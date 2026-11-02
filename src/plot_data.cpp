@@ -133,7 +133,7 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
 }
 EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vector<std::string>>& cells){
     auto data=cells;
-    if(data.size()>100)throw std::runtime_error("상태는 최대 100개 입력하세요.");
+    if(data.size()<2||data.size()>100)throw std::runtime_error("에너지 그래프에는 2~100개 상태가 필요합니다.");
     size_t paths=std::max(size_t(1),original.series.size());
     std::vector<EnergyRow> states;std::vector<std::vector<double>> energies(paths);std::vector<std::vector<bool>> present(paths);
     for(size_t r=0;r<data.size();r++){

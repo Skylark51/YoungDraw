@@ -189,9 +189,9 @@ int main(){try{
     }
     {
         for(ui::Table sparse:{ui::Table{},ui::Table{{"","",""}},ui::Table{{"Only","5",""}}}){
-            Fixture f(original,sparse);f.apply();check(f.grid.ok,"empty and single row tables can apply");
-            Document saved;saved.nextId=2;saved.plots.push_back(f.applied);auto restored=fromNative(toNative(saved));
-            check(makeScene(restored).objectBounds.count(1)>0,"empty and single row plots remain visible and selectable");
+            Fixture f(original,sparse);f.apply();
+            check(!f.grid.done&&!f.grid.ok,"empty and single-row energy grids cannot replace saved data");
+            check(!ui::value(f.grid.error).empty(),"invalid energy grid explains why Apply was rejected");
         }
     }
     {

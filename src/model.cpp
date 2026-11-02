@@ -68,11 +68,54 @@ void Document::ring(Vec c,int n,bool alt){
     for(int i=0;i<n;i++){double angle=-pi/2+pi/n+2*pi*i/n;ids.push_back(addAtom(c+Vec{std::cos(angle),std::sin(angle)}*r));}
     for(int i=0;i<n;i++)addBond(ids[i],ids[(i+1)%n],alt&&i%2==0?BondKind::Double:BondKind::Single);
 }
-static int valence(int e){switch(e){case 1:case 9:case 17:case 35:case 53:return 1;case 8:case 16:return 2;case 5:case 7:case 15:return 3;case 6:case 14:return 4;default:return 0;}}
-int Document::hydrogens(int id) const {const Atom* a=atom(id);if(!a)return 0;if(a->explicitH>=0)return a->explicitH;int v=0;for(auto& b:bonds)if(b.a==id||b.b==id)v+=order(b.kind);int target=valence(a->element);if(a->element==7&&a->charge==1)target=4;if(a->element==8&&a->charge==-1)target=1;return std::max(0,target-v);}
+// Dative bonds represent coordination and do not consume the donor's
+// conventional covalent valence. Metal oxidation states are not inferred here.
+static int targetValence(const Atom& a){
+    switch(a.element){
+    case 1:case 9:case 17:case 35:case 53:return 1;
+    case 5:return 3;
+    case 6:case 14:return 4;
+    case 7:return a.charge>0?4:a.charge<0?2:3;
+    case 8:return a.charge>0?3:a.charge<0?1:2;
+    case 15:return 3;
+    case 16:return 2;
+    default:return 0; // Coordination metals and unspecified elements.
+    }
+}
+static int valenceLimit(const Atom& a){
+    if(a.element==15)return 5;
+    if(a.element==16)return 6;
+    return targetValence(a);
+}
+static int covalentValence(const Document& d,const Atom& a){
+    int total=0,aromatic=0,other=0;
+    for(const auto& b:d.bonds)if(b.a==a.id||b.b==a.id){
+        if(b.kind==BondKind::Dative)continue;
+        total+=order(b.kind);
+        if(b.kind==BondKind::Aromatic)++aromatic;else ++other;
+    }
+    // Two aromatic strokes represent three bond-order units at pyridine-like N
+    // and sp2 carbon. Pyrrole-like [nH] / substituted N instead contributes
+    // its lone pair and retains two sigma bond orders.
+    if(aromatic>=2&&(a.element==6||
+       (a.element==7&&(a.charge>0||(other==0&&a.explicitH<=0)))))++total;
+    return total;
+}
+int Document::hydrogens(int id) const {
+    const Atom* a=atom(id);if(!a)return 0;
+    if(a->explicitH>=0)return a->explicitH;
+    const int target=targetValence(*a),used=covalentValence(*this,*a);
+    if(!target)return 0;
+    if((a->element==15&&used>3)||(a->element==16&&used>2))return 0;
+    return std::max(0,target-used);
+}
 std::vector<std::string> Document::validate() const {
-    std::vector<std::string> warnings;for(auto& a:atoms){int v=0;for(auto& b:bonds)if(b.a==a.id||b.b==a.id)v+=order(b.kind);
-        if(valence(a.element)&&v>valence(a.element))warnings.push_back(symbol(a.element)+" #"+std::to_string(a.id)+": check valence");}
+    std::vector<std::string> warnings;
+    for(const auto& a:atoms){
+        const int limit=valenceLimit(a);
+        if(limit&&covalentValence(*this,a)+std::max(0,a.explicitH)>limit)
+            warnings.push_back(symbol(a.element)+" #"+std::to_string(a.id)+": check valence");
+    }
     return warnings;
 }
 Vec snapped(Vec a,Vec b,double len,bool free){Vec d=b-a;if(free)return b;double angle=d.length()<.1?-pi/6:std::atan2(d.y,d.x);angle=std::round(angle/(pi/6))*(pi/6);return a+Vec{std::cos(angle),std::sin(angle)}*len;}

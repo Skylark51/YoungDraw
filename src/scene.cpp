@@ -6,6 +6,7 @@
 #include <queue>
 #include <map>
 #include <limits>
+#include <stdexcept>
 namespace yd {
 struct ScriptRun {std::string text;int script=0;};
 static std::vector<ScriptRun> scriptRuns(const std::string& input){
@@ -558,8 +559,35 @@ Scene makeScene(const Document& d,const Measure& measure){
 }
 static std::string escape(const std::string& v){std::string s;for(char c:v){if(c=='&')s+="&amp;";else if(c=='<')s+="&lt;";else if(c=='\"')s+="&quot;";else s+=c;}return s;}
 std::string hexToBase64(const std::string& hex){static const char* alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";auto digit=[](char c){return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c>='A'&&c<='F'?c-'A'+10:-1;};std::string bytes;for(size_t i=0;i+1<hex.size();){if(digit(hex[i])<0){i++;continue;}int hi=digit(hex[i++]),lo=digit(hex[i++]);if(lo<0)return {};bytes+=char(hi*16+lo);}std::string out;for(size_t i=0;i<bytes.size();i+=3){unsigned n=unsigned(static_cast<unsigned char>(bytes[i]))<<16;if(i+1<bytes.size())n|=unsigned(static_cast<unsigned char>(bytes[i+1]))<<8;if(i+2<bytes.size())n|=static_cast<unsigned char>(bytes[i+2]);out+=alphabet[(n>>18)&63];out+=alphabet[(n>>12)&63];out+=i+1<bytes.size()?alphabet[(n>>6)&63]:'=';out+=i+2<bytes.size()?alphabet[n&63]:'=';}return out;}
-std::string toSvg(const Scene& s){std::ostringstream o;o.imbue(std::locale::classic());o<<std::fixed<<std::setprecision(4);auto r=s.bounds;
-    o<<"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\""<<r.w<<"pt\" height=\""<<r.h<<"pt\" viewBox=\""<<r.x<<' '<<r.y<<' '<<r.w<<' '<<r.h<<"\">\n<g stroke-linecap=\"round\" stroke-linejoin=\"round\">\n";
+PublicationReport publicationCheck(const Scene& s,double widthPt){
+    if(!std::isfinite(widthPt)||widthPt<=0||!std::isfinite(s.bounds.w)||s.bounds.w<=0||!std::isfinite(s.bounds.h)||s.bounds.h<=0)
+        throw std::runtime_error("Invalid publication width or scene bounds");
+    PublicationReport result;
+    result.widthPt=widthPt;
+    result.scale=widthPt/s.bounds.w;
+    result.heightPt=s.bounds.h*result.scale;
+    int smallFonts=0,thinLines=0,rasterImages=0;
+    for(const auto& item:s.items){
+        if(item.type==Primitive::Text&&!item.text.empty()&&item.fontSize*result.scale<4.5)++smallFonts;
+        if((item.type==Primitive::Line||item.type==Primitive::Bezier||
+            item.type==Primitive::Ellipse||item.type==Primitive::Box)&&
+           item.width>0&&item.width*result.scale<0.5)++thinLines;
+        if(item.type==Primitive::Image)++rasterImages;
+    }
+    if(result.heightPt>660.)
+        result.warnings.push_back("Height exceeds JACS 660 pt maximum, including the caption.");
+    if(smallFonts)
+        result.warnings.push_back(std::to_string(smallFonts)+" text items fall below 4.5 pt at the selected output width.");
+    if(thinLines)
+        result.warnings.push_back(std::to_string(thinLines)+" strokes fall below 0.5 pt at the selected output width.");
+    if(rasterImages)
+        result.warnings.push_back(std::to_string(rasterImages)+" embedded raster images require manual DPI verification (color 300, grayscale 600, line art 1200).");
+    return result;
+}
+std::string toSvg(const Scene& s,double widthPt){std::ostringstream o;o.imbue(std::locale::classic());o<<std::fixed<<std::setprecision(4);auto r=s.bounds;
+    const double printedWidth=widthPt>0?publicationCheck(s,widthPt).widthPt:r.w;
+    const double printedHeight=widthPt>0?r.h*printedWidth/r.w:r.h;
+    o<<"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\""<<printedWidth<<"pt\" height=\""<<printedHeight<<"pt\" viewBox=\""<<r.x<<' '<<r.y<<' '<<r.w<<' '<<r.h<<"\">\n<g stroke-linecap=\"round\" stroke-linejoin=\"round\">\n";
     for(auto& p:s.items){if(p.points.empty())continue;auto a=p.points[0];std::string dash=p.dash==1?" stroke-dasharray=\"4 3\"":p.dash==2?" stroke-dasharray=\"1 2\"":"";
         if(p.type==Primitive::Line||p.type==Primitive::Bezier){o<<"<path fill=\""<<(p.filled?p.color:"none")<<"\" stroke=\""<<p.color<<"\" stroke-width=\""<<p.width<<"\""<<((p.flatEnd||p.flatStart)?" stroke-linecap=\"butt\"":"")<<dash<<" d=\"M "<<a.x<<' '<<a.y;
             if(p.type==Primitive::Bezier){for(size_t i=1;i+2<p.points.size();i+=3)o<<" C "<<p.points[i].x<<' '<<p.points[i].y<<' '<<p.points[i+1].x<<' '<<p.points[i+1].y<<' '<<p.points[i+2].x<<' '<<p.points[i+2].y;}
