@@ -193,6 +193,16 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
  }
  if(!state)return DefWindowProcW(hwnd,msg,wp,lp);
  switch(msg){
+ // Preserve WM_COMMAND dispatch for automation, accessibility adapters and
+ // existing theme regression tests even though buttons are painted in one view.
+ case WM_COMMAND:{
+     int id=LOWORD(wp);
+     if((id>=100&&id<106)||(id>=200&&id<206)||
+        (id>=300&&id<303)||id==IDOK||id==IDCANCEL){
+         state->focus=id;choose(*state,id);
+     }
+     return 0;
+ }
  case WM_ERASEBKGND:return 1; // The full opaque offscreen frame covers the client.
  case WM_PAINT:{
      PAINTSTRUCT ps;HDC dc=BeginPaint(hwnd,&ps);
