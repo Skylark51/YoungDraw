@@ -405,6 +405,7 @@ std::vector<ui::TemplateCard>& templateCards(size_t& unreadable){
         basic={};basic.ring({0,0},5);add(L"기본",L"사이클로펜테인",basic);
         add(L"기본",L"의자형 · 형태 보호",chairTemplate());
         add(L"기본",L"반응 메커니즘",mechanismDemo());
+        add(L"기본",L"촉매 순환 · 수소화 예시",catalyticCycleDemo());
         add(L"기본",L"에너지 그래프",coordinateDemo());
         for(auto& entry:labTemplates)add(ui::wide(entry.category),ui::wide(entry.name),fromNative(entry.data));
         for(const auto& path:paths)try{

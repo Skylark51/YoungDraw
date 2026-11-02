@@ -533,6 +533,42 @@ CleanupReport cleanStructure(Document& d,const std::vector<int>& selection,bool 
 }
 Document chairTemplate(){Document d;std::vector<Vec> points={{-45,-24},{-25,6},{20,6},{45,24},{25,-6},{-20,-6}};for(auto p:points){int id=d.addAtom(p);d.atom(id)->protect=true;}for(size_t i=0;i<points.size();i++)d.addBond(d.atoms[i].id,d.atoms[(i+1)%points.size()].id,i==1?BondKind::Bold:BondKind::Single);std::vector<double> lengths;Vec center;for(auto& a:d.atoms)center=center+a.p;center=center*(1./d.atoms.size());for(auto& b:d.bonds)lengths.push_back((d.atom(b.a)->p-d.atom(b.b)->p).length());std::sort(lengths.begin(),lengths.end());double scale=d.style.bondLength/lengths[lengths.size()/2];for(auto& a:d.atoms)a.p=center+(a.p-center)*scale;return d;}
 Document mechanismDemo(){Document d;Reaction r;r.id=d.nextId++;r.p={65,80};r.slots={{"Reactant",{}},{"Intermediate",{}},{"Product",{}}};r.above={"Nucleophilic attack","C–O bond cleavage"};r.below={"37.2","17.7"};d.reactions.push_back(r);fillSlot(d,demo(),r.id,0);Document b=demo();b.atom(b.atoms.back().id)->element=8;fillSlot(d,b,r.id,1);fillSlot(d,demo(),r.id,2);optimizeMechanism(d,{r.id});return d;}
+// Editable, intentionally generic hydrogenation cycle: no metal, ligand or
+// energetic assignment is implied by these illustrative intermediates.
+Document catalyticCycleDemo(){
+    Document d;Reaction r;r.id=d.nextId++;r.p={0,0};r.cyclic=true;
+    r.centerLabel="Catalytic cycle";r.captionFontSize=14;r.unit.clear();
+    r.slots={{"Active catalyst",{}},{"Metal dihydride",{}},{"Metal ethyl hydride",{}}};
+    r.above={"H_{2} / oxidative addition",
+             "C_{2}H_{4} / migratory insertion",
+             "C_{2}H_{6} / reductive elimination"};
+    r.below.resize(r.slots.size());
+    d.reactions.push_back(r);
+    auto fragment=[](int stage){
+        Document f;
+        int m=f.addAtom({0,0},26);auto* metal=f.atom(m);
+        metal->label="M";metal->explicitH=0;metal->protect=true;
+        auto ligand=[&](Vec p,int element,const std::string& label){
+            int id=f.addAtom(p,element);auto* atom=f.atom(id);
+            atom->label=label;atom->explicitH=0;atom->protect=true;
+            f.addBond(m,id);return id;
+        };
+        if(stage>=1)ligand({-30,0},1,"H");
+        if(stage==1)ligand({30,0},1,"H");
+        if(stage==2){
+            int carbon=ligand({30,0},6,"CH_{2}");
+            int terminal=f.addAtom({60,0},6);
+            f.atom(terminal)->label="CH_{3}";
+            f.atom(terminal)->explicitH=0;
+            f.atom(terminal)->protect=true;
+            f.addBond(carbon,terminal);
+        }
+        return f;
+    };
+    for(size_t i=0;i<r.slots.size();i++)fillSlot(d,fragment(int(i)),r.id,i);
+    optimizeMechanism(d,{r.id},true);
+    return d;
+}
 Document coordinateDemo(){Document d;EnergyPlot p;p.id=d.nextId++;p.p={25,90};p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#000000",{0,37.2,17.7,27.3,-9.9},1,3.5}};d.plots.push_back(p);fillSlot(d,demo(),p.id,0,true);fillSlot(d,chairTemplate(),p.id,4,false);return d;}
 void applyHouseStyle(Document& d){
     Style target;double scale=target.bondLength/d.style.bondLength;

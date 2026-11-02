@@ -117,6 +117,7 @@ void optimizeMechanism(Document& d,const std::vector<int>& selection={},bool cyc
 void fillSlot(Document& d,const Document& fragment,int container,size_t index,bool above=false);
 Document chairTemplate();
 Document mechanismDemo();
+Document catalyticCycleDemo();
 Document coordinateDemo();
 void applyHouseStyle(Document& d);
 std::string symbol(int atomicNumber);

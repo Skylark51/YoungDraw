@@ -304,6 +304,19 @@ int main(){try{
  check(rejects("<CDXML><page id='1'><fragment id='2'><n id='3' p='0 0'/><b id='4' B='3' E='99'/></fragment></page></CDXML>"),"dangling references rejected");
  check(rejects("<CDXML><page id='1'><fragment id='2'><n id='3' p='0 0'/><n id='3' p='1 1'/></fragment></page></CDXML>"),"duplicate id rejected");check(rejects("<CDXML><page>"),"malformed XML rejected");check(rejects("<!DOCTYPE CDXML [<!ENTITY x SYSTEM 'file:///C:/Windows/win.ini'>]><CDXML><page id='1'>&x;</page></CDXML>"),"external entities prohibited");
 #endif
+ Document catalytic=catalyticCycleDemo();
+ check(catalytic.reactions.size()==1&&catalytic.reactions[0].cyclic&&catalytic.reactions[0].slots.size()==3,"bundled catalytic cycle is an editable three-stage scheme");
+ check(catalytic.atoms.size()==8&&catalytic.bonds.size()==5,"catalytic cycle has editable M, hydride and ethyl ligands");
+ check(catalytic.reactions[0].above[0].find("oxidative addition")!=std::string::npos&&catalytic.reactions[0].above[2].find("reductive elimination")!=std::string::npos,"catalytic cycle labels its illustrative steps");
+ for(auto& slot:catalytic.reactions[0].slots){check(!slot.members.empty(),"each catalytic state is populated");for(int id:slot.members)check(catalytic.atom(id)||catalytic.bond(id),"catalytic state members refer to editable objects");}
+ int catalyticArrows=0;for(auto& item:makeScene(catalytic).items)if(item.owner==catalytic.reactions[0].id&&item.type==Primitive::Polygon)catalyticArrows++;
+ check(catalyticArrows==3,"all catalytic cycle arrows are rendered");
+ auto loadedCatalytic=fromNative(toNative(catalytic));
+ check(loadedCatalytic.reactions.size()==1&&loadedCatalytic.reactions[0].cyclic&&loadedCatalytic.atoms.size()==catalytic.atoms.size(),"catalytic cycle survives native save and reopen");
+#ifdef TEST_CDXML
+ auto cdxmlCatalytic=fromCdxml(toCdxml(catalytic));
+ check(cdxmlCatalytic.reactions.size()==1&&cdxmlCatalytic.reactions[0].cyclic&&cdxmlCatalytic.bonds.size()==catalytic.bonds.size(),"catalytic cycle survives CDXML roundtrip");
+#endif
  Document cycle=mechanismDemo();auto originalAtoms=cycle.atoms.size();int cycleId=cycle.reactions[0].id;optimizeMechanism(cycle,{cycleId},true);check(cycle.reactions[0].cyclic&&cycle.atoms.size()==originalAtoms,"cyclic layout retains structures");auto cycleScene=makeScene(cycle);int cycleArrows=0;for(auto& p:cycleScene.items)if(p.owner==cycleId&&p.type==Primitive::Polygon)cycleArrows++;check(cycleArrows==3,"catalytic cycle closes final arrow");
  check(cycle.reactions[0].above.size()==3&&cycle.reactions[0].below.size()==3&&cycle.reactions[0].above.back()=="Name"&&cycle.reactions[0].below.back()=="0.0","closing arrow has editable name and energy");
  check(cycle.reactions[0].slots[0].label=="Reactant"&&cycle.reactions[0].above[0]=="Nucleophilic attack"&&cycle.reactions[0].below[0]=="37.2","cycle conversion preserves existing captions");
