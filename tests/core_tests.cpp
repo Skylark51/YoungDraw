@@ -18,8 +18,8 @@ int main(){try{
    auto report=publicationCheck(figure,240);
    check(report.widthPt==240&&std::abs(report.heightPt-150)<1e-6&&report.warnings.size()==3,"JACS preflight warns about effective font, stroke and raster DPI");
    auto svg=toSvg(figure,240);
-   check(svg.find("width=\\"240.0000pt\\"")!=std::string::npos&&svg.find("height=\\"150.0000pt\\"")!=std::string::npos,"JACS export has exact publication dimensions");
-   check(toSvg(figure).find("width=\\"480.0000pt\\"")!=std::string::npos,"legacy SVG export dimensions remain unchanged");
+   check(svg.find(R"(width="240.0000pt")")!=std::string::npos&&svg.find(R"(height="150.0000pt")")!=std::string::npos,"JACS export has exact publication dimensions");
+   check(toSvg(figure).find(R"(width="480.0000pt")")!=std::string::npos,"legacy SVG export dimensions remain unchanged");
    check(publicationCheck(figure,504).widthPt==504,"double-column JACS export width");
   }
  {auto chair=chairTemplate();double shortest=1e9,longest=0,area=0;int concave=0;
