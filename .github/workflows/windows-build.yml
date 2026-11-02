@@ -1,0 +1,68 @@
+name: Build, test and refresh YoungDraw.exe
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths-ignore:
+      - YoungDraw.exe
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure MSVC build
+        shell: pwsh
+        run: cmake -S . -B build/ci -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build build/ci --config Release --parallel 2
+
+      - name: Run regression suite
+        shell: pwsh
+        run: ctest --test-dir build/ci -C Release --output-on-failure --timeout 120
+
+      - name: Upload tested executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: YoungDraw-windows-x64
+          path: build/ci/Release/YoungDraw.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      # The next git pull brings down the tested executable together with the source.
+      # Pushing with GITHUB_TOKEN does not trigger another workflow run.
+      - name: Refresh committed YoungDraw.exe
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          git fetch origin main
+          $remoteHead = (git rev-parse origin/main).Trim()
+          if ($LASTEXITCODE -ne 0 -or $remoteHead -ne $env:GITHUB_SHA) {
+            throw "main advanced during the build; a newer run must publish its own executable."
+          }
+          Copy-Item -LiteralPath 'build/ci/Release/YoungDraw.exe' -Destination 'YoungDraw.exe' -Force
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- YoungDraw.exe
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Executable already matches tested source."
+            exit 0
+          }
+          git commit -m "build: refresh tested YoungDraw.exe [skip ci]"
+          if ($LASTEXITCODE -ne 0) { throw "Could not commit the executable." }
+          git push origin HEAD:main
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish the executable." }
