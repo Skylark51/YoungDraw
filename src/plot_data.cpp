@@ -140,7 +140,6 @@ EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vect
         auto prefix=std::to_string(r+1)+"행 · ";
         if(data[r].size()!=paths+1)throw std::runtime_error(prefix+"상태 이름과 모든 경로의 에너지를 입력하세요.");
         auto label=trim(data[r][0]);
-        if(label.empty())throw std::runtime_error(prefix+"상태 이름을 입력하세요.");
         for(size_t k=0;k<paths;k++){
             auto text=trim(data[r][k+1]);double energy=0;
             present[k].push_back(!text.empty());
