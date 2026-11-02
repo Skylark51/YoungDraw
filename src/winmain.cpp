@@ -26,6 +26,7 @@
 #include <map>
 #include <memory>
 #include <regex>
+#include <cwctype>
 using namespace Gdiplus;using namespace yd;namespace fs=std::filesystem;
 namespace {
 HWND win;Document doc,dragBefore,dragBase;History history;std::wstring filePath,status=L"선택: Space · 결합: x · 화살표: e · 화면 이동: Ctrl+우클릭 드래그";
@@ -358,7 +359,7 @@ bool validTemplatePart(const std::wstring& part){
     if(part.empty()||part==L"."||part==L".."||part.size()>100||part.back()==L'.'||part.back()==L' ')return false;
     if(part.find_first_of(L"<>:\"/\\|?*")!=std::wstring::npos)return false;
     for(wchar_t c:part)if(c<32)return false;
-    std::wstring upper=part;std::transform(upper.begin(),upper.end(),upper.begin(),towupper);
+    std::wstring upper=part;std::transform(upper.begin(),upper.end(),upper.begin(),[](wchar_t c){return wchar_t(std::towupper(c));});
     auto stem=upper.substr(0,upper.find(L'.'));
     if(stem==L"CON"||stem==L"PRN"||stem==L"AUX"||stem==L"NUL")return false;
     if(stem.size()==4&&(stem.substr(0,3)==L"COM"||stem.substr(0,3)==L"LPT")&&stem[3]>=L'1'&&stem[3]<=L'9')return false;
