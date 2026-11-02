@@ -65,11 +65,11 @@ void paint(HWND hwnd,Gallery& f,HDC dc){
     bool metalAvailable=false;
     if(f.selected>=0){const auto& card=f.cards->at(size_t(f.selected));
         label(g,card.name,{float(divider+16),62,300,52},17,appearance::palette().text,true);
-        yd::Scene scene=card.preview;
+        const yd::Scene* scene=&card.preview;
         const wchar_t* metals[]={L"M",L"Fe",L"Mn",L"Co",L"Ni",L"Cu",L"Zn"};
         for(auto& atom:card.document.atoms)if(atom.label=="M"){metalAvailable=true;break;}
-        if(metalAvailable&&f.metal){if(!f.metalPreview||f.metalPreviewIndex!=f.selected||f.metalPreviewElement!=f.metal){auto copy=card.document;int elements[]={26,26,25,27,28,29,30};for(auto& a:copy.atoms)if(a.label=="M"){a.element=elements[f.metal];a.label.clear();}f.metalPreview=yd::makeScene(copy);f.metalPreviewIndex=f.selected;f.metalPreviewElement=f.metal;}scene=*f.metalPreview;}
-        f.painter(g,scene,{preview.X+14,preview.Y+14,preview.Width-28,preview.Height-28});
+        if(metalAvailable&&f.metal){if(!f.metalPreview||f.metalPreviewIndex!=f.selected||f.metalPreviewElement!=f.metal){auto copy=card.document;int elements[]={26,26,25,27,28,29,30};for(auto& a:copy.atoms)if(a.label=="M"){a.element=elements[f.metal];a.label.clear();}f.metalPreview=yd::makeScene(copy);f.metalPreviewIndex=f.selected;f.metalPreviewElement=f.metal;}scene=&*f.metalPreview;}
+        f.painter(g,*scene,{preview.X+14,preview.Y+14,preview.Width-28,preview.Height-28});
         label(g,(card.group.empty()?card.category:card.group)+L" · 원자 "+std::to_wstring(card.document.atoms.size())+L"개",{preview.X,float(h-304),300,26},12,appearance::palette().muted);
         button(g,f,410,card.favorite?L"★ 즐겨찾기 해제":L"☆ 즐겨찾기",{preview.X,float(h-272),146,29},card.favorite);
         button(g,f,411,L"편집 탭으로 열기",{preview.X+154,float(h-272),146,29});
