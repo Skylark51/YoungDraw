@@ -56,6 +56,20 @@ int main(int argc,char** argv){
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
         {
+            // Hover-only paint reuse must keep geometry, while any document redraw
+            // must invalidate the cached scene (including Undo and tab switches).
+            auto previousDoc=doc;
+            doc={};doc.addAtom({0,0});redraw();
+            auto first=sceneForPaint(true).bounds;
+            doc.atoms[0].p={200,100};
+            auto retained=sceneForPaint(true).bounds;
+            check(first.x==retained.x&&first.y==retained.y,"overlay paint reuses the existing scene");
+            redraw();
+            auto updated=sceneForPaint(true).bounds;
+            check(updated.x>first.x+100&&updated.y>first.y+50,"document redraw rebuilds the scene");
+            doc=previousDoc;redraw();
+        }
+        {
             auto originalDoc=doc;auto originalHistory=history;auto originalSelection=selection;auto originalOrigin=origin;double originalZoom=zoom;bool originalDirty=dirty;
             doc={};history.clear();selection.clear();origin={left+200.,top+180.};zoom=2;tool=Select;dirty=false;
             int a=doc.addAtom({0,0}),b=doc.addAtom({25,0});int bond=doc.addBond(a,b);
