@@ -19,6 +19,7 @@
 #include "win_theme.h"
 #include "win_ui.h"
 #include "win_splash.h"
+#include "win_storage.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -258,7 +259,7 @@ void writePreview(const std::wstring& path,const Document& d){
     UINT n=0,bytes=0;GetImageEncodersSize(&n,&bytes);std::vector<BYTE> memory(bytes);auto* encoders=(ImageCodecInfo*)memory.data();GetImageEncoders(n,bytes,encoders);for(UINT i=0;i<n;i++)if(wcscmp(encoders[i].MimeType,L"image/png")==0){if(image.Save(path.c_str(),&encoders[i].Clsid,nullptr)!=Ok)throw std::runtime_error("Could not save preview");return;}throw std::runtime_error("PNG encoder unavailable");
 }
 std::string readFile(const std::wstring& path){std::ifstream f(fs::path(path),std::ios::binary|std::ios::ate);if(!f)throw std::runtime_error("파일을 열 수 없습니다.");auto n=f.tellg();if(n<0||n>64*1024*1024)throw std::runtime_error("파일은 64 MB까지 지원합니다.");std::string s(size_t(n),0);f.seekg(0);if(!f.read(s.data(),n))throw std::runtime_error("파일을 읽을 수 없습니다.");return s;}
-void writeFile(const std::wstring& path,const std::string& data){if(data.size()>64*1024*1024)throw std::runtime_error("프로젝트의 64 MB 제한을 초과했습니다. 삽입 이미지 크기를 줄이세요.");std::wstring tmp=path+L".youngdraw.tmp";HANDLE f=CreateFileW(tmp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);if(f==INVALID_HANDLE_VALUE)throw std::runtime_error("임시 저장 파일을 만들 수 없습니다.");DWORD written=0;bool ok=WriteFile(f,data.data(),DWORD(data.size()),&written,nullptr)&&written==data.size();if(ok)ok=FlushFileBuffers(f)!=0;CloseHandle(f);if(!ok){DeleteFileW(tmp.c_str());throw std::runtime_error("파일을 저장할 수 없습니다.");}if(!MoveFileExW(tmp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){DeleteFileW(tmp.c_str());throw std::runtime_error("저장 파일을 교체할 수 없습니다.");}}
+void writeFile(const std::wstring& path,const std::string& data){storage::writeAtomic(path,data);}
 std::optional<std::wstring> fileDialog(bool save,int type=0,std::wstring initial=L""){wchar_t path[32768]={};if(save)wcscpy_s(path,type==1?L"structure.svg":type==2?L"structure.cdxml":L"drawing.ydraw");OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=win;f.lpstrFile=path;f.nMaxFile=32768;f.lpstrFilter=type==1?L"SVG vector graphic\0*.svg\0\0":type==2?L"ChemDraw XML\0*.cdxml\0\0":type==4?L"Structures / Images\0*.ydraw;*.cdxml;*.gif;*.png;*.jpg;*.jpeg\0\0":type==3?L"Images (GIF, PNG, JPEG)\0*.gif;*.png;*.jpg;*.jpeg\0\0":L"YoungDraw / ChemDraw XML\0*.ydraw;*.cdxml\0YoungDraw project\0*.ydraw\0ChemDraw XML\0*.cdxml\0\0";f.lpstrDefExt=type==1?L"svg":type==2?L"cdxml":L"ydraw";f.lpstrInitialDir=initial.empty()?nullptr:initial.c_str();f.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(save?OFN_OVERWRITEPROMPT:OFN_FILEMUSTEXIST);if(save?GetSaveFileNameW(&f):GetOpenFileNameW(&f))return std::wstring(path);return {};}
 std::vector<std::wstring> openDocumentFiles(){
     std::vector<wchar_t> buffer(65536);OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=win;
