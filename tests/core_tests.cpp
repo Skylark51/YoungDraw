@@ -194,7 +194,27 @@ int main(){try{
   check(ids.size()==3,"partial resize retains only selected atoms and their internal bond");
  }
  Document d;d.ring({40,40},6,true);check(d.atoms.size()==6&&d.bonds.size()==6,"benzene topology");for(auto& b:d.bonds)check(std::abs((d.atom(b.a)->p-d.atom(b.b)->p).length()-d.style.bondLength*benzeneBondScale)<1e-8,"benzene defaults to seventy-five percent bond length");
- int first=d.atoms[0].id;d.atom(first)->element=7;check(d.hydrogens(first)==0,"pyridine N valence");History h;h.checkpoint(d);d.erase({first});check(d.bonds.size()==4,"incident bonds deleted");check(h.undo(d)&&d.atoms.size()==6,"undo topology");check(h.redo(d)&&d.atoms.size()==5,"redo deletion");
+ int first=d.atoms[0].id;d.atom(first)->element=7;check(d.hydrogens(first)==0,"pyridine N valence");
+  {Document aromatic;int n=aromatic.addAtom({0,0},7),c1=aromatic.addAtom({20,0}),c2=aromatic.addAtom({-20,0});
+   aromatic.addBond(n,c1,BondKind::Aromatic);aromatic.addBond(n,c2,BondKind::Aromatic);
+   check(aromatic.hydrogens(n)==0&&aromatic.hydrogens(c1)==3,"pyridine aromatic N does not gain an implicit hydrogen");
+   check(aromatic.validate().empty(),"pyridine aromatic bonds do not exceed neutral N valence");
+   aromatic.atom(n)->explicitH=1;
+   check(aromatic.hydrogens(n)==1&&aromatic.validate().empty(),"pyrrole-like explicitly hydrogenated aromatic N is supported");
+   aromatic.atom(n)->explicitH=-1;aromatic.atom(n)->charge=1;
+   check(aromatic.hydrogens(n)==1,"pyridinium-like charged N can carry one implicit H");
+  }
+  {Document charged;int n=charged.addAtom({0,0},7);charged.atom(n)->charge=1;
+   for(int i=0;i<4;i++){int c=charged.addAtom({double(i*20),20});charged.addBond(n,c);}
+   check(charged.hydrogens(n)==0&&charged.validate().empty(),"tetravalent positive nitrogen is valid");
+   charged.atom(n)->charge=0;
+   check(!charged.validate().empty(),"neutral nitrogen with four sigma bonds is flagged");
+  }
+  {Document complex;int n=complex.addAtom({0,0},7);
+   for(int i=0;i<3;i++){int c=complex.addAtom({double(i*20),20});complex.addBond(n,c);}
+   int metal=complex.addAtom({40,40},26);complex.addBond(n,metal,BondKind::Dative);
+   check(complex.hydrogens(n)==0&&complex.validate().empty(),"coordination bond does not create a false donor valence violation");
+  }History h;h.checkpoint(d);d.erase({first});check(d.bonds.size()==4,"incident bonds deleted");check(h.undo(d)&&d.atoms.size()==6,"undo topology");check(h.redo(d)&&d.atoms.size()==5,"redo deletion");
  check(std::abs(snapped({0,0},{12,3},14.4).length()-14.4)<1e-8,"snap length");
  {auto molecule=demo();auto original=molecule;int seed=molecule.bonds.front().id;auto ids=transformStructures(molecule,{seed},90);check(ids.size()==molecule.atoms.size()+molecule.bonds.size(),"a selected bond rotates its whole molecule");
   for(size_t i=0;i<molecule.atoms.size();i++)for(size_t j=0;j<i;j++)check(std::abs((molecule.atoms[i].p-molecule.atoms[j].p).length()-(original.atoms[i].p-original.atoms[j].p).length())<1e-7,"rotation preserves every internal distance");
