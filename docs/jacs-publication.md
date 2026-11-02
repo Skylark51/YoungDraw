@@ -27,7 +27,7 @@ Source: [JACS Author Guidelines, Appendix 2](https://researcher-resources.acs.or
 - Aromatic pyridine-like N and carbon, charged N/O, and dative metal
   coordination receive separate valence handling. Ambiguous metal oxidation
   states and nonstandard bonding still require chemical review.
-- Graph table edits require 2–100 named states. Blank energy cells remain
+- Graph table edits require 2–100 state rows. Blank labels and energy cells remain
   allowed to represent omitted points/paths.
 - Native/CDXML/SVG saves use unique, adjacent temporary files, flush all
   content, then replace the destination. An abandoned old .youngdraw.tmp
