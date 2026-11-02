@@ -13,16 +13,18 @@ struct Target {RectF box;int command;};
 struct Gallery {
     const std::vector<TemplateCard>* cards=nullptr;TemplatePainter painter;
     std::vector<size_t> filtered;std::vector<Target> targets;
-    std::vector<std::wstring> categories={L"전체",L"리간드",L"착물 · axial",L"착물 · equatorial",L"원본 CDXML 착물",L"기질",L"산·시약",L"기본",L"사용자"};
+    std::optional<yd::Scene> metalPreview;int metalPreviewIndex=-1,metalPreviewElement=-1;
+    TemplateAction action=TemplateAction::Insert;
+    std::vector<std::wstring> categories={L"전체",L"즐겨찾기",L"리간드",L"착물 · axial",L"착물 · equatorial",L"원본 CDXML 착물",L"기질",L"산·시약",L"기본",L"사용자"};
     std::wstring category=L"리간드",search;HWND edit=nullptr;HFONT font=nullptr;
     int page=0,selected=-1,metal=0,perPage=9,width=1160,height=740;bool done=false,ok=false;HBRUSH editBrush=nullptr;
 };
 std::wstring normalized(std::wstring text){std::wstring result;for(wchar_t c:text)if(std::iswalnum(c)||(c>=0x1100&&c<=0xd7ff))result.push_back(wchar_t(std::towlower(c)));return result;}
 void filter(Gallery& f){
     f.filtered.clear();auto query=normalized(f.search);
-    for(size_t i=0;i<f.cards->size();i++){auto& card=f.cards->at(i);bool category=f.category==L"전체"||card.category==f.category;
+    for(size_t i=0;i<f.cards->size();i++){auto& card=f.cards->at(i);bool category=f.category==L"전체"||card.category==f.category||(f.category==L"즐겨찾기"&&card.favorite);
         if(f.category==L"착물")category=card.category.find(L"착물")!=std::wstring::npos;
-        if(category&&(query.empty()||normalized(card.name+card.category).find(query)!=std::wstring::npos))f.filtered.push_back(i);}
+        if(category&&(query.empty()||normalized(card.name+card.category+card.group).find(query)!=std::wstring::npos))f.filtered.push_back(i);}
     f.page=0;f.selected=f.filtered.empty()?-1:int(f.filtered.front());
 }
 void label(Graphics& g,const std::wstring& text,RectF box,float size,Color color,bool bold=false,bool center=false){
@@ -36,9 +38,9 @@ void button(Graphics& g,Gallery& f,int id,const std::wstring& text,RectF box,boo
 void paint(HWND hwnd,Gallery& f,HDC dc){
     RECT client;GetClientRect(hwnd,&client);f.width=client.right;f.height=client.bottom;int w=f.width,h=f.height;
     Bitmap bitmap(w,h,PixelFormat32bppARGB);Graphics g(&bitmap);g.Clear(appearance::palette().chrome);g.SetSmoothingMode(SmoothingModeAntiAlias);g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);f.targets.clear();
-    float tabWidth=float(w-32)/9;
-    const wchar_t* captions[]={L"전체",L"리간드",L"Axial 착물",L"Equatorial 착물",L"원본 착물",L"기질",L"산·시약",L"기본",L"사용자"};
-    for(int i=0;i<9;i++)button(g,f,100+i,captions[i],{16+i*tabWidth,14,tabWidth-5,34},f.category==f.categories[size_t(i)]);
+    float tabWidth=float(w-32)/10;
+    const wchar_t* captions[]={L"전체",L"★ 즐겨찾기",L"리간드",L"Axial 착물",L"Equatorial 착물",L"원본 착물",L"기질",L"산·시약",L"기본",L"사용자"};
+    for(int i=0;i<10;i++)button(g,f,100+i,captions[i],{16+i*tabWidth,14,tabWidth-5,34},f.category==f.categories[size_t(i)]);
     int divider=w-332,gridWidth=divider-32;label(g,L"검색",{16,62,48,30},13,appearance::palette().muted,true);
     label(g,std::to_wstring(f.filtered.size())+L"개 · 그림을 누르면 크게 볼 수 있습니다.",{16,96,float(gridWidth),24},12,appearance::palette().muted);
     int columns=gridWidth>=620?3:2,rows=h>=650?3:2;f.perPage=columns*rows;
@@ -52,25 +54,31 @@ void paint(HWND hwnd,Gallery& f,HDC dc){
         panel(g,thumbnail,appearance::palette().canvas,appearance::palette().edge);
         f.painter(g,card.preview,thumbnail);
         if(active){SolidBrush tint(appearance::palette().hover);g.FillRectangle(&tint,box.X+1,box.Y+box.Height-41,box.Width-2,40.f);}
-        label(g,card.name,{box.X+8,box.Y+box.Height-40,box.Width-16,35},12,active?appearance::palette().accent:appearance::palette().text,true,true);
+        label(g,(card.favorite?L"★ ":L"")+card.name,{box.X+8,box.Y+box.Height-40,box.Width-16,35},12,active?appearance::palette().accent:appearance::palette().text,true,true);
     }
     if(f.filtered.empty())label(g,L"일치하는 템플릿이 없습니다.",{16,180,float(gridWidth),120},16,appearance::palette().muted,false,true);
     button(g,f,201,L"‹ 이전",{16,float(h-54),88,34},false,f.page>0);
     label(g,std::to_wstring(f.page+1)+L" / "+std::to_wstring(pages),{112,float(h-54),92,34},13,appearance::palette().muted,false,true);
     button(g,f,202,L"다음 ›",{212,float(h-54),88,34},false,f.page+1<pages);
-    RectF preview{float(divider+16),126,300,float(h-360)};
+    RectF preview{float(divider+16),126,300,float(h-435)};
     panel(g,preview,appearance::palette().canvas,appearance::palette().edge);
     bool metalAvailable=false;
     if(f.selected>=0){const auto& card=f.cards->at(size_t(f.selected));
         label(g,card.name,{float(divider+16),62,300,52},17,appearance::palette().text,true);
-        yd::Scene scene=card.preview;
+        const yd::Scene* scene=&card.preview;
         const wchar_t* metals[]={L"M",L"Fe",L"Mn",L"Co",L"Ni",L"Cu",L"Zn"};
         for(auto& atom:card.document.atoms)if(atom.label=="M"){metalAvailable=true;break;}
-        if(metalAvailable&&f.metal){auto copy=card.document;int elements[]={26,26,25,27,28,29,30};for(auto& a:copy.atoms)if(a.label=="M"){a.element=elements[f.metal];a.label.clear();}scene=yd::makeScene(copy);}
-        f.painter(g,scene,{preview.X+14,preview.Y+14,preview.Width-28,preview.Height-28});
-        label(g,card.category+L" · 원자 "+std::to_wstring(card.document.atoms.size())+L"개",{preview.X,float(h-222),300,26},12,appearance::palette().muted);
-        label(g,L"금속",{preview.X,float(h-189),300,24},12,appearance::palette().muted,true);
-        for(int i=0;i<7;i++)button(g,f,300+i,metals[i],{preview.X+i*43,float(h-161),38,28},metalAvailable&&f.metal==i,metalAvailable);
+        if(metalAvailable&&f.metal){if(!f.metalPreview||f.metalPreviewIndex!=f.selected||f.metalPreviewElement!=f.metal){auto copy=card.document;int elements[]={26,26,25,27,28,29,30};for(auto& a:copy.atoms)if(a.label=="M"){a.element=elements[f.metal];a.label.clear();}f.metalPreview=yd::makeScene(copy);f.metalPreviewIndex=f.selected;f.metalPreviewElement=f.metal;}scene=&*f.metalPreview;}
+        f.painter(g,*scene,{preview.X+14,preview.Y+14,preview.Width-28,preview.Height-28});
+        label(g,(card.group.empty()?card.category:card.group)+L" · 원자 "+std::to_wstring(card.document.atoms.size())+L"개",{preview.X,float(h-304),300,26},12,appearance::palette().muted);
+        button(g,f,410,card.favorite?L"★ 즐겨찾기 해제":L"☆ 즐겨찾기",{preview.X,float(h-272),146,29},card.favorite);
+        button(g,f,411,L"편집 탭으로 열기",{preview.X+154,float(h-272),146,29});
+        bool user=!card.path.empty();
+        button(g,f,412,L"이름 변경",{preview.X,float(h-237),94,29},false,user);
+        button(g,f,413,L"분류 이동",{preview.X+102,float(h-237),94,29},false,user);
+        button(g,f,414,L"삭제",{preview.X+204,float(h-237),96,29},false,user);
+        label(g,L"금속",{preview.X,float(h-190),300,24},12,appearance::palette().muted,true);
+        for(int i=0;i<7;i++)button(g,f,300+i,metals[i],{preview.X+i*43,float(h-164),38,28},metalAvailable&&f.metal==i,metalAvailable);
     }
     label(g,L"선택한 구조만 삽입합니다.\n더블클릭 또는 Enter로도 삽입할 수 있습니다.",{preview.X,float(h-119),300,48},12,appearance::palette().muted);
     button(g,f,IDOK,L"선택한 템플릿 삽입",{preview.X,float(h-54),184,34},true,f.selected>=0);
@@ -78,12 +86,13 @@ void paint(HWND hwnd,Gallery& f,HDC dc){
     Graphics output(dc);ui::presentPixels(output,bitmap);
 }
 void command(HWND hwnd,Gallery& f,int id){
-    if(id>=100&&id<109){f.category=f.categories[size_t(id-100)];filter(f);}
-    else if(id>=1000){f.selected=id-1000;SetFocus(hwnd);}
+    if(id>=100&&id<110){f.category=f.categories[size_t(id-100)];filter(f);}
+    else if(id>=1000){f.selected=id-1000;f.metalPreview.reset();SetFocus(hwnd);}
     else if(id>=300&&id<307)f.metal=id-300;
     else if(id==201)f.page=std::max(0,f.page-1);
     else if(id==202)f.page++;
-    else if(id==IDOK&&f.selected>=0){f.ok=true;f.done=true;}
+    else if(id>=410&&id<=414&&f.selected>=0){f.ok=true;f.done=true;f.action=id==410?TemplateAction::Favorite:id==411?TemplateAction::Edit:id==412?TemplateAction::Rename:id==413?TemplateAction::Move:TemplateAction::Remove;}
+    else if(id==IDOK&&f.selected>=0){f.ok=true;f.done=true;f.action=TemplateAction::Insert;}
     else if(id==IDCANCEL)f.done=true;
     InvalidateRect(hwnd,nullptr,FALSE);
 }
@@ -124,6 +133,6 @@ std::optional<TemplateChoice> templateGallery(HWND parent,const std::vector<Temp
     if(!hwnd)return {};appearance::titlebar(hwnd);EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(f.edit);MSG msg;
     while(!f.done&&GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
     DestroyWindow(hwnd);if(f.font)DeleteObject(f.font);if(f.editBrush)DeleteObject(f.editBrush);EnableWindow(parent,TRUE);SetActiveWindow(parent);
-    if(f.ok)return TemplateChoice{size_t(f.selected),f.metal};return {};
+    if(f.ok)return TemplateChoice{size_t(f.selected),f.metal,f.action};return {};
 }
 }

@@ -38,6 +38,45 @@ int main(int argc,char** argv){
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
     int result=0;
     try{
+        // User templates live in an isolated LOCALAPPDATA root so this test never
+        // changes a real user's templates, favorites, or active gallery data.
+        {
+            wchar_t previous[32768]{};DWORD size=GetEnvironmentVariableW(L"LOCALAPPDATA",previous,32768);
+            std::wstring oldAppData=size&&size<32768?std::wstring(previous,size):L"";
+            auto root=fs::temp_directory_path()/(L"YoungDrawTemplateTests-"+std::to_wstring(GetCurrentProcessId()));
+            fs::create_directories(root);
+            check(SetEnvironmentVariableW(L"LOCALAPPDATA",root.wstring().c_str())!=0,"isolate template storage");
+            try{
+                check(validTemplatePart(L"Fe-peroxo")&&!validTemplatePart(L"../escape")&&!validTemplatePart(L"CON"),"template path validation");
+                auto path=templateLocation(L"test-molecule",L"catalysis");
+                fs::create_directories(path.parent_path());
+                Document initial;initial.addAtom({0,0},8);
+                writeFile(path.wstring(),toNative(initial));
+                size_t skipped=0;
+                auto& cards=templateCards(skipped);
+                auto match=[&](const std::vector<ui::TemplateCard>& items){
+                    return std::find_if(items.begin(),items.end(),[&](const ui::TemplateCard& card){return card.path==path.wstring();});
+                };
+                auto item=match(cards);
+                check(item!=cards.end()&&item->group==L"catalysis"&&item->document.atoms.size()==1,"user template category and load");
+                const auto* preview=&item->preview;
+                auto& reused=templateCards(skipped);
+                check(&match(reused)->preview==preview,"unchanged template preview is cached");
+                auto favorites=loadFavorites();favorites.insert(templateKey(*item));saveFavorites(favorites);
+                auto& marked=templateCards(skipped);
+                check(match(marked)->favorite,"favorite survives gallery reload");
+                initial.addAtom({50,0},6);writeFile(path.wstring(),toNative(initial));
+                auto& refreshed=templateCards(skipped);
+                check(match(refreshed)->document.atoms.size()==2,"edited template invalidates preview cache");
+                fs::remove(path);auto& removed=templateCards(skipped);
+                check(match(removed)==removed.end(),"deleted user template disappears from gallery");
+            }catch(...){
+                SetEnvironmentVariableW(L"LOCALAPPDATA",oldAppData.empty()?nullptr:oldAppData.c_str());
+                fs::remove_all(root);throw;
+            }
+            SetEnvironmentVariableW(L"LOCALAPPDATA",oldAppData.empty()?nullptr:oldAppData.c_str());
+            fs::remove_all(root);
+        }
         // Reproduce differing bitmap/window DPI (100%, 125%, 150%, 200%).
         // The painted UI must fill the client area and retain hit-test positions.
         for(float sourceDpi:{96.f,120.f,144.f,192.f})for(float targetDpi:{96.f,120.f,144.f,192.f}){
