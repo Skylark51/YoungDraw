@@ -11,6 +11,17 @@
 using namespace yd;
 int checks=0;static void check(bool v,const char* name){checks++;if(!v)throw std::runtime_error(name);}
 int main(){try{
+  {Scene figure;figure.bounds={0,0,480,300};
+   Primitive line;line.type=Primitive::Line;line.points={{0,0},{100,0}};line.width=.8;figure.items.push_back(line);
+   Primitive label;label.type=Primitive::Text;label.points={{0,20}};label.text="TS";label.fontSize=8;figure.items.push_back(label);
+   Primitive bitmap;bitmap.type=Primitive::Image;bitmap.points={{10,30},{60,50}};figure.items.push_back(bitmap);
+   auto report=publicationCheck(figure,240);
+   check(report.widthPt==240&&std::abs(report.heightPt-150)<1e-6&&report.warnings.size()==3,"JACS preflight warns about effective font, stroke and raster DPI");
+   auto svg=toSvg(figure,240);
+   check(svg.find("width=\\"240.0000pt\\"")!=std::string::npos&&svg.find("height=\\"150.0000pt\\"")!=std::string::npos,"JACS export has exact publication dimensions");
+   check(toSvg(figure).find("width=\\"480.0000pt\\"")!=std::string::npos,"legacy SVG export dimensions remain unchanged");
+   check(publicationCheck(figure,504).widthPt==504,"double-column JACS export width");
+  }
  {auto chair=chairTemplate();double shortest=1e9,longest=0,area=0;int concave=0;
   for(size_t i=0;i<6;i++){Vec a=chair.atoms[i].p,b=chair.atoms[(i+1)%6].p;area+=a.x*b.y-a.y*b.x;}
   for(size_t i=0;i<6;i++){Vec edge=chair.atoms[(i+1)%6].p-chair.atoms[i].p,next=chair.atoms[(i+2)%6].p-chair.atoms[(i+1)%6].p;shortest=std::min(shortest,edge.length());longest=std::max(longest,edge.length());if((edge.x*next.y-edge.y*next.x)*area<0)concave++;
