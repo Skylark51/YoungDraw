@@ -6,6 +6,7 @@
 #include <queue>
 #include <map>
 #include <limits>
+#include <stdexcept>
 namespace yd {
 struct ScriptRun {std::string text;int script=0;};
 static std::vector<ScriptRun> scriptRuns(const std::string& input){
