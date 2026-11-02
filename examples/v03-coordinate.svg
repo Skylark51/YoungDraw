@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="779.0402pt" height="313.3104pt" viewBox="-12.9711 -2.5904 779.0402 313.3104">
+<g stroke-linecap="round" stroke-linejoin="round">
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 39.0289 4.4096 L 54.0289 30.3904"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 37.0812 8.2361 L 49.7412 30.1639"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 54.0289 30.3904 L 39.0289 56.3711"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 39.0289 56.3711 L 9.0289 56.3711"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 36.6889 52.7711 L 11.3689 52.7711"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 9.0289 56.3711 L -5.9711 30.3904"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M -5.9711 30.3904 L 9.0289 4.4096"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M -1.6835 30.1639 L 10.9765 8.2361"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 9.0289 4.4096 L 39.0289 4.4096"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 54.0289 30.3904 L 80.0096 45.3904"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 78.2096 45.3904 L 78.2096 66.3904"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 81.8096 45.3904 L 81.8096 66.3904"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 80.0096 45.3904 L 99.6504 34.0508"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 112.3304 34.0508 L 131.9711 45.3904"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 694.4692 297.9500 L 710.3692 282.0500"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 710.3692 282.0500 L 742.1691 290.0000"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 742.1691 290.0000 L 758.0691 277.2800"/>
+<path fill="none" stroke="#000000" stroke-width="4.0000" d="M 758.0691 277.2800 L 742.1691 302.7200"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 742.1691 302.7200 L 710.3692 294.7700"/>
+<path fill="none" stroke="#000000" stroke-width="2.0000" d="M 710.3692 294.7700 L 694.4692 297.9500"/>
+<text fill="#000000" x="75.6696" y="81.1304" font-family="Arial" font-size="14.0000" font-weight="bold"><tspan x="75.6696" dy="0.0000">O</tspan></text>
+<text fill="#000000" x="101.6504" y="36.1304" font-family="Arial" font-size="14.0000" font-weight="bold"><tspan x="101.6504" dy="0.0000">N</tspan></text>
+<text fill="#000000" x="101.6504" y="21.1304" font-family="Arial" font-size="14.0000" font-weight="bold"><tspan x="101.6504" dy="0.0000">H</tspan></text>
+<path fill="none" stroke="#000000" stroke-width="1.2000" d="M 63.0000 218.0000 L 734.7691 218.0000"/>
+<polygon fill="#000000" points="734.7691,218.0000 729.7691,220.0000 729.7691,216.0000 "/>
+<path fill="none" stroke="#000000" stroke-width="1.2000" d="M 63.0000 218.0000 L 63.0000 105.0000"/>
+<polygon fill="#000000" points="63.0000,105.0000 65.0000,110.0000 61.0000,110.0000 "/>
+<text fill="#000000" x="312.4246" y="86.7400" font-family="Arial" font-size="14.0000" font-weight="bold"><tspan x="312.4246" dy="0.0000">Reaction coordinate</tspan></text>
+<text fill="#000000" x="25.0000" y="97.1920" font-family="Arial" font-size="11.2000" font-weight="bold"><tspan x="25.0000" dy="0.0000">Energy (kcal/mol)</tspan></text>
+<text fill="#000000" x="320.6706" y="255.4660" font-family="Arial" font-size="12.6000" font-weight="bold"><tspan x="320.6706" dy="0.0000">Reaction coordinate</tspan></text>
+<text fill="#000000" x="31.0000" y="222.9180" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="31.0000" dy="0.0000">-15.6</tspan></text>
+<path fill="none" stroke="#000000" stroke-width="0.5000" d="M 60.0000 218.0000 L 63.0000 218.0000"/>
+<text fill="#000000" x="31.0000" y="196.6680" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="31.0000" dy="0.0000">-1.0</tspan></text>
+<path fill="none" stroke="#000000" stroke-width="0.5000" d="M 60.0000 191.7500 L 63.0000 191.7500"/>
+<text fill="#000000" x="31.0000" y="170.4180" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="31.0000" dy="0.0000">13.7</tspan></text>
+<path fill="none" stroke="#000000" stroke-width="0.5000" d="M 60.0000 165.5000 L 63.0000 165.5000"/>
+<text fill="#000000" x="31.0000" y="144.1680" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="31.0000" dy="0.0000">28.3</tspan></text>
+<path fill="none" stroke="#000000" stroke-width="0.5000" d="M 60.0000 139.2500 L 63.0000 139.2500"/>
+<text fill="#000000" x="31.0000" y="117.9180" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="31.0000" dy="0.0000">42.9</tspan></text>
+<path fill="none" stroke="#000000" stroke-width="0.5000" d="M 60.0000 113.0000 L 63.0000 113.0000"/>
+<text fill="#167d9a" x="53.8860" y="185.9583" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="53.8860" dy="0.0000">0.0</tspan></text>
+<text fill="#000000" x="59.5280" y="236.1920" font-family="Arial" font-size="11.2000" font-weight="bold"><tspan x="59.5280" dy="0.0000">R</tspan></text>
+<path fill="none" stroke="#167d9a" stroke-width="2.0000" d="M 63.0000 190.0403 C 132.6958 190.0403 159.2465 123.1613 228.9423 123.1613"/>
+<text fill="#167d9a" x="216.7903" y="119.0793" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="216.7903" dy="0.0000">37.2</tspan></text>
+<text fill="#000000" x="218.5263" y="236.1920" font-family="Arial" font-size="11.2000" font-weight="bold"><tspan x="218.5263" dy="0.0000">TS1</tspan></text>
+<path fill="none" stroke="#167d9a" stroke-width="2.0000" d="M 228.9423 123.1613 C 298.6380 123.1613 325.1888 158.2188 394.8846 158.2188"/>
+<text fill="#167d9a" x="382.7326" y="154.1368" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="382.7326" dy="0.0000">17.7</tspan></text>
+<text fill="#000000" x="391.4126" y="236.1920" font-family="Arial" font-size="11.2000" font-weight="bold"><tspan x="391.4126" dy="0.0000">I</tspan></text>
+<path fill="none" stroke="#167d9a" stroke-width="2.0000" d="M 394.8846 158.2188 C 464.5803 158.2188 491.1311 140.9597 560.8269 140.9597"/>
+<text fill="#167d9a" x="548.6749" y="136.8777" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="548.6749" dy="0.0000">27.3</tspan></text>
+<text fill="#000000" x="550.4109" y="236.1920" font-family="Arial" font-size="11.2000" font-weight="bold"><tspan x="550.4109" dy="0.0000">TS2</tspan></text>
+<path fill="none" stroke="#167d9a" stroke-width="2.0000" d="M 560.8269 140.9597 C 630.5226 140.9597 657.0734 207.8387 726.7691 207.8387"/>
+<text fill="#167d9a" x="714.6171" y="203.7567" font-family="Arial" font-size="9.8000" font-weight="bold"><tspan x="714.6171" dy="0.0000">-9.9</tspan></text>
+<text fill="#000000" x="723.2971" y="236.1920" font-family="Arial" font-size="11.2000" font-weight="bold"><tspan x="723.2971" dy="0.0000">P</tspan></text>
+<ellipse fill="#167d9a" stroke="#167d9a" stroke-width="2.0000" cx="63.0000" cy="190.0403" rx="2.5000" ry="2.5000"/>
+<ellipse fill="#167d9a" stroke="#167d9a" stroke-width="2.0000" cx="228.9423" cy="123.1613" rx="2.5000" ry="2.5000"/>
+<ellipse fill="#167d9a" stroke="#167d9a" stroke-width="2.0000" cx="394.8846" cy="158.2188" rx="2.5000" ry="2.5000"/>
+<ellipse fill="#167d9a" stroke="#167d9a" stroke-width="2.0000" cx="560.8269" cy="140.9597" rx="2.5000" ry="2.5000"/>
+<ellipse fill="#167d9a" stroke="#167d9a" stroke-width="2.0000" cx="726.7691" cy="207.8387" rx="2.5000" ry="2.5000"/>
+<text fill="#167d9a" x="73.0000" y="105.1920" font-family="Arial" font-size="11.2000" font-weight="bold"><tspan x="73.0000" dy="0.0000">Path A</tspan></text>
+</g>
+</svg>

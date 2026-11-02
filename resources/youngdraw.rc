@@ -1,0 +1,7 @@
+#define IDI_YOUNGDRAW 101
+IDI_YOUNGDRAW ICON "youngdraw.ico"
+204 RCDATA "youngdraw-icon.png"
+
+201 RCDATA "themes/backrooms.jpg"
+202 RCDATA "themes/nostalgia.jpg"
+203 RCDATA "themes/horror.jpg"

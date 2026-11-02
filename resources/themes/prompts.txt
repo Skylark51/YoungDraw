@@ -1,0 +1,10 @@
+Mode: built-in image_gen, three independent new images, opaque backgrounds.
+
+backrooms.jpg
+Empty liminal Backrooms interior, a vast maze of slightly yellowed 1990s damask wallpaper partitions, low acoustic drop ceiling with long fluorescent panels, ochre carpet, uncanny repetitive corridors with sharp perspective and distant dark doorway, sickly warm yellow fluorescent illumination, absolutely no people, no monsters, no writing. Photoreal cinematic architectural atmosphere, rich authentic wallpaper texture, restrained eerie analog photography. Landscape 16:9, designed as a desktop drawing application background, detailed around edges, uncluttered center.
+
+nostalgia.jpg
+Nostalgic late 1990s quiet study room at blue hour after summer rain, old beige CRT computer on wooden desk near window, screen blank dark teal, cassette tapes and unlabelled books, soft peach sunset and dusty lavender ambient light, distant trees through rain speckled glass, warm cozy amber desk lamp, subtle analog film grain. Evocative wistful memory, cinematic photoreal environment, no people, no writing, no text or logos. Landscape 16:9, desktop scientific drawing app background, spacious calm composition, not illustration.
+
+horror.jpg
+Abandoned scientific laboratory at midnight, cinematic psychological horror environment, long dark corridor with old laboratory glass partitions, dim cold blue-green emergency lighting and a single deep crimson warning light, subtle ground fog, water stained surfaces, mysterious open doorway into darkness, oppressive silence, no figures, no faces, no monsters, no gore, no words or lettering. Sophisticated atmospheric architectural photography with rich shadows. Landscape 16:9 desktop scientific drawing app background, uncluttered center and strong peripheral atmosphere.
