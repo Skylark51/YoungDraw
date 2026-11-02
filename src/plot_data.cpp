@@ -133,13 +133,14 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
 }
 EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vector<std::string>>& cells){
     auto data=cells;
-    if(data.size()>100)throw std::runtime_error("상태는 최대 100개 입력하세요.");
+    if(data.size()<2||data.size()>100)throw std::runtime_error("에너지 그래프에는 2~100개 상태가 필요합니다.");
     size_t paths=std::max(size_t(1),original.series.size());
     std::vector<EnergyRow> states;std::vector<std::vector<double>> energies(paths);std::vector<std::vector<bool>> present(paths);
     for(size_t r=0;r<data.size();r++){
         auto prefix=std::to_string(r+1)+"행 · ";
         if(data[r].size()!=paths+1)throw std::runtime_error(prefix+"상태 이름과 모든 경로의 에너지를 입력하세요.");
         auto label=trim(data[r][0]);
+        if(label.empty())throw std::runtime_error(prefix+"상태 이름을 입력하세요.");
         for(size_t k=0;k<paths;k++){
             auto text=trim(data[r][k+1]);double energy=0;
             present[k].push_back(!text.empty());
