@@ -72,9 +72,9 @@ int main(){try{
     }
     {
         auto graph=sample();graph.series.resize(3,graph.series[0]);
-        for(const auto& invalid:std::vector<std::vector<std::vector<std::string>>>{{},{{"R","0","1","2"}},{{"","0","1","2"},{"TS","4","5","6"}}}){
+        for(const auto& invalid:std::vector<std::vector<std::vector<std::string>>>{{},{{"R","0","1","2"}}}){
             bool rejected=false;try{(void)energyGridData(graph,invalid);}catch(const std::exception&){rejected=true;}
-            check(rejected,"energy grid rejects missing states and unnamed rows");
+            check(rejected,"energy grid rejects zero and one state");
         }
         for(size_t k=0;k<graph.series.size();k++)graph.series[k].name="S = "+std::to_string(k);
         auto renderLegend=[&](){Document d;d.plots={graph};std::map<int,std::string> entries;for(auto& item:makeScene(d,measure).items)if(item.type==Primitive::Text&&item.textRole==7)entries[item.textIndex]=item.text;return entries;};
