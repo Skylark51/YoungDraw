@@ -214,6 +214,8 @@ int main(){try{
    check(aromatic.hydrogens(n)==1&&aromatic.validate().empty(),"pyrrole-like explicitly hydrogenated aromatic N is supported");
    aromatic.atom(n)->explicitH=-1;aromatic.atom(n)->charge=1;
    check(aromatic.hydrogens(n)==1,"pyridinium-like charged N can carry one implicit H");
+   int substituent=aromatic.addAtom({0,20});aromatic.addBond(n,substituent);
+   check(aromatic.hydrogens(n)==0&&aromatic.validate().empty(),"N-substituted pyridinium has no extra implicit H");
   }
   {Document charged;int n=charged.addAtom({0,0},7);charged.atom(n)->charge=1;
    for(int i=0;i<4;i++){int c=charged.addAtom({double(i*20),20});charged.addBond(n,c);}
