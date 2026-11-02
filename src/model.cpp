@@ -98,7 +98,7 @@ static int covalentValence(const Document& d,const Atom& a){
     // and sp2 carbon. Pyrrole-like [nH] / substituted N instead contributes
     // its lone pair and retains two sigma bond orders.
     if(aromatic>=2&&(a.element==6||
-       (a.element==7&&other==0&&a.explicitH<=0)))++total;
+       (a.element==7&&(a.charge>0||(other==0&&a.explicitH<=0)))))++total;
     return total;
 }
 int Document::hydrogens(int id) const {
