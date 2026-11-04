@@ -160,13 +160,20 @@ size_t reactionRow(const Reaction& r,size_t i){
     size_t row=0;for(size_t j=1;j<=i&&j<r.slots.size();j++)if(r.slots[j].startsRow)row++;
     return row;
 }
-void appendMechanismStage(Reaction& r,bool below){
+void appendMechanismStage(Reaction& r,bool below,size_t source){
+    if(source==size_t(-1))source=r.slots.size()-1;
+    if(source>=r.slots.size())throw std::runtime_error("Invalid stage source");
+    if(r.links.empty()&&source+1!=r.slots.size()){
+        for(size_t i=0;i<r.slots.size();i++){auto delta=reactionSlot(r,i)-r.p;r.slotGrid.push_back({delta.x/r.spacing,delta.y/(r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80))});if(i)r.links.push_back({int(i)-1,int(i)});}
+    }
     if(r.slots.size()>=30)throw std::runtime_error("메커니즘은 최대 30칸까지 추가할 수 있습니다.");
     if(below&&!r.cyclic&&!r.vertical){
         // Preserve existing automatic row breaks before switching to manual rows.
         if(r.wrapColumns>0){for(size_t i=1;i<r.slots.size();i++)r.slots[i].startsRow=i%size_t(r.wrapColumns)==0;r.wrapColumns=0;}
     }
-    if(!r.links.empty()){r.links.push_back({int(r.slots.size())-1,int(r.slots.size())});Vec last=r.slotGrid.back();r.slotGrid.push_back(last+Vec{1,below?1.:0.});}
+    if(!r.links.empty()){r.links.push_back({int(source),int(r.slots.size())});Vec next=r.slotGrid[source]+Vec{1,below?1.:0.};
+        while(std::any_of(r.slotGrid.begin(),r.slotGrid.end(),[&](Vec p){return (p-next).length()<.1;}))next.y++;
+        r.slotGrid.push_back(next);}
     r.slots.push_back({"Stage "+std::to_string(r.slots.size()+1),{},"",below&&!r.cyclic&&!r.vertical});
     r.above.push_back("Next step");r.below.push_back("");
 }
@@ -220,7 +227,7 @@ void optimizeMechanism(Document& d,const std::vector<int>& selection,bool cyclic
         r.slotWidth=widest;r.slotHeight=tallest;
         // Every connector uses the longest caption's width and identical margins.
         if(r.cyclic)r.cycleRadius=mechanismCycleRadius(r,d.style);
-        r.spacing=widest+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style)+(r.links.empty()?0:mechanismFontSize(r,d.style)*2);
+        r.spacing=widest+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style)+(r.links.empty()?0:mechanismFontSize(r,d.style)*4);
         if(r.vertical&&!r.cyclic){
             r.spacing=tallest+mechanismCaptionHeight(r,d.style)+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style);
         }

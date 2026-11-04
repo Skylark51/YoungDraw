@@ -126,5 +126,24 @@ int main(){try{
         auto saved=toNative(d);normalizeChemicalLabels(d);check(toNative(d)==saved,"chemical label normalization is idempotent");
         for(auto reopened:{fromNative(saved),fromCdxml(toCdxml(d))})check((reopened.atom(a)->labelRuns.back().face&64)!=0,"oxidation scripts survive output and reopen");
     }
+    {
+        Reaction r;r.slots={{"A",{}},{"B",{}},{"C",{}}};r.slotGrid={{0,0},{0,1},{0,2}};r.links={{-1,0},{-1,1},{-1,2}};
+        auto original=r.slotGrid;appendMechanismStage(r,false,0);
+        check(r.links.back().from==0&&r.links.back().to==3,"extend the top branch instead of the last branch");
+        appendMechanismStage(r,false,1);check(r.links.back().from==1&&r.links.back().to==4,"middle branch extends independently");
+        for(size_t i=0;i<3;i++)check((r.slotGrid[i]-original[i]).length()<1e-8,"other branch frames remain fixed");
+        check(r.links[0].from==-1,"extending a rootless branch creates no reactant");
+    }
+    {
+        Document d;
+        for(Vec p:std::vector<Vec>{{0,0},{250,0},{250,180}}){int a=d.addAtom(p),b=d.addAtom(p+Vec{20,10},8);d.addBond(a,b);}
+        arrow(d,{60,0},{210,0});arrow(d,{60,60},{210,180});auto before=d;
+        arrangeImportedMechanism(d,{},true);
+        for(auto& a:before.atoms)check((d.atom(a.id)->p-a.p).length()<1e-8,"source layout mode preserves every original atom position");
+        auto& r=d.reactions.back();for(size_t i=0;i<r.slots.size();i++){
+            auto b=makeScene(d.subset(r.slots[i].members)).bounds;
+            check((reactionSlot(r,i)-Vec{b.x+b.w/2,b.y+b.h/2}).length()<1e-6,"frame remains centered on the original structure");
+        }
+    }
     std::cout<<"Mechanism editing regressions passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

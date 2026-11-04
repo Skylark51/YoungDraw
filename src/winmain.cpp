@@ -1035,6 +1035,13 @@ void branchMechanism(){
     double source=numeric((*value)[0],1,double(r->slots.size()));if(source!=std::floor(source))throw std::runtime_error("구조 번호는 정수입니다.");
     Document candidate=doc;double count=numeric((*value)[1],1,20);if(count!=std::floor(count))throw std::runtime_error("분기 수는 정수입니다.");for(auto& item:candidate.reactions)if(item.id==r->id)for(int i=0;i<int(count);i++)addMechanismBranch(item,size_t(source)-1);optimizeMechanism(candidate,{r->id},false);history.checkpoint(doc);doc=std::move(candidate);changed();fit();
 }
+void externalMechanism(){
+    auto values=ui::form(win,L"첫 구조 없이 세로선에서 분기",{{L"분기 수 (2~20)","3"}});if(!values)return;
+    double count=numeric((*values)[0],2,20);if(count!=std::floor(count))throw std::runtime_error("분기 수는 정수입니다.");
+    Document candidate=doc;Reaction r;r.id=candidate.nextId++;r.p=world({double(ww)/2,double(wh)/2});r.unit.clear();
+    for(int i=0;i<int(count);i++){r.slots.push_back({"",{},""});r.slotGrid.push_back({0,double(i)});r.links.push_back({-1,i,{}});r.above.push_back("");r.below.push_back("");}
+    candidate.reactions.push_back(r);optimizeMechanism(candidate,{r.id},false);history.checkpoint(doc);doc=std::move(candidate);selection={r.id};targetContainer=0;changed();fit();
+}
 void insertBranchArrows(){
     Document before=doc;auto originalSelection=selection;int stemId=0;Vec anchor=world({double(ww)/2,double(wh)/2});double height=160;
     for(auto& o:doc.objects)if(contains(selection,o.id)&&o.kind==ObjectKind::Line&&o.points.size()==2&&std::abs(o.points[0].x-o.points[1].x)<.01){stemId=o.id;anchor={o.points[0].x,std::min(o.points[0].y,o.points[1].y)};height=std::abs(o.points[0].y-o.points[1].y);break;}
@@ -1051,7 +1058,7 @@ void insertBranchArrows(){
 void arrangeImported(){
     Document before=doc;auto originalSelection=selection;auto ids=groupedSelection(selection);
     auto update=[&](const std::vector<std::string>& values)->std::wstring{
-        Document candidate=before;int owner=arrangeImportedMechanism(candidate,ids);
+        Document candidate=before;int owner=arrangeImportedMechanism(candidate,ids,values[4]=="0");
         auto slots=candidate.reactions.back().slots;double degrees=numeric(values[1],-36000,36000),factor=numeric(values[2],1,1000)/100.;
         for(auto& slot:slots){
             bool image=false;for(auto& o:candidate.objects)if(contains(slot.members,o.id)&&o.kind==ObjectKind::Image)image=true;
@@ -1059,9 +1066,9 @@ void arrangeImported(){
             if((degrees||values[3]!="0")&&!image)transformStructures(candidate,slot.members,degrees,values[3]=="1",values[3]=="2");
             if(factor!=1)scaleStructures(candidate,slot.members,factor);
         }
-        optimizeMechanism(candidate,{owner},false);doc=std::move(candidate);selection={owner};redraw();UpdateWindow(win);return {};
+        if(values[4]!="0"||values[0]!="0"||degrees||factor!=1||values[3]!="0")optimizeMechanism(candidate,{owner},false);doc=std::move(candidate);selection={owner};redraw();UpdateWindow(win);return {};
     };
-    auto result=ui::form(win,L"화살표 사이 구조 묶음 정리 · 미리보기",{{L"구조 모양","0",false,{L"원본 좌표 유지",L"2D 결합 각도·길이 정돈"}},{L"구조 묶음 회전 (도)","0"},{L"구조 묶음 배율 (%)","100"},{L"반전","0",false,{L"없음",L"좌우",L"상하"}}},update);
+    auto result=ui::form(win,L"화살표 사이 구조 묶음 정리 · 미리보기",{{L"구조 모양","0",false,{L"원본 좌표 유지",L"2D 결합 각도·길이 정돈"}},{L"구조 묶음 회전 (도)","0"},{L"구조 묶음 배율 (%)","100"},{L"반전","0",false,{L"없음",L"좌우",L"상하"}},{L"배치","0",false,{L"원본 구조 위치·묶음 유지",L"간격 자동 재배치"}}},update);
     if(!result){doc=before;selection=originalSelection;redraw();return;}
     auto error=update(*result);if(!error.empty())throw std::runtime_error(ui::utf8(error));
     if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();status=L"화살표 사이의 구조들을 반응 상태로 묶었습니다. 구조 칸에서 Ctrl+Shift+K: 모양 정돈 · Ctrl+K: 크기 조정";}
@@ -1084,7 +1091,7 @@ void command(int id){std::optional<InlineTarget> colorTarget;if(id==156&&inlineE
  switch(id){
  case 166:{auto candidate=doc;auto ids=groupedSelection(selection);if(ids.empty())throw std::runtime_error("벤젠이 포함된 그룹이나 고리를 선택하세요.");int count=collapsePhenyl(candidate,ids);if(!count)throw std::runtime_error("단일 결합 하나로 연결된 비치환 벤젠을 찾지 못했습니다.");history.checkpoint(doc);doc=std::move(candidate);selection.erase(std::remove_if(selection.begin(),selection.end(),[&](int id){auto all=doc.allIds();return !contains(all,id);}),selection.end());changed();break;}
  case 167:arrangeImported();break;
- case 220:insertBranchArrows();break;
+ case 220:insertBranchArrows();break;case 221:externalMechanism();break;
  case 168:editArrowCross();break;case 169:branchMechanism();break;
  case 165:resizeSelected();break;case 160:case 161:case 162:case 163:case 164:transformSelected(id);break;case 170:library(L"전체");break;case 171:library(L"리간드");break;case 172:library(L"착물");break;case 173:library(L"기질");break;case 174:library(L"산·시약");break;case 100:newDocumentTab();break;case 109:closeDocumentTab(activeDocument);break;
  case 101:{for(const auto& path:openDocumentFiles()){
@@ -1118,7 +1125,7 @@ void command(int id){std::optional<InlineTarget> colorTarget;if(id==156&&inlineE
  case 112:saveCurrentTemplate();break;
  case 113:{auto p=fileDialog(false);if(p)insert(fromCdxml(readFile(*p)),center());break;}
  case 120:{sidebarPage=0;history.checkpoint(doc);Reaction r;r.id=doc.nextId++;r.p=center()-Vec{120,0};r.slots={{"Reactant",{}},{"Intermediate",{}},{"Product",{}}};r.above={"Step 1","Step 2"};r.below={"",""};doc.reactions.push_back(r);selection={r.id};tool=Select;changed();editReaction(r.id);break;}
- case 121:edit();break;case 122:case 128:{auto* r=reaction(primary());if(!r)throw std::runtime_error("반응 메커니즘을 선택하세요.");if(r->slots.size()>=30)throw std::runtime_error("메커니즘은 최대 30칸까지 추가할 수 있습니다.");history.checkpoint(doc);appendMechanismStage(*r,id==128);optimizeMechanism(doc,{r->id},r->cyclic);changed();fit();break;}case 123:fillTarget(false);break;case 124:fillTarget(true);break;
+ case 121:edit();break;case 122:case 128:{auto* r=reaction(primary());if(!r)throw std::runtime_error("반응 메커니즘을 선택하세요.");if(r->slots.size()>=30)throw std::runtime_error("메커니즘은 최대 30칸까지 추가할 수 있습니다.");history.checkpoint(doc);appendMechanismStage(*r,id==128,targetContainer==r->id?targetSlot:size_t(-1));optimizeMechanism(doc,{r->id},r->cyclic);changed();fit();break;}case 123:fillTarget(false);break;case 124:fillTarget(true);break;
  case 130:{sidebarPage=1;history.checkpoint(doc);EnergyPlot p;p.id=doc.nextId++;p.p=center()-Vec{160,75};p.stages=defaultMechanismStages();p.states={{"R",0,{},{}},{"TS",20,{},{}},{"P",-10,{},{}}};p.series={{"Path 1","#000000",{0,20,-10},1,3.5}};doc.plots.push_back(p);selection={p.id};tool=Select;changed();editPlot(p.id);break;}
  case 131:if(plot(primary()))editPlot(primary());else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 132:if(plot(primary()))editSeries(primary(),true);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 133:if(plot(primary()))editSeries(primary(),false);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;
  case 125:case 126:{Document before=doc;try{optimizeMechanism(doc,selection,id==126);}catch(...){doc=before;throw;}history.checkpoint(before);selection.clear();changed();fit();break;}case 127:reactionSettings(primary());break;case 135:addBilateralBranch(primary());break;case 137:plotSettings(primary());break;case 138:publicationLayout(primary());break;case 139:editPlotStages(primary());break;case 136:snapPlotStages(primary());break;case 142:editPlotColors(primary());break;case 150:history.checkpoint(doc);applyHouseStyle(doc);status=L"Arial 굵게, 14 pt 라벨, 2 pt 결합선을 적용했습니다.";changed();fit();break;case 134:guides=!guides;break;case 140:case 141:sidebarPage=id==141?1:0;history.checkpoint(doc);doc=id==140?mechanismDemo():coordinateDemo();selection.clear();targetContainer=0;filePath.clear();tool=Select;status=L"배치 예제입니다. Ctrl+Z로 이전 문서를 복원합니다.";changed();fit();break;
@@ -1145,7 +1152,7 @@ void presentBuffer(Graphics& out,Bitmap& buffer){
     out.DrawImage(&buffer,Gdiplus::Rect(0,0,INT(buffer.GetWidth()),INT(buffer.GetHeight())),0,0,
                   INT(buffer.GetWidth()),INT(buffer.GetHeight()),UnitPixel);
 }
-Vec mechanismAddPosition(const Reaction& r,bool below=false);
+Vec mechanismAddPosition(const Reaction& r,bool below=false,size_t slot=size_t(-1));
 void paint(HDC dc,bool reuseScene=false){const auto& palette=appearance::palette();ink=palette.text;muted=palette.muted;accent=palette.accent;border=palette.edge;
  const auto width=std::max(1,ww),height=std::max(1,wh);
  if(!paintBuffer||paintBuffer->GetWidth()!=UINT(width)||paintBuffer->GetHeight()!=UINT(height))
@@ -1183,7 +1190,7 @@ void paint(HDC dc,bool reuseScene=false){const auto& palette=appearance::palette
     if(hovered){highlight(*hovered);if(auto* graph=plot(snapPlot)){auto label=ui::wide(graph->states[size_t(hovered->state)].label)+L" · "+(hovered->edge<0?L"왼쪽 끝":hovered->edge>0?L"오른쪽 끝":L"중앙");Vec at=screen(hovered->p);text(g,label,float(at.x+10),float(at.y-25),11,accent,true);}}
  }
  if(guides&&!snapPlot){for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();i++)guide(reactionSlot(r,i),r.slotWidth,r.slotHeight,r.slots[i].members.empty()?L"구조를 삽입하세요":L"",r.id,i,false);for(auto& p:doc.plots)if(!doc.isLocked(p.id))for(size_t i=0;i<p.states.size();i++){guide(plotAnchor(p,i,true),48,55,p.states[i].above.empty()?L"+ 구조 삽입":L"",p.id,i,true);guide(plotAnchor(p,i,false),48,55,p.states[i].below.empty()?L"+ 구조 삽입":L"",p.id,i,false);}}
- if(tool==Select&&!inlineEdit)for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id)){for(bool below:{false,true}){if(below&&r.vertical)continue;Vec p=mechanismAddPosition(r,below);SolidBrush body(white);Pen outline(accent,1.8f);g.FillEllipse(&body,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawEllipse(&outline,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawLine(&outline,float(p.x-5),float(p.y),float(p.x+5),float(p.y));g.DrawLine(&outline,float(p.x),float(p.y-5),float(p.x),float(p.y+5));}}
+ if(tool==Select&&!inlineEdit)for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id)){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=r.links.empty()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});if(!terminal)continue;for(bool below:{false,true}){if(below&&r.vertical)continue;Vec p=mechanismAddPosition(r,below,slot);SolidBrush body(white);Pen outline(accent,1.8f);g.FillEllipse(&body,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawEllipse(&outline,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawLine(&outline,float(p.x-5),float(p.y),float(p.x+5),float(p.y));g.DrawLine(&outline,float(p.x),float(p.y-5),float(p.x),float(p.y+5));}}}
  if(selectedCycleArrow>=0&&selection==std::vector<int>{selectedCycleOwner}){Scene highlight;for(auto item:sc.items)if(item.owner==selectedCycleOwner&&item.reactionArrow==selectedCycleArrow){item.color="#008778";item.width+=1;highlight.items.push_back(item);}auto saved=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,highlight);g.Restore(saved);}
  if(!inlineEdit)for(int id:selection){auto it=sc.objectBounds.find(id);if(it!=sc.objectBounds.end()){auto r=it->second;Vec p=screen({r.x,r.y});Pen pen(Color(150,0,135,120),1.5);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,float(p.x-4),float(p.y-4),float(r.w*zoom+8),float(r.h*zoom+8));}else if(auto a=doc.atom(id)){Vec p=screen(a->p);Pen pen(accent,1.5);g.DrawEllipse(&pen,float(p.x-8),float(p.y-8),16.f,16.f);}}
  if(selection.size()==1){auto found=sc.arrowPaths.find(selection.front());if(found!=sc.arrowPaths.end()&&found->second.size()==4){const auto& path=found->second;Pen guidePen(Color(170,0,135,120),1);guidePen.SetDashStyle(DashStyleDash);for(int i:{0,2}){Vec a=screen(path[i]),b=screen(path[i+1]);g.DrawLine(&guidePen,float(a.x),float(a.y),float(b.x),float(b.y));}Pen outline(accent,1.5);SolidBrush body(white),control(accent);for(int i=0;i<4;i++){Vec p=screen(path[i]);g.FillEllipse(i==1||i==2?&control:&body,float(p.x-5),float(p.y-5),10.f,10.f);g.DrawEllipse(&outline,float(p.x-5),float(p.y-5),10.f,10.f);}}}
@@ -1217,7 +1224,7 @@ void paint(HDC dc,bool reuseScene=false){const auto& palette=appearance::palette
     heading(L"반응 편집",270);pair(120,L"반응 추가",121,L"단계 표 편집",292);pair(122,L"단계 추가",127,L"메커니즘 설정",328);
     heading(L"배치",378);full(125,L"크기·간격 자동 정렬",400);full(126,L"촉매 순환 배치",436);
     heading(L"구조 삽입",486);pair(123,L"붙여넣기",124,L"파일에서 삽입",508);full(134,L"구조 삽입 영역 표시",544,guides);
-    heading(L"시작하기",594);pair(220,L"세로선 분기",140,L"메커니즘 예제",616);
+    heading(L"시작하기",594);pair(221,L"첫 구조 없이 분기",140,L"메커니즘 예제",616);
  }else{
     heading(L"데이터·경로",270);pair(130,L"그래프 추가",131,L"데이터 표 편집",292);pair(132,L"경로 추가",133,L"경로 스타일",328);
     pair(135,L"양쪽 분기 추가",138,L"출판용 정돈",364);
@@ -1250,10 +1257,11 @@ void updateDrag(){
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
 void cancel(){selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();if(dragging)doc=dragBefore;drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;ReleaseCapture();redraw();}
-Vec mechanismAddPosition(const Reaction& r,bool below){
-    Vec last=reactionSlot(r,r.slots.size()-1);
+Vec mechanismAddPosition(const Reaction& r,bool below,size_t slot){
+    if(slot==size_t(-1))slot=r.slots.size()-1;
+    Vec last=reactionSlot(r,slot);
     if(below||(r.vertical&&!r.cyclic))return screen(last+Vec{0,r.slotHeight/2+mechanismCaptionHeight(r,doc.style)})+Vec{0,28};
-    double direction=reactionRow(r,r.slots.size()-1)%2?-1.:1.;
+    double direction=r.links.empty()&&reactionRow(r,slot)%2?-1.:1.;
     return screen(last+Vec{direction*r.slotWidth/2,0})+Vec{direction*28,0};
 }
 std::optional<std::pair<int,int>> cycleArrowAt(Vec p){
@@ -1292,7 +1300,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
     history.checkpoint(doc);if(snapStage<0)graph->stages.push_back(label);else graph->stages.at(size_t(snapStage))=label;
     snapPlot=0;snapStart.reset();status=L"준위에 맞춰 반응 이름·양쪽 화살표를 배치했습니다. Ctrl+Z: 되돌리기";changed();return;
  }
- if(tool==Select)for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id) ){for(bool below:{false,true}){if(below&&r.vertical)continue;if((p-mechanismAddPosition(r,below)).length()<=13){selection={r.id};command(below?128:122);return;}}}
+ if(tool==Select)for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id) ){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=r.links.empty()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});if(!terminal)continue;for(bool below:{false,true}){if(below&&r.vertical)continue;if((p-mechanismAddPosition(r,below,slot)).length()<=13){selection={r.id};targetContainer=r.id;targetSlot=slot;command(below?128:122);return;}}}}
  if(tool==Select){auto sc=scene();Vec w=world(p);for(auto i=sc.items.rbegin();i!=sc.items.rend();++i)if(i->textRole==13&&!groupedObject(i->owner)){Vec at=i->points[0];double width=measure(i->text,i->fontSize,i->font,i->face);if(w.x>=at.x-2&&w.x<=at.x+width+2&&w.y>=at.y-2&&w.y<=at.y+i->fontSize+2){annotationDrag=i->owner;annotationStart=at;dragBefore=dragBase=doc;selection={i->owner};curveHandle=-1;dragging=true;moved=copyDrag=false;SetCapture(win);status=L"전하·라디칼 표시 위치 이동 · Esc: 취소 · Ctrl+Z: 되돌리기";redraw();return;}}}
  if(beginCurveHandle(p))return;curveHandle=-1;Vec w=world(p);int aid=doc.atomAt(w,10/zoom),bid=doc.bondAt(w,5/zoom),oid=aid||bid?0:objectAt(w);hoverAtom=aid;hoverBond=aid?0:bid;
  if((GetKeyState(VK_CONTROL)&0x8000)&&!aid&&!bid&&!oid){panning=true;panOrigin=origin;SetCapture(win);return;}
@@ -1321,7 +1329,7 @@ void hotkey(char c){
 bool deleteSelectedCycleArrow();
 #include "win_shortcuts.h"
 
-void menuBar(HWND hwnd){HMENU bar=CreateMenu();auto menu=[&](const wchar_t* label,std::initializer_list<std::pair<int,const wchar_t*>> items){HMENU m=CreatePopupMenu();for(auto& item:items)AppendMenuW(m,MF_STRING,item.first,item.second);AppendMenuW(bar,MF_POPUP|MF_OWNERDRAW,(UINT_PTR)m,label);MENUITEMINFOW info{sizeof(info)};info.fMask=MIIM_STRING;info.dwTypeData=const_cast<wchar_t*>(label);SetMenuItemInfoW(bar,UINT(GetMenuItemCount(bar)-1),TRUE,&info);};menu(L"파일(&F)",{{100,L"새 문서\tCtrl+N"},{101,L"열기…\tCtrl+O"},{102,L"저장\tCtrl+S"},{112,L"템플릿으로 저장…"},{109,L"현재 탭 닫기\tCtrl+W"},{108,L"CDXML 내보내기…"},{103,L"SVG 내보내기…"},{106,L"JACS 출판용 SVG…"}});menu(L"편집(&E)",{{104,L"실행 취소\tCtrl+Z"},{105,L"다시 실행\tCtrl+Shift+Z"},{198,L"그룹 만들기\tCtrl+G"},{199,L"그룹 해제\tCtrl+Shift+G"},{121,L"선택 항목 편집…"},{110,L"구조 정리\tCtrl+Shift+K"},{153,L"선택 부분을 뒤쪽으로 (옅은 회색)"},{154,L"선택 부분을 앞쪽으로 (검정)"},{160,L"선택 구조 좌우 반전"},{161,L"선택 구조 상하 반전"},{162,L"선택 구조 반시계 90° 회전"},{163,L"선택 구조 시계 90° 회전"},{164,L"선택 구조 각도 지정 회전…\tCtrl+R"},{165,L"선택 구조 크기 조정…\tCtrl+K"},{166,L"벤젠을 Ph로 축약\tCtrl+Shift+P"}});menu(L"삽입(&I)",{{111,L"템플릿…"},{113,L"구조 파일…"},{215,L"직선\tl"},{216,L"공명 화살표 ↔\tr"},{217,L"공명 결합 (실선+파선)\ta"},{218,L"오비탈 그리기"},{219,L"오비탈 설정…"},{220,L"세로선 분기 화살표…"},{120,L"반응 메커니즘…"},{130,L"에너지 그래프…"}});menu(L"배치(&L)",{{167,L"가져온 메커니즘 정리 (구조 보존)"},{169,L"메커니즘 분기 추가…"},{168,L"화살표 중앙 X 설정…"},{125,L"크기·간격 자동 정렬"},{126,L"촉매 순환 배치"},{127,L"메커니즘 설정…"},{137,L"그래프·축 설정…"},{138,L"출판용 비율·여백 정돈"},{139,L"반응 이름·화살표…"},{136,L"화살표 자석 배치…"},{142,L"그래프 구간별 색상…"},{135,L"그래프 양쪽 분기 추가…"},{190,L"선택 객체 왼쪽 맞춤\tCtrl+Shift+Alt+L"},{191,L"선택 객체 가로 중앙 맞춤\tCtrl+Shift+Alt+C"},{192,L"선택 객체 오른쪽 맞춤\tCtrl+Shift+Alt+R"},{193,L"선택 객체 위쪽 맞춤\tCtrl+Shift+Alt+T"},{194,L"선택 객체 상하 중앙 맞춤\tCtrl+Shift+Alt+M"},{195,L"선택 객체 아래쪽 맞춤\tCtrl+Shift+Alt+B"},{196,L"선택 객체 가로 간격 배분\tCtrl+Shift+Alt+H"},{197,L"선택 객체 세로 간격 배분\tCtrl+Shift+Alt+V"}});menu(L"보기(&V)",{{184,L"배경 · 테마…"},{176,L"레이어 패널"},{107,L"화면 맞춤"},{134,L"구조 삽입 영역 표시"},{140,L"메커니즘 예제"},{141,L"에너지 그래프 예제"}});SetMenu(hwnd,bar);refreshAppearance();}
+void menuBar(HWND hwnd){HMENU bar=CreateMenu();auto menu=[&](const wchar_t* label,std::initializer_list<std::pair<int,const wchar_t*>> items){HMENU m=CreatePopupMenu();for(auto& item:items)AppendMenuW(m,MF_STRING,item.first,item.second);AppendMenuW(bar,MF_POPUP|MF_OWNERDRAW,(UINT_PTR)m,label);MENUITEMINFOW info{sizeof(info)};info.fMask=MIIM_STRING;info.dwTypeData=const_cast<wchar_t*>(label);SetMenuItemInfoW(bar,UINT(GetMenuItemCount(bar)-1),TRUE,&info);};menu(L"파일(&F)",{{100,L"새 문서\tCtrl+N"},{101,L"열기…\tCtrl+O"},{102,L"저장\tCtrl+S"},{112,L"템플릿으로 저장…"},{109,L"현재 탭 닫기\tCtrl+W"},{108,L"CDXML 내보내기…"},{103,L"SVG 내보내기…"},{106,L"JACS 출판용 SVG…"}});menu(L"편집(&E)",{{104,L"실행 취소\tCtrl+Z"},{105,L"다시 실행\tCtrl+Shift+Z"},{198,L"그룹 만들기\tCtrl+G"},{199,L"그룹 해제\tCtrl+Shift+G"},{121,L"선택 항목 편집…"},{110,L"구조 정리\tCtrl+Shift+K"},{153,L"선택 부분을 뒤쪽으로 (옅은 회색)"},{154,L"선택 부분을 앞쪽으로 (검정)"},{160,L"선택 구조 좌우 반전"},{161,L"선택 구조 상하 반전"},{162,L"선택 구조 반시계 90° 회전"},{163,L"선택 구조 시계 90° 회전"},{164,L"선택 구조 각도 지정 회전…\tCtrl+R"},{165,L"선택 구조 크기 조정…\tCtrl+K"},{166,L"벤젠을 Ph로 축약\tCtrl+Shift+P"}});menu(L"삽입(&I)",{{111,L"템플릿…"},{113,L"구조 파일…"},{215,L"직선\tl"},{216,L"공명 화살표 ↔\tr"},{217,L"공명 결합 (실선+파선)\ta"},{218,L"오비탈 그리기"},{219,L"오비탈 설정…"},{221,L"첫 구조 없이 분기 메커니즘…"},{220,L"세로선 분기 화살표…"},{120,L"반응 메커니즘…"},{130,L"에너지 그래프…"}});menu(L"배치(&L)",{{167,L"가져온 메커니즘 정리 (구조 보존)"},{169,L"메커니즘 분기 추가…"},{168,L"화살표 중앙 X 설정…"},{125,L"크기·간격 자동 정렬"},{126,L"촉매 순환 배치"},{127,L"메커니즘 설정…"},{137,L"그래프·축 설정…"},{138,L"출판용 비율·여백 정돈"},{139,L"반응 이름·화살표…"},{136,L"화살표 자석 배치…"},{142,L"그래프 구간별 색상…"},{135,L"그래프 양쪽 분기 추가…"},{190,L"선택 객체 왼쪽 맞춤\tCtrl+Shift+Alt+L"},{191,L"선택 객체 가로 중앙 맞춤\tCtrl+Shift+Alt+C"},{192,L"선택 객체 오른쪽 맞춤\tCtrl+Shift+Alt+R"},{193,L"선택 객체 위쪽 맞춤\tCtrl+Shift+Alt+T"},{194,L"선택 객체 상하 중앙 맞춤\tCtrl+Shift+Alt+M"},{195,L"선택 객체 아래쪽 맞춤\tCtrl+Shift+Alt+B"},{196,L"선택 객체 가로 간격 배분\tCtrl+Shift+Alt+H"},{197,L"선택 객체 세로 간격 배분\tCtrl+Shift+Alt+V"}});menu(L"보기(&V)",{{184,L"배경 · 테마…"},{176,L"레이어 패널"},{107,L"화면 맞춤"},{134,L"구조 삽입 영역 표시"},{140,L"메커니즘 예제"},{141,L"에너지 그래프 예제"}});SetMenu(hwnd,bar);refreshAppearance();}
 void refreshAppearance(){const auto& p=appearance::palette();ink=p.text;muted=p.muted;accent=p.accent;border=p.edge;appearance::titlebar(win);HBRUSH old=menuBackground;menuBackground=CreateSolidBrush(RGB(p.chrome.GetR(),p.chrome.GetG(),p.chrome.GetB()));MENUINFO info{sizeof(info)};info.fMask=MIM_BACKGROUND;info.hbrBack=menuBackground;if(GetMenu(win))SetMenuInfo(GetMenu(win),&info);if(old)DeleteObject(old);DrawMenuBar(win);if(documentTabs)InvalidateRect(documentTabs,nullptr,FALSE);redraw();}
 LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){try{switch(msg){case WM_CREATE:win=hwnd;appearance::load();appearance::titlebar(hwnd);createTooltip();menuBar(hwnd);createDocumentTabs();title();return 0;case WM_GETMINMAXINFO:{auto* p=(MINMAXINFO*)lp;p->ptMinTrackSize={1200,880};return 0;}case WM_SIZE:hideTooltip();if(!finishInline(true))return 0;ww=LOWORD(lp);wh=HIWORD(lp);if(documentTabs)MoveWindow(documentTabs,left,89,std::max(1,ww-left-right),30,TRUE);redraw();return 0;case WM_ERASEBKGND:return 1;case WM_SETCURSOR:if(LOWORD(lp)==HTCLIENT&&panning){SetCursor(LoadCursorW(nullptr,IDC_HAND));return TRUE;}if(LOWORD(lp)==HTCLIENT&&canvas(mouse)&&tool==Text){SetCursor(LoadCursorW(nullptr,IDC_IBEAM));return TRUE;}break;case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(hwnd,&ps);paint(dc,true);EndPaint(hwnd,&ps);return 0;}
  case WM_MEASUREITEM:{auto* item=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(item->CtlType==ODT_MENU){auto label=reinterpret_cast<const wchar_t*>(item->itemData);item->itemWidth=UINT(wcslen(label)*8+16);item->itemHeight=24;return TRUE;}break;}

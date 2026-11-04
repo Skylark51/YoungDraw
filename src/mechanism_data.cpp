@@ -11,9 +11,13 @@ std::vector<Vec> mechanismLinkPath(const Reaction& r,size_t index,const Style& s
         x-=edge+mechanismArrowLength(r,style);b.x-=edge;return {{x,b.y},b};
     }
     Vec a=reactionSlot(r,size_t(l.from));double direction=b.x>=a.x?1.:-1.;a.x+=direction*edge;b.x-=direction*edge;
-    if(std::abs(a.y-b.y)<.01)return {a,b};
-    // Every outgoing path shares a fixed spine next to its source frame.
-    double x=a.x+direction*font*.6;
+    double x=a.x+direction*(mechanismArrowMargin(r,style)+font);
+    if(std::abs(a.y-b.y)<.01){
+        int outgoing=0;for(auto& link:r.links)if(link.from==l.from)outgoing++;
+        if(outgoing>1)return {a,{x,a.y},b};
+        return {a,b};
+    }
+    // Keep the common stem outside both the molecule and the full caption span.
     return {a,{x,a.y},{x,b.y},b};
 }
 Vec mechanismLinkCaption(const Reaction& r,size_t index,const Style& style){auto path=mechanismLinkPath(r,index,style);return (path[path.size()-2]+path.back())*.5;}

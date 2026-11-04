@@ -103,7 +103,8 @@ void addMechanismBranch(Reaction& r,size_t source){
     Vec p=r.slotGrid.at(source)+Vec{1,1};bool occupied=true;while(occupied){occupied=false;for(auto q:r.slotGrid)if((p-q).length()<.5){p.y++;occupied=true;break;}}
     r.links.push_back({int(source),int(r.slots.size()),{}});r.slotGrid.push_back(p);r.slots.push_back({"",{},""});r.above.push_back("");r.below.push_back("");
 }
-static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& selection){
+static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& selection,bool preserveLayout){
+    const Document original=d;
     normalizeChemicalLabels(d,selection);
     struct Part{std::vector<int> ids;Rect box;Vec at;};std::vector<Part> parts,notations;std::set<int> seen,owned;
     for(auto& r:d.reactions){for(auto& s:r.slots)owned.insert(s.members.begin(),s.members.end());for(auto& l:r.links)owned.insert(l.members.begin(),l.members.end());}for(auto& p:d.plots)for(auto& s:p.states){owned.insert(s.above.begin(),s.above.end());owned.insert(s.below.begin(),s.below.end());}
@@ -199,8 +200,15 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
         for(int id:slot.members)if(d.atom(id)&&!covered.count(id)){auto ids=d.component(id);covered.insert(ids.begin(),ids.end());components++;}
         if(components>1){Group group;group.id=d.nextId++;group.members=slot.members;d.groups.push_back(group);}
     }
-    d.reactions.push_back(r);optimizeMechanism(d,{r.id},false);return r.id;
+    d.reactions.push_back(r);optimizeMechanism(d,{r.id},false);
+    if(preserveLayout){
+        auto& saved=d.reactions.back();double pitch=saved.slotHeight+std::max(saved.rowGap,mechanismCaptionHeight(saved,Style{})+80);
+        for(size_t i=0;i<parts.size();i++)saved.slotGrid[i]={(parts[i].at.x-saved.p.x)/saved.spacing,(parts[i].at.y-saved.p.y)/pitch};
+        for(auto& a:d.atoms)if(auto* old=original.atom(a.id))a.p=old->p;
+        for(auto& o:d.objects)for(auto& old:original.objects)if(o.id==old.id){o.points=old.points;break;}
+    }
+    return r.id;
 }
-int arrangeImportedMechanism(Document& d,const std::vector<int>& selection){Document candidate=d;int id=arrangeImportedMechanismImpl(candidate,selection);d=std::move(candidate);return id;}
+int arrangeImportedMechanism(Document& d,const std::vector<int>& selection,bool preserveLayout){Document candidate=d;int id=arrangeImportedMechanismImpl(candidate,selection,preserveLayout);d=std::move(candidate);return id;}
 
 }
