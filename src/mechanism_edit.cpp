@@ -67,12 +67,13 @@ void normalizeChemicalLabels(Document& d,const std::vector<int>& selection){
             visible+=formatted[i++];super.push_back(script);
         }
         if(visible!=raw)return;
+        double baseline=0;for(auto& run:runs)if((run.face&96)!=64)baseline=std::max(baseline,run.size);if(baseline<=0)for(auto& run:runs)baseline=std::max(baseline,run.size);
         std::vector<TextRun> result;size_t offset=0;
         for(auto run:runs){size_t start=0;while(start<run.text.size()){
             bool elevated=super[offset+start];size_t end=start+1;
             while(end<run.text.size()&&super[offset+end]==elevated)end++;
             auto part=run;part.text=run.text.substr(start,end-start);
-            if(elevated&&(part.face&96)!=64){part.face=(part.face&~96)|64;part.size*=.7;}
+            if(elevated){part.face=(part.face&~96)|64;part.size=std::min(part.size,baseline*chemicalScriptScale(part.text));}
             result.push_back(part);start=end;
         }offset+=run.text.size();}
         runs=std::move(result);text=formatted;
@@ -96,8 +97,8 @@ std::vector<int> addBranchArrows(Document& d,Vec top,double height,double length
 }
 void addMechanismBranch(Reaction& r,size_t source){
     if(r.cyclic||r.vertical)throw std::runtime_error("분기는 가로 메커니즘에서 추가하세요.");
-    if(source>=r.slots.size()||r.slots.size()>=30)throw std::runtime_error("분기 시작 단계와 최대 30칸을 확인하세요.");
-    if(r.links.empty()){
+    if(source>=r.slots.size()||r.slots.size()>=40)throw std::runtime_error("분기 시작 단계와 최대 40칸을 확인하세요.");
+    if(!r.explicitConnections()){
         for(size_t i=0;i<r.slots.size();i++){Vec p=reactionSlot(r,i)-r.p;r.slotGrid.push_back({p.x/r.spacing,p.y/(r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80))});if(i)r.links.push_back({int(i)-1,int(i),{}});}
     }
     Vec p=r.slotGrid.at(source)+Vec{1,1};bool occupied=true;while(occupied){occupied=false;for(auto q:r.slotGrid)if((p-q).length()<.5){p.y++;occupied=true;break;}}
@@ -146,7 +147,7 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
             parts.erase(parts.begin()+j);merged=true;break;
         }
     }
-    if(parts.size()<2||parts.size()>30)throw std::runtime_error("정리할 구조 2~30개와 반응 화살표·텍스트를 선택하세요.");
+    if(parts.size()<2||parts.size()>40)throw std::runtime_error("정리할 구조 2~40개와 반응 화살표·텍스트를 선택하세요.");
     // Row clustering retains the drawn rows; no chemical coordinate is rescaled.
     std::sort(parts.begin(),parts.end(),[](const Part& a,const Part& b){return a.at.y<b.at.y;});
     std::vector<std::vector<Part>> rows;for(auto p:parts){if(rows.empty()||std::abs(p.at.y-rows.back().front().at.y)>std::max(40.,p.box.h*.6))rows.push_back({});rows.back().push_back(p);}parts.clear();
@@ -179,7 +180,7 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
         }
         if(a==b)continue;r.links.push_back({a,b,{}});mids.push_back((arrow->points[arrow->points.size()-2]+arrow->points.back())*.5);consumed.push_back(arrow->id);auto mark=arrow->cross;mark.index=int(r.links.size())-1;if(mark.enabled)r.crosses.push_back(mark);
     }
-    if(r.links.empty())throw std::runtime_error("구조 사이 반응 화살표를 찾지 못했습니다. 구조와 화살표를 함께 선택하세요.");
+    if(!r.explicitConnections())throw std::runtime_error("구조 사이 반응 화살표를 찾지 못했습니다. 구조와 화살표를 함께 선택하세요.");
     r.above.resize(r.links.size());r.below.resize(r.links.size());
     static const std::regex energy(R"(^\s*(?:[-+]?\d+(?:\.\d+)?\*?|\?(?:\.\?)?)(?:\s*/\s*(?:[-+]?\d+(?:\.\d+)?\*?|\?(?:\.\?)?))*\s*$)");
     for(auto& o:d.objects)if(!o.points.empty()&&!owned.count(o.id)&&selected({o.id})&&!has(consumed,o.id)){

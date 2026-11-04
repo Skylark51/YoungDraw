@@ -24,8 +24,8 @@ struct Style {
 };
 enum class BondKind { Single, Double, Triple, Wedge, Hash, Dash, Bold, Wavy, Aromatic, Dative };
 struct TextRun { std::string text,color="#000000",font="Arial"; double size=10; int face=0; };
-struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,radical=0; std::string label; bool protect=false; std::vector<TextRun> labelRuns; Vec labelOffset; std::string color="#000000"; Vec annotationOffset; bool annotationManual=false; };
-struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; std::string customOrder,customDisplay; std::string color="#000000"; };
+struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,radical=0; std::string label; bool protect=false; std::vector<TextRun> labelRuns; Vec labelOffset; std::string color="#000000"; Vec annotationOffset; bool annotationManual=false; double drawingScale=1; };
+struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; std::string customOrder,customDisplay; std::string color="#000000"; double drawingScale=1; };
 enum class ObjectKind { Line, Curve, Text, Ellipse, Rectangle, Image };
 struct ArrowCross { int index=-1; bool enabled=false; double width=4,size=14; std::string color="#ff0000"; };
 struct MechanismLink { int from=0,to=1; std::vector<int> members; }; // from -1: common external vertical spine.
@@ -55,6 +55,9 @@ struct Reaction {
     std::vector<Vec> slotGrid; // Frame positions in column/row units.
     std::vector<ArrowCross> crosses;
     double rowGap=100; // Minimum clear vertical space between structure boxes.
+    bool manualConnections=false; // Empty links can intentionally mean no arrows.
+    double arrowLength=0; // 0: caption-driven automatic length.
+    bool explicitConnections() const {return manualConnections||!links.empty();}
 };
 struct EnergyState { std::string label; double energy=0; std::vector<int> above,below; int marker=-1; };
 struct MechanismStage { std::string label; double start=0,end=100,fontSize=0; }; // Percent span; fontSize 0 matches state captions.
@@ -121,6 +124,8 @@ void appendMechanismStage(Reaction& r,bool below=false,size_t source=size_t(-1))
 Vec plotAnchor(const EnergyPlot& p,size_t index,bool above);
 void optimizeMechanism(Document& d,const std::vector<int>& selection={},bool cyclic=false);
 void fillSlot(Document& d,const Document& fragment,int container,size_t index,bool above=false);
+Document structureInSlot(const Document& d,int container,size_t index,bool above=false);
+void replaceSlotStructure(Document& d,const Document& fragment,int container,size_t index,bool above=false);
 int collapsePhenyl(Document& d,const std::vector<int>& selection);
 int arrangeImportedMechanism(Document& d,const std::vector<int>& selection={},bool preserveLayout=false);
 void addMechanismBranch(Reaction& r,size_t source);
@@ -135,6 +140,7 @@ void applyHouseStyle(Document& d);
 std::string symbol(int atomicNumber);
 int atomicNumber(const std::string& symbol);
 std::string chemicalScripts(const std::string& text);
+double chemicalScriptScale(const std::string& text);
 int order(BondKind kind);
 Vec snapped(Vec start, Vec end, double length, bool free=false);
 double defaultBondLength(const Document& d,int atom,BondKind kind=BondKind::Single,int element=6);

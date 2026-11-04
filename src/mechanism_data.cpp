@@ -2,7 +2,12 @@
 #include <sstream>
 #include <locale>
 #include <stdexcept>
+#include <utility>
+#include <map>
+#include <tuple>
 namespace yd {
+namespace { MechanismMeasure captionMeasure;std::map<std::tuple<std::string,double,int>,double> captionWidths; }
+void setMechanismTextMeasure(MechanismMeasure measure){captionMeasure=std::move(measure);captionWidths.clear();}
 std::vector<Vec> mechanismLinkPath(const Reaction& r,size_t index,const Style& style){
     auto l=r.links.at(index);Vec b=reactionSlot(r,size_t(l.to));
     double edge=r.slotWidth/2+mechanismArrowMargin(r,style),font=mechanismFontSize(r,style);
@@ -10,9 +15,28 @@ std::vector<Vec> mechanismLinkPath(const Reaction& r,size_t index,const Style& s
         double x=b.x;for(auto& link:r.links)if(link.from<0)x=std::min(x,reactionSlot(r,size_t(link.to)).x);
         x-=edge+mechanismArrowLength(r,style);b.x-=edge;return {{x,b.y},b};
     }
-    Vec a=reactionSlot(r,size_t(l.from));double direction=b.x>=a.x?1.:-1.;a.x+=direction*edge;b.x-=direction*edge;
+    Vec source=reactionSlot(r,size_t(l.from));
+    double direction=b.x>=source.x?1.:-1.;
+    if(std::abs(b.x-source.x)<2*edge+font){
+        // Overlapping imported frames and same-column branches need an outside
+        // route; trimming both ends horizontally would invert/collapse the head.
+        Vec a=source+Vec{edge,0},end=b+Vec{edge,0};
+        double outside=std::max(a.x,end.x)+mechanismArrowLength(r,style);
+        if(std::abs(a.y-end.y)<=std::max(font,r.slotHeight*.15)){
+            end={b.x,b.y-r.slotHeight/2-mechanismArrowMargin(r,style)};
+            double top=std::min(a.y,end.y)-font*2;
+            return {a,{outside,a.y},{outside,top},{end.x,top},end};
+        }
+        return {a,{outside,a.y},{outside,end.y},end};
+    }
+    Vec a=source;a.x+=direction*edge;b.x-=direction*edge;
     double x=a.x+direction*(mechanismArrowMargin(r,style)+font);
-    if(std::abs(a.y-b.y)<.01){
+    // Imported frames can have slightly different visual centers even in one
+    // row. Do not turn that small offset into a three-segment staircase.
+    // Snap the connector only; the molecules retain their original positions.
+    double rowTolerance=std::max(font,r.slotHeight*.15);
+    if(std::abs(a.y-b.y)<=rowTolerance){
+        b.y=a.y;
         int outgoing=0;for(auto& link:r.links)if(link.from==l.from)outgoing++;
         if(outgoing>1)return {a,{x,a.y},b};
         return {a,b};
@@ -30,18 +54,18 @@ double mechanismCaptionHeight(const Reaction& r,const Style& style){
     return height;
 }
 double mechanismArrowLength(const Reaction& r,const Style& style){
+    if(r.arrowLength>0)return r.arrowLength;
     double font=mechanismFontSize(r,style),widest=0;
     auto measure=[&](const std::string& raw){
         auto text=chemicalScripts(raw);double line=0,scale=1;size_t close=std::string::npos;
+        std::string run;
+        auto flush=[&](){if(run.empty())return;if(captionMeasure){auto key=std::make_tuple(run,font*scale,style.labelFace);auto it=captionWidths.find(key);if(it==captionWidths.end()){if(captionWidths.size()>4096)captionWidths.clear();it=captionWidths.emplace(std::move(key),captionMeasure(run,font*scale,"Arial",style.labelFace)).first;}line+=it->second;}else for(unsigned char c:run){if((c&0xc0)==0x80)continue;line+=font*scale*.62;}run.clear();};
         for(size_t i=0;i<text.size();i++){unsigned char c=text[i];
-            if((c=='_'||c=='^')&&i+1<text.size()&&text[i+1]=='{'&&(close=text.find('}',i+2))!=std::string::npos){scale=.7;i++;continue;}
-            if(i==close){scale=1;continue;}
-            if(c=='\n'){widest=std::max(widest,line);line=0;continue;}
-            if(c=='\r'||(c&0xc0)==0x80)continue;
-            // Match the scene's conservative Arial advance instead of reserving
-            // a wide glyph for every letter. Keep extra room for M/W and CJK.
-            line+=font*scale*(c>=0x80?1.05:c=='W'||c=='M'?1.:.62);
-        }widest=std::max(widest,line);
+            if((c=='_'||c=='^')&&i+1<text.size()&&text[i+1]=='{'&&(close=text.find('}',i+2))!=std::string::npos){flush();scale=c=='^'?chemicalScriptScale(text.substr(i+2,close-i-2)):.7;i++;continue;}
+            if(i==close){flush();scale=1;continue;}
+            if(c=='\n'){flush();widest=std::max(widest,line);line=0;continue;}
+            if(c!='\r')run+=char(c);
+        }flush();widest=std::max(widest,line);
     };
     auto measureEnergy=[&](const std::string& raw){
         try{
@@ -59,9 +83,10 @@ double mechanismArrowLength(const Reaction& r,const Style& style){
     };
     for(auto& raw:r.above){auto caption=transitionCaption(raw);measure(caption.description);measure(caption.name);}
     for(auto& raw:r.below)measureEnergy(raw);
-    for(auto& slot:r.slots){measure(slot.label);measureEnergy(slot.energy);}
-    return std::max(font*4.,widest+font);
+    return std::max(font*3.,widest+font*.6);
 }
+double mechanismArrowWeight(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.1,font*.085)*std::sqrt(std::max(1.,mechanismArrowLength(r,style)/(font*6)));}
+double mechanismArrowHead(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.25,font/10)*std::sqrt(std::max(1.,mechanismArrowLength(r,style)/(font*6)));}
 namespace {
 struct CycleBox {double x,y,w,h;};
 double cycleTextWidth(const std::string& text,double font){

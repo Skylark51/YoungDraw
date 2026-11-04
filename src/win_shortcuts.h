@@ -35,6 +35,9 @@ void formatSelectedText(int mask,bool plain=false){
     if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();repeatAction=[mask,plain](){formatSelectedText(mask,plain);};}
 }
 void key(WPARAM k){
+    if(mechanismConnectionDrag){if(k==VK_ESCAPE)cancel();return;}
+    if(mechanismConnecting&&k==VK_ESCAPE){cancel();return;}
+    if(isolatedStructureEditing&&(GetKeyState(VK_CONTROL)&0x8000)){if(k==VK_TAB)return;if(k=='S'){command(186);return;}}
     if(snapPlot){if(k==VK_ESCAPE){cancel();status=L"화살표 자석 배치를 취소했습니다.";}return;}
     pruneLockedSelection();bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0,shift=(GetKeyState(VK_SHIFT)&0x8000)!=0,alt=(GetKeyState(VK_MENU)&0x8000)!=0;
     if(dragging||drawing||boxing||panning){if(k==VK_ESCAPE)cancel();return;}
@@ -72,7 +75,7 @@ void key(WPARAM k){
     }
     if(k==VK_LEFT||k==VK_RIGHT||k==VK_UP||k==VK_DOWN){double step=shift?10:1;nudgeSelection({k==VK_LEFT?-step:k==VK_RIGHT?step:0,k==VK_UP?-step:k==VK_DOWN?step:0});redraw();return;}
     if(k==VK_ESCAPE){selectedCycleOwner=0;selectedCycleArrow=-1;tool=Select;selection.clear();targetContainer=0;}
-    if(k==VK_DELETE||k==VK_BACK){if(deleteSelectedCycleArrow())return;if(!selection.empty()){history.checkpoint(doc);doc.erase(selection);selection.clear();changed();}}
+    if(k==VK_DELETE||k==VK_BACK){if(activeStructureTarget()&&reaction(targetContainer)){command(144);return;}if(deleteSelectedCycleArrow())return;if(!selection.empty()){history.checkpoint(doc);doc.erase(selection);selection.clear();changed();}}
     if(k==VK_F1)MessageBoxW(win,L"Ctrl+K: 크기 / Ctrl+R: 회전 / Ctrl+Shift+K: 구조 정리\nCtrl+Shift+Alt+L/C/R: 왼쪽 / 가로 중앙 / 오른쪽 정렬\nCtrl+Shift+Alt+T/M/B: 위 / 세로 중앙 / 아래 정렬\nCtrl+Shift+Alt+H/V: 가로 / 세로 간격 배분\nCtrl+Shift+H/V: 좌우 / 상하 반전\n방향키: 1 pt 이동 / Shift+방향키: 10 pt 이동\nAlt+좌우: 1° 회전 / Alt+상하: 15° 회전\nCtrl+방향키: 반응 화살표와 복제 구조 추가\nCtrl+G / Ctrl+Shift+G: 그룹 / 그룹 해제\nCtrl+D: CDXML 복사 / Ctrl+Shift+X: 반응 배치\nCtrl+Z: 실행 취소 / Ctrl+Shift+Z: 다시 실행 / Ctrl+Y: 마지막 작업 반복\nShift+G: 오비탈 도구 / Space: 선택 도구\n텍스트 편집 F9/F10: 아래 / 위첨자\nCtrl+우클릭 드래그: 화면 이동",L"YoungDraw · ChemDraw 호환 단축키",MB_OK);
     if(k==VK_RETURN){if(hoverAtom){selection={hoverAtom};editObject(hoverAtom);}else edit();}redraw();
 }

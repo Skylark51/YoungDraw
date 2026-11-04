@@ -32,6 +32,7 @@ std::string chemicalScripts(const std::string& text) {
     }
     return result;
 }
+double chemicalScriptScale(const std::string& text){return !text.empty()&&text.find_first_not_of("IVX")==std::string::npos?.55:.7;}
 int order(BondKind k) { return k==BondKind::Double?2:k==BondKind::Triple?3:1; }
 bool Document::isLocked(int id) const {
     if(graphsLocked)for(const auto& p:plots)if(p.id==id)return true;
@@ -52,7 +53,7 @@ const Bond* Document::bond(int id) const { for(auto& b:bonds) if(b.id==id)return
 int Document::addBond(int a,int b,BondKind k) {
     if(a==b||!atom(a)||!atom(b)) throw std::runtime_error("Invalid bond endpoints");
     for(const auto& v:bonds)if((v.a==a&&v.b==b)||(v.a==b&&v.b==a))return v.id;
-    int id=nextId++; bonds.push_back({id,a,b,k});return id;
+    int id=nextId++; bonds.push_back({id,a,b,k});bonds.back().drawingScale=(atom(a)->drawingScale+atom(b)->drawingScale)/2;return id;
 }
 int Document::atomAt(Vec p,double t) const { int id=0;for(const auto& a:atoms) { double d=(a.p-p).length();if(d<t){t=d;id=a.id;}}return id; }
 int Document::bondAt(Vec p,double t) const {
@@ -155,14 +156,14 @@ void setAtomElement(Document& d,int id,int element){
     for(auto& edge:affected)adjustTerminalBond(d,*d.bond(edge.first),edge.second);
 }
 double defaultBondLength(const Document& d,int id,BondKind kind,int element){
-    auto* atom=d.atom(id);double length=d.style.bondLength*bondLengthScale(atom?atom->element:6,element,kind);
+    auto* atom=d.atom(id);double scale=atom?atom->drawingScale:1;double length=d.style.bondLength*scale*bondLengthScale(atom?atom->element:6,element,kind);
     if(kind!=BondKind::Single||element!=6||!atom||atom->element!=6)return length;
     std::set<int> path{id};std::function<bool(int,int,int)> walk=[&](int at,int depth,int unsaturated){
         for(auto& b:d.bonds){int next=b.a==at?b.b:b.b==at?b.a:0;if(!next||d.atom(next)->element!=6)continue;int count=unsaturated+(b.kind==BondKind::Double||b.kind==BondKind::Aromatic);
             if(next==id){if(depth==6&&count>=3)return true;continue;}if(depth>=6||path.count(next))continue;path.insert(next);bool found=walk(next,depth+1,count);path.erase(next);if(found)return true;
         }return false;
     };
-    return d.style.bondLength*(walk(id,1,0)?benzeneConnectorScale:1.);
+    return d.style.bondLength*scale*(walk(id,1,0)?benzeneConnectorScale:1.);
 }
 std::vector<int> addOrbital(Document& d,Vec center,Vec tip,OrbitalKind kind,int phaseStyle){
     Vec axis=tip-center;double length=axis.length();
