@@ -65,5 +65,66 @@ int main(){try{
     {
         auto imported=fromCdxml("<CDXML><page id=\"1\"><fragment id=\"2\"><n id=\"3\" p=\"0 0\"/><n id=\"4\" p=\"18 9\"/><b id=\"5\" B=\"3\" E=\"4\"/></fragment></page></CDXML>");auto before=imported;check(!upgradeBondGeometry(imported),"opening an external CDXML does not silently normalize bond geometry");rigid(before,imported);
     }
+    {
+        Document d;auto ids=addBranchArrows(d,{0,0},180,120,4);
+        check(ids.size()==5&&d.objects.size()==5&&d.groups.size()==1,"four arrows share exactly one grouped spine");
+        for(size_t i=1;i<d.objects.size();i++){auto& o=d.objects[i];check(o.head==1&&o.points[0].x==0&&o.points[1].x==120,"every branch starts on the same vertical line");}
+        auto original=d;d.translate(ids,{40,20});
+        for(size_t i=0;i<d.objects.size();i++)check((d.objects[i].points[0]-original.objects[i].points[0]-Vec{40,20}).length()<1e-8,"fork moves as one group");
+        for(auto saved:{fromNative(toNative(d)),fromCdxml(toCdxml(d))})check(saved.groups.size()==1&&saved.objects.size()==5,"standalone fork survives native and CDXML");
+        auto svg=toSvg(makeScene(d));check(svg.find("<polygon")!=std::string::npos,"fork arrowheads export as vector geometry");
+        auto before=toNative(d);bool rejected=false;try{addBranchArrows(d,{0,0},100,100,1);}catch(...){rejected=true;}
+        check(rejected&&toNative(d)==before,"invalid branch count leaves document untouched");
+        Document existing;Object stem;stem.id=existing.nextId++;stem.points={{10,20},{10,220}};stem.color="#cc0000";existing.objects.push_back(stem);
+        addBranchArrows(existing,{10,20},200,100,3,true,stem.id);
+        check(existing.objects.size()==4&&existing.objects[1].points.back().x==-90&&existing.objects[1].color=="#cc0000","selected spine is reused with leftwards arrows and its color");
+    }
+    {
+        Document d;std::vector<std::vector<int>> molecules;
+        for(Vec at:std::vector<Vec>{{100,0},{150,0},{340,0},{100,200},{340,200},{100,400}}){int a=d.addAtom(at,6),b=d.addAtom(at+Vec{15,10},8);d.addBond(a,b);molecules.push_back({a,b});}
+        // Two disconnected species form the first state, separated from the next by an arrow.
+        arrow(d,{200,0},{300,0});arrow(d,{160,200},{300,200});
+        Object stem;stem.id=d.nextId++;stem.points={{0,0},{0,400}};d.objects.push_back(stem);
+        arrow(d,{0,0},{70,0});arrow(d,{0,200},{70,200});arrow(d,{0,400},{70,400});
+        text(d,{240,-30},"CoIII reaction");d.objects.back().fontSize=10;
+        auto before=d;int owner=arrangeImportedMechanism(d);auto& r=d.reactions[0];
+        check(r.slots.size()==5,"two disconnected molecules between reaction arrows become one state");
+        check(r.slots[0].members.size()==4&&r.slots[0].members[0]==molecules[0][0],"compound state retains both molecular fragments");
+        int external=0;for(auto& link:r.links)external+=link.from==-1;
+        check(external==3&&r.links.size()==5,"three-way external fork is retained without invented reactant structures");
+        check(r.captionFontSize==10,"import keeps the source caption font size");
+        check(r.above[0]=="Co^{III} reaction","imported reaction captions normalize oxidation numbers");
+        auto picture=makeScene(d);int spines=0;
+        for(auto& item:picture.items)if(item.owner==owner&&item.type==Primitive::Line&&item.reactionArrow==-1&&item.points.size()==2&&std::abs(item.points[0].x-item.points[1].x)<.01&&std::abs(item.points[0].y-item.points[1].y)>100)spines++;
+        check(spines==1,"external fork renders one continuous vertical spine");
+        for(auto reopened:{fromNative(toNative(d)),fromCdxml(toCdxml(d))}){
+            int n=0;for(auto& link:reopened.reactions[0].links)n+=link.from==-1;
+            check(n==3&&reopened.reactions[0].slots[0].members.size()==4,"external fork and compound frames roundtrip");
+        }
+        check(d.groups.size()==1,"disconnected state is grouped for selection and transport");
+        for(auto& b:before.bonds)check(((before.atom(b.a)->p-before.atom(b.b)->p)-(d.atom(b.a)->p-d.atom(b.b)->p)).length()<1e-7,"default import preserves molecular geometry");
+        auto members=r.slots[0].members;auto first=d.atom(members[0])->p,second=d.atom(members[2])->p;
+        transformStructures(d,members,90);check(std::abs((d.atom(members[2])->p-d.atom(members[0])->p).length()-(second-first).length())<1e-7,"compound state rotates rigidly as one unit");
+    }
+    {
+        Document d;
+        for(Vec at:std::vector<Vec>{{-100,0},{280,0},{280,250},{280,500}}){int a=d.addAtom(at),b=d.addAtom(at+Vec{20,10},8);d.addBond(a,b);}
+        Object stem;stem.id=d.nextId++;stem.points={{0,0},{0,500}};d.objects.push_back(stem);
+        for(double y:{0.,250.,500.})arrow(d,{0,y},{240,y});
+        arrangeImportedMechanism(d);auto& r=d.reactions[0];
+        check(r.links.size()==3&&std::all_of(r.links.begin(),r.links.end(),[](const MechanismLink& link){return link.from==0;}),"all three spine branches inherit the same upstream reactant even far below it");
+        auto first=mechanismLinkPath(r,1,d.style),second=mechanismLinkPath(r,2,d.style);
+        check(first.size()==4&&second.size()==4&&first[1].x==second[1].x,"internal multiway branches share one fixed vertical spine");
+    }
+    {
+        Document d;int a=d.addAtom({0,0},27);d.atom(a)->label="LCoIII";
+        d.atom(a)->labelRuns={{"LCo","#111111","Arial",12,0},{"I","#ff0000","Arial",12,0},{"II","#0000ff","Arial",12,0}};
+        int label=text(d,{0,30},"FeII");d.objects.back().runs={{"FeII","#22aa55","Arial",14,1}};
+        normalizeChemicalLabels(d);
+        check(d.atom(a)->label=="LCo^{III}"&&d.atom(a)->labelRuns[1].face==64&&d.atom(a)->labelRuns[1].color=="#ff0000"&&d.atom(a)->labelRuns[2].color=="#0000ff","split imported atom runs normalize Roman numerals without losing colors");
+        check(d.objects.back().text=="Fe^{II}"&&(d.objects.back().runs.back().face&64)&&d.objects.back().runs.back().size<14,"free text oxidation state gains a smaller superscript");
+        auto saved=toNative(d);normalizeChemicalLabels(d);check(toNative(d)==saved,"chemical label normalization is idempotent");
+        for(auto reopened:{fromNative(saved),fromCdxml(toCdxml(d))})check((reopened.atom(a)->labelRuns.back().face&64)!=0,"oxidation scripts survive output and reopen");
+    }
     std::cout<<"Mechanism editing regressions passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

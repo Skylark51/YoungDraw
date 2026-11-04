@@ -53,6 +53,47 @@ int collapsePhenyl(Document& d,const std::vector<int>& selection){
         eraseExact(d,removed);auto* a=d.atom(attachment);a->label="Ph";a->labelRuns.clear();a->explicitH=0;count++;
     }return count;
 }
+void normalizeChemicalLabels(Document& d,const std::vector<int>& selection){
+    auto normalize=[](std::string& text,std::vector<TextRun>& runs){
+        if(runs.empty()){text=chemicalScripts(text);return;}
+        std::string raw;for(auto& run:runs)raw+=run.text;
+        auto formatted=chemicalScripts(raw);if(formatted==raw)return;
+        // Map generated superscripts back onto the original colored/font runs, even
+        // when a metal symbol and its Roman numeral were split across CDXML runs.
+        std::vector<bool> super;std::string visible;bool script=false;
+        for(size_t i=0;i<formatted.size();){
+            if(formatted.compare(i,2,"^{")==0){script=true;i+=2;continue;}
+            if(script&&formatted[i]=='}'){script=false;i++;continue;}
+            visible+=formatted[i++];super.push_back(script);
+        }
+        if(visible!=raw)return;
+        std::vector<TextRun> result;size_t offset=0;
+        for(auto run:runs){size_t start=0;while(start<run.text.size()){
+            bool elevated=super[offset+start];size_t end=start+1;
+            while(end<run.text.size()&&super[offset+end]==elevated)end++;
+            auto part=run;part.text=run.text.substr(start,end-start);
+            if(elevated&&(part.face&96)!=64){part.face=(part.face&~96)|64;part.size*=.7;}
+            result.push_back(part);start=end;
+        }offset+=run.text.size();}
+        runs=std::move(result);text=formatted;
+    };
+    auto ids=selection.empty()?d.allIds():d.subset(selection).allIds();
+    for(auto& a:d.atoms)if(has(ids,a.id))normalize(a.label,a.labelRuns);
+    for(auto& o:d.objects)if(o.kind==ObjectKind::Text&&has(ids,o.id))normalize(o.text,o.runs);
+}
+std::vector<int> addBranchArrows(Document& d,Vec top,double height,double length,size_t count,bool left,int stemId){
+    if(count<2||count>20||!std::isfinite(height)||!std::isfinite(length)||height<10||height>10000||length<10||length>10000||!std::isfinite(top.x)||!std::isfinite(top.y))throw std::runtime_error("분기는 2~20개, 세로선 높이와 화살표 길이는 10~10000 pt로 지정하세요.");
+    Object* existing=nullptr;
+    if(stemId){for(auto& o:d.objects)if(o.id==stemId)existing=&o;
+        if(!existing||d.isLocked(stemId)||existing->kind!=ObjectKind::Line||existing->points.size()!=2||std::abs(existing->points[0].x-existing->points[1].x)>.01)throw std::runtime_error("분기 기준으로 사용할 세로 직선을 선택하세요.");
+    }
+    std::vector<int> ids;double width=d.style.lineWidth;std::string color="#000000";
+    if(existing){existing->head=0;existing->points={top,top+Vec{0,height}};width=existing->width;color=existing->color;ids.push_back(existing->id);}
+    else{Object stem;stem.id=d.nextId++;stem.points={top,top+Vec{0,height}};stem.width=width;d.objects.push_back(stem);ids.push_back(stem.id);}
+    for(size_t i=0;i<count;i++){Object arrow;arrow.id=d.nextId++;Vec start=top+Vec{0,height*i/(count-1)};arrow.points={start,start+Vec{left?-length:length,0}};arrow.head=1;arrow.width=width;arrow.color=color;d.objects.push_back(arrow);ids.push_back(arrow.id);}
+    // Normal document grouping keeps the entire fork movable and exportable.
+    Group group;group.id=d.nextId++;group.members=ids;d.groups.push_back(group);return ids;
+}
 void addMechanismBranch(Reaction& r,size_t source){
     if(r.cyclic||r.vertical)throw std::runtime_error("분기는 가로 메커니즘에서 추가하세요.");
     if(source>=r.slots.size()||r.slots.size()>=30)throw std::runtime_error("분기 시작 단계와 최대 30칸을 확인하세요.");
@@ -63,29 +104,85 @@ void addMechanismBranch(Reaction& r,size_t source){
     r.links.push_back({int(source),int(r.slots.size()),{}});r.slotGrid.push_back(p);r.slots.push_back({"",{},""});r.above.push_back("");r.below.push_back("");
 }
 static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& selection){
+    normalizeChemicalLabels(d,selection);
     struct Part{std::vector<int> ids;Rect box;Vec at;};std::vector<Part> parts,notations;std::set<int> seen,owned;
     for(auto& r:d.reactions){for(auto& s:r.slots)owned.insert(s.members.begin(),s.members.end());for(auto& l:r.links)owned.insert(l.members.begin(),l.members.end());}for(auto& p:d.plots)for(auto& s:p.states){owned.insert(s.above.begin(),s.above.end());owned.insert(s.below.begin(),s.below.end());}
     auto selected=[&](const std::vector<int>& ids){return selection.empty()||std::any_of(ids.begin(),ids.end(),[&](int id){return has(selection,id);})||std::any_of(d.bonds.begin(),d.bonds.end(),[&](const Bond& b){return has(selection,b.id)&&(has(ids,b.a)||has(ids,b.b));});};
-    for(auto& a:d.atoms)if(!seen.count(a.id)&&!owned.count(a.id)){auto ids=d.component(a.id);seen.insert(ids.begin(),ids.end());if(!selected(ids))continue;auto b=bounds(d,ids);Part p{ids,b,center(b)};if(ids.size()==1)notations.push_back(p);else parts.push_back(p);}
+    for(auto& a:d.atoms)if(!seen.count(a.id)&&!owned.count(a.id)){auto ids=d.component(a.id);seen.insert(ids.begin(),ids.end());if(!selected(ids))continue;auto b=bounds(d,ids);Part p{ids,b,center(b)};if(ids.size()==1&&a.element==1)notations.push_back(p);else parts.push_back(p);}
     for(auto& o:d.objects)if(o.kind==ObjectKind::Image&&!owned.count(o.id)&&!d.isLocked(o.id)&&selected({o.id})){auto b=bounds(d,{o.id});parts.push_back({{o.id},b,center(b)});}
+    std::vector<const Object*> arrows,stems;
+    for(auto& o:d.objects)if(o.kind==ObjectKind::Line&&o.points.size()>=2&&!owned.count(o.id)&&selected({o.id})){
+        if(o.head)arrows.push_back(&o);
+        else if(std::abs(o.points.front().x-o.points.back().x)<.1)stems.push_back(&o);
+    }
+    // A state may contain disconnected molecules/ions. Merge nearby components
+    // only inside the same arrow-delimited region; never across a reaction arrow.
+    auto separated=[&](const Part& a,const Part& b){
+        for(auto* arrow:arrows){Vec start=arrow->points.front(),end=arrow->points.back();
+            double low=std::min(a.at.x,b.at.x),high=std::max(a.at.x,b.at.x);
+            double mid=(start.x+end.x)/2;
+            if(mid>low&&mid<high&&std::abs(start.x-end.x)>std::abs(start.y-end.y)&&
+                std::abs((start.y+end.y)/2-(a.at.y+b.at.y)/2)<std::max({25.,a.box.h,b.box.h}))return true;
+            double midY=(start.y+end.y)/2;
+            if(midY>std::min(a.at.y,b.at.y)&&midY<std::max(a.at.y,b.at.y)&&std::abs(start.y-end.y)>std::abs(start.x-end.x)&&
+                std::abs((start.x+end.x)/2-(a.at.x+b.at.x)/2)<std::max({25.,a.box.w,b.box.w}))return true;
+        }return false;
+    };
+    bool merged=true;while(merged){merged=false;
+        for(size_t i=0;i<parts.size()&&!merged;i++)for(size_t j=i+1;j<parts.size();j++){
+            auto& a=parts[i];auto& b=parts[j];
+            double gap=std::max({a.box.x-b.box.x-b.box.w,b.box.x-a.box.x-a.box.w,0.});
+            bool grouped=false;for(auto& group:d.groups){
+                bool first=std::any_of(a.ids.begin(),a.ids.end(),[&](int id){return has(group.members,id);});
+                bool second=std::any_of(b.ids.begin(),b.ids.end(),[&](int id){return has(group.members,id);});
+                bool hasArrow=std::any_of(arrows.begin(),arrows.end(),[&](const Object* o){return has(group.members,o->id);});
+                if(first&&second&&!hasArrow){grouped=true;break;}
+            }
+            if((!grouped&&(gap>std::max(70.,d.style.bondLength*3)||std::abs(a.at.y-b.at.y)>std::max(25.,std::min(a.box.h,b.box.h)*.7)))||separated(a,b))continue;
+            a.ids.insert(a.ids.end(),b.ids.begin(),b.ids.end());
+            double right=std::max(a.box.x+a.box.w,b.box.x+b.box.w),bottom=std::max(a.box.y+a.box.h,b.box.y+b.box.h);
+            a.box.x=std::min(a.box.x,b.box.x);a.box.y=std::min(a.box.y,b.box.y);a.box.w=right-a.box.x;a.box.h=bottom-a.box.y;a.at=center(a.box);
+            parts.erase(parts.begin()+j);merged=true;break;
+        }
+    }
     if(parts.size()<2||parts.size()>30)throw std::runtime_error("정리할 구조 2~30개와 반응 화살표·텍스트를 선택하세요.");
     // Row clustering retains the drawn rows; no chemical coordinate is rescaled.
     std::sort(parts.begin(),parts.end(),[](const Part& a,const Part& b){return a.at.y<b.at.y;});
     std::vector<std::vector<Part>> rows;for(auto p:parts){if(rows.empty()||std::abs(p.at.y-rows.back().front().at.y)>std::max(40.,p.box.h*.6))rows.push_back({});rows.back().push_back(p);}parts.clear();
     Reaction r;r.id=d.nextId++;r.unit.clear();
+    std::vector<double> fonts;for(auto& o:d.objects)if(o.kind==ObjectKind::Text&&selected({o.id})&&!owned.count(o.id)&&o.fontSize>0)fonts.push_back(o.fontSize);
+    if(!fonts.empty()){std::sort(fonts.begin(),fonts.end());r.captionFontSize=std::clamp(fonts[fonts.size()/2],6.,48.);r.rowGap=std::max(30.,r.captionFontSize*4);}
+
     for(size_t y=0;y<rows.size();y++){auto& row=rows[y];std::sort(row.begin(),row.end(),[](const Part& a,const Part& b){return a.at.x<b.at.x;});for(auto p:row){parts.push_back(p);}}
     r.p=parts.front().at;
     // Columns are clustered independently of rows so branches share a column.
     std::vector<double> columns;for(auto& p:parts)columns.push_back(p.at.x);std::sort(columns.begin(),columns.end());std::vector<double> xs;for(double x:columns)if(xs.empty()||x-xs.back()>std::max(40.,d.style.bondLength*2))xs.push_back(x);
     size_t k=0;for(size_t y=0;y<rows.size();y++)for(size_t j=0;j<rows[y].size();j++,k++){size_t col=0;double best=1e30;for(size_t c=0;c<xs.size();c++)if(std::abs(parts[k].at.x-xs[c])<best){best=std::abs(parts[k].at.x-xs[c]);col=c;}r.slotGrid.push_back({double(col),double(y)});r.slots.push_back({"",parts[k].ids,""});}
-    std::vector<int> consumed;std::vector<Vec> mids;std::vector<const Object*> arrows;
-    for(auto& o:d.objects)if(o.kind==ObjectKind::Line&&o.head&&o.points.size()>=2&&!owned.count(o.id)&&selected({o.id}))arrows.push_back(&o);
+    std::vector<int> consumed;std::vector<Vec> mids;
     auto nearest=[&](Vec point){size_t best=0;double dist=1e30;for(size_t i=0;i<parts.size();i++){auto b=parts[i].box;double dx=std::max({b.x-point.x,0.,point.x-b.x-b.w}),dy=std::max({b.y-point.y,0.,point.y-b.y-b.h});double v=std::hypot(dx,dy);if(v<dist){dist=v;best=i;}}return best;};
-    for(auto* arrow:arrows){size_t a=nearest(arrow->points.front()),b=nearest(arrow->points.back());if(a==b)continue;r.links.push_back({int(a),int(b),{}});mids.push_back((arrow->points.front()+arrow->points.back())*.5);consumed.push_back(arrow->id);auto mark=arrow->cross;mark.index=int(r.links.size())-1;if(mark.enabled)r.crosses.push_back(mark);}
+    auto onStem=[](Vec p,const Object& stem){auto a=stem.points.front(),b=stem.points.back();return std::abs(p.x-a.x)<3&&p.y>=std::min(a.y,b.y)-3&&p.y<=std::max(a.y,b.y)+3;};
+    for(auto* arrow:arrows){int a=int(nearest(arrow->points.front())),b=int(nearest(arrow->points.back()));
+        for(auto* stem:stems)if(onStem(arrow->points.front(),*stem)){
+            int nearestSource=int(nearest(arrow->points.front()));a=nearestSource!=b?nearestSource:-1;
+            // A horizontal parent arrow crossing this spine supplies the source state.
+            for(auto* parent:arrows)if(parent!=arrow){
+                if(onStem(parent->points.front(),*stem)){
+                    int source=int(nearest(parent->points.front())),target=int(nearest(parent->points.back()));
+                    if(source!=target){a=source;break;}continue;
+                }
+                auto start=parent->points.front(),end=parent->points.back();double x=stem->points.front().x;
+                if(std::abs(start.y-end.y)<3&&x>=std::min(start.x,end.x)&&x<=std::max(start.x,end.x)&&
+                    start.y>=std::min(stem->points.front().y,stem->points.back().y)-3&&start.y<=std::max(stem->points.front().y,stem->points.back().y)+3){a=int(nearest(start));break;}
+            }
+            if(!has(consumed,stem->id))consumed.push_back(stem->id);break;
+        }
+        if(a==b)continue;r.links.push_back({a,b,{}});mids.push_back((arrow->points[arrow->points.size()-2]+arrow->points.back())*.5);consumed.push_back(arrow->id);auto mark=arrow->cross;mark.index=int(r.links.size())-1;if(mark.enabled)r.crosses.push_back(mark);
+    }
     if(r.links.empty())throw std::runtime_error("구조 사이 반응 화살표를 찾지 못했습니다. 구조와 화살표를 함께 선택하세요.");
     r.above.resize(r.links.size());r.below.resize(r.links.size());
     static const std::regex energy(R"(^\s*(?:[-+]?\d+(?:\.\d+)?\*?|\?(?:\.\?)?)(?:\s*/\s*(?:[-+]?\d+(?:\.\d+)?\*?|\?(?:\.\?)?))*\s*$)");
     for(auto& o:d.objects)if(!o.points.empty()&&!owned.count(o.id)&&selected({o.id})&&!has(consumed,o.id)){
+        if(o.kind==ObjectKind::Text&&o.text=="+"){r.slots[nearest(o.points[0])].members.push_back(o.id);continue;}
         if(o.kind==ObjectKind::Text){Vec p=center(bounds(d,{o.id}));size_t state=nearest(p),edge=0;double ds=(p-parts[state].at).length(),de=1e30;for(size_t e=0;e<mids.size();e++){double v=(p-mids[e]).length();if(v<de){de=v;edge=e;}}if(std::min(ds,de)>std::max(180.,d.style.bondLength*6))continue;
             bool isEnergy=std::regex_match(o.text,energy);if(!isEnergy&&!o.text.empty()&&(o.text.front()=='+'||o.text.front()=='-')&&de<ds){r.links[edge].members.push_back(o.id);continue;}std::string& dest=de<ds?(isEnergy?r.below[edge]:r.above[edge]):(isEnergy?r.slots[state].energy:r.slots[state].label);
             // Ambiguous multiple energy rows remain visible instead of being discarded.
@@ -97,7 +194,12 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
     // Dissolve only grouping that crosses frame boundaries; per-molecule groups survive.
     std::map<int,int> frame;for(size_t i=0;i<r.slots.size();i++)for(int id:r.slots[i].members)frame[id]=int(i);for(size_t i=0;i<r.links.size();i++)for(int id:r.links[i].members)frame[id]=int(r.slots.size()+i);
     d.groups.erase(std::remove_if(d.groups.begin(),d.groups.end(),[&](const Group& g){std::set<int> frames;for(int id:g.members)if(frame.count(id))frames.insert(frame[id]);return frames.size()>1;}),d.groups.end());
-    eraseExact(d,consumed);d.reactions.push_back(r);optimizeMechanism(d,{r.id},false);return r.id;
+    eraseExact(d,consumed);
+    for(auto& slot:r.slots){std::set<int> covered;size_t components=0;
+        for(int id:slot.members)if(d.atom(id)&&!covered.count(id)){auto ids=d.component(id);covered.insert(ids.begin(),ids.end());components++;}
+        if(components>1){Group group;group.id=d.nextId++;group.members=slot.members;d.groups.push_back(group);}
+    }
+    d.reactions.push_back(r);optimizeMechanism(d,{r.id},false);return r.id;
 }
 int arrangeImportedMechanism(Document& d,const std::vector<int>& selection){Document candidate=d;int id=arrangeImportedMechanismImpl(candidate,selection);d=std::move(candidate);return id;}
 
