@@ -82,4 +82,17 @@ std::vector<Primitive> arrowPrimitives(const Object& o){
     Primitive head;head.owner=o.id;head.type=Primitive::Polygon;head.color=o.color;head.filled=true;head.points={tip,base+normal*halfWidth,base-normal*halfWidth};
     return {shaft,head};
 }
+void appendArrowCross(std::vector<Primitive>& items,const std::vector<Primitive>& shaft,const ArrowCross& mark,int owner){
+    if(!mark.enabled)return;
+    std::vector<std::pair<Vec,Vec>> segments;double length=0;
+    for(auto& p:shaft){if(p.type!=Primitive::Line&&p.type!=Primitive::Bezier)continue;
+        std::vector<Vec> path=p.points;
+        if(p.type==Primitive::Bezier){path.clear();for(size_t i=0;i+3<p.points.size();i+=3){Cubic c{p.points[i],p.points[i+1],p.points[i+2],p.points[i+3]};for(int j=0;j<=64;j++)path.push_back(at(c,j/64.));}}
+        for(size_t i=1;i<path.size();i++){segments.push_back({path[i-1],path[i]});length+=(path[i]-path[i-1]).length();}}
+    if(length<1e-6)return;double remaining=length/2;Vec mid;
+    for(auto segment:segments){double len=(segment.second-segment.first).length();if(remaining<=len){mid=segment.first+(segment.second-segment.first)*(remaining/std::max(len,1e-9));break;}remaining-=len;}
+    Primitive p;p.owner=owner;p.width=mark.width;p.color=mark.color;double h=mark.size/2;
+    p.points={mid+Vec{-h,-h},mid+Vec{h,h}};items.push_back(p);p.points={mid+Vec{-h,h},mid+Vec{h,-h}};items.push_back(p);
+}
+
 }

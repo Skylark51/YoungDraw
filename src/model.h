@@ -27,6 +27,8 @@ struct TextRun { std::string text,color="#000000",font="Arial"; double size=10; 
 struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,radical=0; std::string label; bool protect=false; std::vector<TextRun> labelRuns; Vec labelOffset; std::string color="#000000"; Vec annotationOffset; bool annotationManual=false; };
 struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; std::string customOrder,customDisplay; std::string color="#000000"; };
 enum class ObjectKind { Line, Curve, Text, Ellipse, Rectangle, Image };
+struct ArrowCross { int index=-1; bool enabled=false; double width=4,size=14; std::string color="#ff0000"; };
+struct MechanismLink { int from=0,to=1; std::vector<int> members; };
 struct Object {
     int id=0; ObjectKind kind=ObjectKind::Line; std::vector<Vec> points;
     std::string text,color="#000000",imageHex,mime="image/png",font="Arial";
@@ -35,6 +37,7 @@ struct Object {
     int sourceAtom=0,targetAtom=0; bool autoRoute=false;
     int sourceBond=0,targetBond=0; double sourceBondT=.5,targetBondT=.5;
     bool centerText=true;
+    ArrowCross cross;
 };
 struct Slot { std::string label; std::vector<int> members; std::string energy; bool startsRow=false; };
 struct CaptionColor { int role=0,index=-1; std::string color; };
@@ -48,6 +51,9 @@ struct Reaction {
     std::vector<CaptionColor> captionColors;
     int wrapColumns=0; // 0: one row; positive: alternating left/right rows (ignored for cycles).
     bool vertical=false; // Straight mechanism runs from top to bottom.
+    std::vector<MechanismLink> links; // Explicit reaction graph; empty uses sequential connectors.
+    std::vector<Vec> slotGrid; // Frame positions in column/row units.
+    std::vector<ArrowCross> crosses;
     double rowGap=100; // Minimum clear vertical space between structure boxes.
 };
 struct EnergyState { std::string label; double energy=0; std::vector<int> above,below; int marker=-1; };
@@ -115,6 +121,10 @@ void appendMechanismStage(Reaction& r,bool below=false);
 Vec plotAnchor(const EnergyPlot& p,size_t index,bool above);
 void optimizeMechanism(Document& d,const std::vector<int>& selection={},bool cyclic=false);
 void fillSlot(Document& d,const Document& fragment,int container,size_t index,bool above=false);
+int collapsePhenyl(Document& d,const std::vector<int>& selection);
+int arrangeImportedMechanism(Document& d,const std::vector<int>& selection={});
+void addMechanismBranch(Reaction& r,size_t source);
+bool atomLabelHasCharge(const Atom& a);
 Document chairTemplate();
 Document mechanismDemo();
 Document catalyticCycleDemo();
