@@ -22,6 +22,7 @@ struct PlotSnapPoint { Vec p; double percent=0; int state=0,path=0,edge=0; }; //
 struct Scene { std::map<int,double> plotBaselines; std::map<int,std::vector<PlotSnapPoint>> plotSnapPoints; std::vector<Primitive> items; Rect bounds; std::map<int,Rect> objectBounds; std::map<int,std::vector<Vec>> arrowPaths; };
 std::vector<Vec> routeArrow(const Document& d,const Object& arrow,const std::map<int,Rect>& atomBoxes={});
 std::vector<Primitive> arrowPrimitives(const Object& arrow);
+void appendArrowCross(std::vector<Primitive>& items,const std::vector<Primitive>& shaft,const ArrowCross& mark,int owner);
 Scene makeScene(const Document& d, const Measure& measure={});
 struct PublicationReport {
     double widthPt=0,heightPt=0,scale=1;

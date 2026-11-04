@@ -1,6 +1,8 @@
 #pragma once
 #include "model.h"
 namespace yd {
+std::vector<Vec> mechanismLinkPath(const Reaction&,size_t,const Style&);
+Vec mechanismLinkCaption(const Reaction&,size_t,const Style&);
 struct SpinEnergy {double spin=0;std::string value;};
 double mechanismCycleNodeRadius(const Reaction&,const Style&);
 Vec mechanismCycleTransitionPosition(const Reaction&,size_t,const Style&,double radius);

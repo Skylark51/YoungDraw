@@ -52,6 +52,7 @@ void key(WPARAM k){
         return;
     }
     if(ctrl){
+        if(shift&&k=='P'){command(166);return;}
         if(shift&&(k=='H'||k=='V')){command(k=='H'?160:161);return;}
         if(shift&&k=='X'){command(125);return;}
         if(shift&&(k=='C'||k=='L')){auto before=doc;for(auto& o:doc.objects)if(contains(selection,o.id)&&o.kind==ObjectKind::Text)o.centerText=k=='C';if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}redraw();return;}

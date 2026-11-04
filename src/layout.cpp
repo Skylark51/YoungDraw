@@ -16,7 +16,7 @@ std::vector<int> Document::component(int id) const {
 }
 std::vector<int> Document::allIds() const {std::vector<int> ids;for(auto& a:atoms)ids.push_back(a.id);for(auto& b:bonds)ids.push_back(b.id);for(auto& o:objects)ids.push_back(o.id);for(auto& r:reactions)ids.push_back(r.id);for(auto& p:plots)ids.push_back(p.id);return ids;}
 static void expand(const Document& d,std::set<int>& ids){bool more=true;while(more){size_t n=ids.size();for(auto& g:d.groups)if(ids.count(g.id)||std::any_of(g.members.begin(),g.members.end(),[&](int id){return ids.count(id)>0;})){ids.insert(g.id);ids.insert(g.members.begin(),g.members.end());}
-    for(auto& r:d.reactions)if(ids.count(r.id))for(auto& s:r.slots)ids.insert(s.members.begin(),s.members.end());
+    for(auto& r:d.reactions)if(ids.count(r.id)){for(auto& s:r.slots)ids.insert(s.members.begin(),s.members.end());for(auto& l:r.links)ids.insert(l.members.begin(),l.members.end());}
     for(auto& p:d.plots)if(ids.count(p.id))for(auto& s:p.states){ids.insert(s.above.begin(),s.above.end());ids.insert(s.below.begin(),s.below.end());}more=ids.size()!=n;}}
 static std::set<int> editableExpansion(const Document& d,const std::vector<int>& selection){
     std::set<int> ids;for(int id:selection)if(!d.isLocked(id))ids.insert(id);
@@ -120,7 +120,7 @@ void Document::erase(const std::vector<int>& selection){auto ids=editableExpansi
     auto remove=[&](auto& entries){entries.erase(std::remove_if(entries.begin(),entries.end(),[&](const auto& e){return ids.count(e.id)>0;}),entries.end());};
     remove(atoms);remove(objects);remove(reactions);remove(plots);remove(groups);
     auto prune=[&](std::vector<int>& members){members.erase(std::remove_if(members.begin(),members.end(),[&](int id){return ids.count(id)>0;}),members.end());};
-    for(auto& r:reactions)for(auto& s:r.slots)prune(s.members);for(auto& p:plots)for(auto& s:p.states){prune(s.above);prune(s.below);}for(auto& g:groups)prune(g.members);
+    for(auto& r:reactions){for(auto& s:r.slots)prune(s.members);for(auto& l:r.links)prune(l.members);}for(auto& p:plots)for(auto& s:p.states){prune(s.above);prune(s.below);}for(auto& g:groups)prune(g.members);
 }
 Document Document::subset(const std::vector<int>& selection) const {
     Document out;out.style=style;auto ids=editableExpansion(*this,selection);
@@ -138,7 +138,7 @@ void Document::append(const Document& other,Vec delta){
     for(auto a:other.atoms){a.id=mapping[a.id];a.p=a.p+delta;atoms.push_back(a);}
     for(auto b:other.bonds){b.id=mapping[b.id];b.a=mapping[b.a];b.b=mapping[b.b];bonds.push_back(b);}
     for(auto o:other.objects){o.sourceAtom=mapping.count(o.sourceAtom)?mapping[o.sourceAtom]:0;o.targetAtom=mapping.count(o.targetAtom)?mapping[o.targetAtom]:0;o.sourceBond=mapping.count(o.sourceBond)?mapping[o.sourceBond]:0;o.targetBond=mapping.count(o.targetBond)?mapping[o.targetBond]:0;o.id=mapping[o.id];for(auto& p:o.points)p=p+delta;objects.push_back(o);}
-    for(auto r:other.reactions){r.id=mapping[r.id];r.p=r.p+delta;for(auto& s:r.slots)remap(s.members);reactions.push_back(r);}
+    for(auto r:other.reactions){r.id=mapping[r.id];r.p=r.p+delta;for(auto& s:r.slots)remap(s.members);for(auto& l:r.links)remap(l.members);reactions.push_back(r);}
     for(auto p:other.plots){p.id=mapping[p.id];p.p=p.p+delta;for(auto& s:p.states){remap(s.above);remap(s.below);}plots.push_back(p);}
     for(auto g:other.groups){g.id=mapping[g.id];remap(g.members);groups.push_back(g);}
 }
@@ -166,10 +166,12 @@ void appendMechanismStage(Reaction& r,bool below){
         // Preserve existing automatic row breaks before switching to manual rows.
         if(r.wrapColumns>0){for(size_t i=1;i<r.slots.size();i++)r.slots[i].startsRow=i%size_t(r.wrapColumns)==0;r.wrapColumns=0;}
     }
+    if(!r.links.empty()){r.links.push_back({int(r.slots.size())-1,int(r.slots.size())});Vec last=r.slotGrid.back();r.slotGrid.push_back(last+Vec{1,below?1.:0.});}
     r.slots.push_back({"Stage "+std::to_string(r.slots.size()+1),{},"",below&&!r.cyclic&&!r.vertical});
     r.above.push_back("Next step");r.below.push_back("");
 }
 Vec reactionSlot(const Reaction& r,size_t i){
+    if(i<r.slotGrid.size())return r.p+Vec{r.slotGrid[i].x*r.spacing,r.slotGrid[i].y*(r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80))};
     if(r.cyclic){double radius=r.cycleRadius>0?r.cycleRadius:mechanismCycleRadius(r,Style{});double angle=-pi/2+2*pi*i/std::max(size_t(1),r.slots.size());return r.p+Vec{std::cos(angle),std::sin(angle)}*radius;}
     if(r.vertical)return r.p+Vec{0,double(i)*r.spacing};
     size_t row=reactionRow(r,i);double col=0;
@@ -203,7 +205,7 @@ void fillSlot(Document& d,const Document& source,int container,size_t index,bool
 void optimizeMechanism(Document& d,const std::vector<int>& selection,bool cyclic){
     bool found=false;
     for(auto& r:d.reactions)if(selection.empty()||has(selection,r.id)){
-        found=true;Reaction old=r;r.cyclic=cyclic;
+        found=true;if(cyclic&&!r.links.empty())throw std::runtime_error("분기 연결을 유지하려면 가로 메커니즘 배치를 사용하세요.");Reaction old=r;r.cyclic=cyclic;
         if(cyclic){
             r.above.resize(r.slots.size());r.below.resize(r.slots.size());
             if(!old.cyclic){
@@ -218,11 +220,12 @@ void optimizeMechanism(Document& d,const std::vector<int>& selection,bool cyclic
         r.slotWidth=widest;r.slotHeight=tallest;
         // Every connector uses the longest caption's width and identical margins.
         if(r.cyclic)r.cycleRadius=mechanismCycleRadius(r,d.style);
-        r.spacing=widest+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style);
+        r.spacing=widest+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style)+(r.links.empty()?0:mechanismFontSize(r,d.style)*2);
         if(r.vertical&&!r.cyclic){
             r.spacing=tallest+mechanismCaptionHeight(r,d.style)+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style);
         }
         for(size_t i=0;i<r.slots.size();i++)if(!r.slots[i].members.empty()){auto b=makeScene(d.subset(r.slots[i].members)).bounds;d.translate(r.slots[i].members,reactionSlot(r,i)-Vec{b.x+b.w/2,b.y+b.h/2});}
+        for(size_t e=0;e<r.links.size();e++){auto& l=r.links[e];if(!l.members.empty()){auto b=makeScene(d.subset(l.members)).bounds;Vec mid=mechanismLinkCaption(r,e,d.style);d.translate(l.members,mid-Vec{0,mechanismFontSize(r,d.style)*3+b.h/2}-Vec{b.x+b.w/2,b.y+b.h/2});}}
     }
     if(found)return;
     struct Part{std::vector<int> ids;Vec center;double w,h;};std::vector<Part> parts;std::set<int> seen;
@@ -367,6 +370,7 @@ static bool publicationChelate(Document& d,const std::vector<int>& comp,const st
 }
 // Upgrade older documents once, preserving branch projections and atom identities.
 bool upgradeBondGeometry(Document& d){
+    if(!d.sourceXml.empty())return false; // Imported chemistry keeps its original coordinates.
     if(d.bondGeometryVersion>=1)return false;d.bondGeometryVersion=1;bool changed=false;std::set<int> visited;
     for(auto& atom:d.atoms){if(visited.count(atom.id))continue;auto comp=d.component(atom.id);visited.insert(comp.begin(),comp.end());auto rings=cycles(d,comp);std::set<int> aromatic;
         auto migrationTargets=bondTargets(d,rings);for(auto& b:d.bonds)if(has(comp,b.a)&&std::abs(migrationTargets[b.id]-d.style.bondLength*benzeneBondScale)<1e-8&&std::any_of(rings.begin(),rings.end(),[&](const auto& ring){return has(ring,b.a)&&has(ring,b.b);})){aromatic.insert(b.a);aromatic.insert(b.b);}
