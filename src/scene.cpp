@@ -216,11 +216,6 @@ Scene makeScene(const Document& d,const Measure& measure){
                 Vec mid=(a+b)*.5;transitionLabels(r,i,mid,-font*1.7,font*.65);
             }
         }
-        // External branches have no invented reactant frame: one shared vertical
-        // spine joins their horizontal arrow tails.
-        bool external=false;double stemX=0,top=1e30,bottom=-1e30;
-        for(size_t e=0;e<r.links.size();e++)if(r.links[e].from<0){auto path=mechanismLinkPath(r,e,d.style);external=true;stemX=path[0].x;top=std::min(top,path[0].y);bottom=std::max(bottom,path[0].y);}
-        if(external){arrowIndex=-1;arrow({stemX,top},{stemX,bottom},"#000000",std::max(1.1,font*.085),0);}
         for(size_t e=0;e<r.links.size();e++){
             arrowIndex=int(e);auto path=mechanismLinkPath(r,e,d.style);double weight=std::max(1.1,font*.085),head=std::max(1.25,font/10);
             auto draw=[&](std::vector<Vec> points,double offset){for(auto& p:points)p=p+Vec{offset,offset};for(size_t j=1;j<points.size();j++)arrow(points[j-1],points[j],"#000000",weight,j+1==points.size()?1:0,head);};

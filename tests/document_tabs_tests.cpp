@@ -13,11 +13,7 @@ static void CALLBACK driveTextPalette(HWND parent,UINT,UINT_PTR timer,DWORD){
 static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     HWND dialog=GetLastActivePopup(parent);wchar_t name[64]{};GetClassNameW(dialog,name,64);if(std::wstring(name)!=L"YoungDrawForm")return;
     KillTimer(parent,timer);formDriven=true;
-    if(formAction==11||formAction==12){
-        SetDlgItemTextW(dialog,100,L"4");previewObserved=toNative(doc)!=formBefore;
-    }else if(formAction==13||formAction==14){
-        SetDlgItemTextW(dialog,101,L"15");SetDlgItemTextW(dialog,102,L"85");previewObserved=toNative(doc)!=formBefore;
-    }else if(formAction==9||formAction==10){
+    if(formAction==9||formAction==10){
         SendDlgItemMessageW(dialog,101,CB_SETCURSEL,1,0);SendDlgItemMessageW(dialog,102,CB_SETCURSEL,2,0);
         SetDlgItemTextW(dialog,104,L"#cc2255");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==8){SetDlgItemTextW(dialog,100,L"30");
@@ -36,7 +32,7 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else{
         SetDlgItemTextW(dialog,101,L"30");previewObserved=toNative(doc)!=formBefore;
     }
-    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14)?IDCANCEL:IDOK,0);
+    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10)?IDCANCEL:IDOK,0);
 }
 int main(int argc,char** argv){
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
@@ -271,28 +267,6 @@ int main(int argc,char** argv){
             setInlineValue({a,0},"CoIII");check(doc.atom(a)->label=="Co^{III}","typed atom oxidation state is normalized");
             Object text;text.id=doc.nextId++;text.kind=ObjectKind::Text;text.points={{20,70}};doc.objects.push_back(text);setInlineValue({text.id,0},"CoIII");check(doc.objects.back().text=="Co^{III}","typed free text oxidation state is normalized");
             writePreview(L"atom-annotations.png",doc);selection.clear();hoverAtom=hoverBond=0;annotationDrag=0;
-        }
-
-        {
-            doc={};selection.clear();history.clear();formBefore=toNative(doc);formAction=12;formDriven=previewObserved=false;
-            SetTimer(hwnd,901,10,driveForm);command(220);
-            check(formDriven&&previewObserved&&toNative(doc)==formBefore,"branch arrow preview cancels without changes");
-            formAction=11;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(220);
-            check(formDriven&&doc.objects.size()==5&&doc.groups.size()==1,"branch insert dialog creates four arrows on one spine");
-            writePreview(L"shared-spine-arrows.png",doc);
-            check(history.undo(doc)&&toNative(doc)==formBefore,"branch insertion undoes as one action");
-            doc={};selection.clear();history.clear();targetContainer=0;
-            for(Vec p:std::vector<Vec>{{0,0},{240,0},{240,160}}){int a=doc.addAtom(p,27),b=doc.addAtom(p+Vec{22,14},8);doc.atom(a)->label="CoIII";doc.addBond(a,b);}
-            Object stem;stem.id=doc.nextId++;stem.points={{60,0},{60,160}};doc.objects.push_back(stem);
-            for(double y:{0.,160.}){Object arrow;arrow.id=doc.nextId++;arrow.points={{60,y},{200,y}};arrow.head=1;doc.objects.push_back(arrow);}
-            formBefore=toNative(doc);formAction=14;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(167);
-            check(formDriven&&previewObserved&&toNative(doc)==formBefore,"import arrangement preview cancels without changing original chemistry");
-            formAction=13;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(167);
-            check(formDriven&&doc.reactions.size()==1&&doc.reactions[0].links.size()==2&&doc.reactions[0].links[1].from==0,"import dialog retains a source-connected shared fork");
-            check(doc.atoms[0].label=="Co^{III}","import dialog normalizes oxidation state");
-            writePreview(L"shared-spine-arranged.png",doc);
-            check(history.undo(doc)&&toNative(doc)==formBefore,"import geometry, labels and topology undo together");
-            selection.clear();targetContainer=0;doc={};history.clear();
         }
 
         {

@@ -4,16 +4,12 @@
 #include <stdexcept>
 namespace yd {
 std::vector<Vec> mechanismLinkPath(const Reaction& r,size_t index,const Style& style){
-    auto l=r.links.at(index);Vec b=reactionSlot(r,size_t(l.to));
-    double edge=r.slotWidth/2+mechanismArrowMargin(r,style),font=mechanismFontSize(r,style);
-    if(l.from<0){
-        double x=b.x;for(auto& link:r.links)if(link.from<0)x=std::min(x,reactionSlot(r,size_t(link.to)).x);
-        x-=edge+mechanismArrowLength(r,style);b.x-=edge;return {{x,b.y},b};
-    }
-    Vec a=reactionSlot(r,size_t(l.from));double direction=b.x>=a.x?1.:-1.;a.x+=direction*edge;b.x-=direction*edge;
+    auto l=r.links.at(index);Vec a=reactionSlot(r,size_t(l.from)),b=reactionSlot(r,size_t(l.to));
+    double direction=b.x>=a.x?1.:-1.,edge=r.slotWidth/2+mechanismArrowMargin(r,style);a.x+=direction*edge;b.x-=direction*edge;
     if(std::abs(a.y-b.y)<.01)return {a,b};
-    // Every outgoing path shares a fixed spine next to its source frame.
-    double x=a.x+direction*font*.6;
+    // Fork before the caption box; its vertical stem must not cut TS energies.
+    double x=a.x+direction*mechanismFontSize(r,style)*.6;
+    if(std::abs(b.x-a.x)<mechanismFontSize(r,style))x=a.x+direction*mechanismFontSize(r,style)*2;
     return {a,{x,a.y},{x,b.y},b};
 }
 Vec mechanismLinkCaption(const Reaction& r,size_t index,const Style& style){auto path=mechanismLinkPath(r,index,style);return (path[path.size()-2]+path.back())*.5;}
