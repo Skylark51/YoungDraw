@@ -64,6 +64,16 @@ int main(){try{
     check(cycleDescription<cycleName&&cycleEnergy>cycleName+document.style.fontSize,"cyclic TS labels preserve the explanation/name/energy order and spacing");
     std::ofstream("mechanism-spin-cycle.svg")<<toSvg(cyclic);
     {
+        Document scaled;int a=scaled.addAtom({0,0}),b=scaled.addAtom({30,0},8),bond=scaled.addBond(a,b);
+        auto before=makeScene(scaled);scaleStructures(scaled,scaled.allIds(),2);
+        auto picture=makeScene(scaled);double oldStroke=0,newStroke=0,oldFont=0,newFont=0;
+        for(auto& p:before.items){if(p.owner==bond&&p.type==Primitive::Line)oldStroke=p.width;if(p.owner==b&&p.type==Primitive::Text)oldFont=std::max(oldFont,p.fontSize);}
+        for(auto& p:picture.items){if(p.owner==bond&&p.type==Primitive::Line)newStroke=p.width;if(p.owner==b&&p.type==Primitive::Text)newFont=std::max(newFont,p.fontSize);}
+        check(std::abs(newStroke-oldStroke*2)<1e-9&&std::abs(newFont-oldFont*2)<1e-9,"structure enlargement scales bond weight and atom labels together");
+        for(auto restored:{fromNative(toNative(scaled)),fromCdxml(toCdxml(scaled))})check(restored.atom(b)->drawingScale==2&&restored.bond(bond)->drawingScale==2,"per-structure visual scale survives native and CDXML saves");
+        check(toCdxml(scaled).find("LineWidth=\"4\"")!=std::string::npos,"CDXML visible bonds carry scaled line width");
+    }
+    {
         Document large;Reaction r;r.id=large.nextId++;r.slots={{"A",{}},{"C",{}},{"E",{}},{"G",{}},{"H",{}}};
         r.above={"B / Ring Opening","D / C–C bond cleavage","F / C–OH bond formation","H / 1,2-hydrogen atom transfer"};
         r.below={"?.? / 12.5 / 21.3","?.? / 13.4 / 22.5","?.? / 17.7 / 22.3","?.? / 17.7 / ?.?"};large.reactions.push_back(r);
@@ -79,7 +89,7 @@ int main(){try{
         check(font>=14&&reaction.spacing-reaction.slotWidth>=120,"inserting structures automatically reserves a readable arrow corridor");
         auto checkArrows=[&](const Document& candidate){
             auto drawing=makeScene(candidate);auto& r=candidate.reactions[0];double font=mechanismFontSize(r,candidate.style);
-            double expected=mechanismArrowLength(r,candidate.style)-4.8*std::max(1.25,font/10.);size_t count=0;
+            double expected=mechanismArrowLength(r,candidate.style)-4.8*mechanismArrowHead(r,candidate.style);size_t count=0;
             for(auto& item:drawing.items)if(item.owner==r.id){
                 if(item.type==Primitive::Line){check(std::abs((item.points.back()-item.points.front()).length()-expected)<1e-5,"every arrow has the same caption-driven length, including equilibrium arrows");count++;}
                 if(item.type==Primitive::Text&&(item.textRole==1||item.textRole==2||item.textRole==3||item.textRole==9||item.textRole==11)&&!item.text.empty())check(std::abs(item.fontSize-font)<1e-7,"upper captions, lower names, and energies share the same automatic font size");
@@ -87,9 +97,17 @@ int main(){try{
             check(count==(r.slots.size()-1)*(r.arrowType==1?2:1),"all reaction connectors are checked");
         };
         checkArrows(large);auto equilibrium=large;equilibrium.reactions[0].arrowType=1;checkArrows(equilibrium);
+        Reaction compact;compact.above={"TS / Short"};auto compactWidth=mechanismArrowLength(compact,large.style);compact.slots={{std::string(200,'W'),{}}};
+        check(mechanismArrowLength(compact,large.style)==compactWidth,"stage names do not inflate arrow corridor");
+        setMechanismTextMeasure([](const std::string& text,double size,const std::string&,int){return text.size()*size*.25;});
+        compact.above={"TS / "+std::string(40,'i')};double compactFont=mechanismFontSize(compact,large.style);
+        check(std::abs(mechanismArrowLength(compact,large.style)-compactFont*10.6)<1e-6,"arrow uses measured caption width with only modest padding");
+        setMechanismTextMeasure({});
         double oldLength=mechanismArrowLength(reaction,large.style);auto extended=large;
         extended.reactions[0].above[0]="B / Longest reaction description controls the shared arrow length";optimizeMechanism(extended,{r.id});
-        check(mechanismArrowLength(extended.reactions[0],extended.style)>oldLength,"editing one long caption lengthens every arrow together");checkArrows(extended);
+        check(mechanismArrowLength(extended.reactions[0],extended.style)>oldLength,"editing one long caption lengthens every arrow together");
+        check(mechanismArrowWeight(extended.reactions[0],extended.style)>mechanismArrowWeight(reaction,large.style),"longer arrows gain stroke weight");
+        check(mechanismArrowHead(extended.reactions[0],extended.style)>mechanismArrowHead(reaction,large.style),"arrowhead grows with longer arrow");checkArrows(extended);
         for(auto restored:{fromNative(toNative(extended)),fromCdxml(toCdxml(extended))})checkArrows(restored);
         std::ofstream("mechanism-balanced-preview.svg")<<toSvg(picture);
     }

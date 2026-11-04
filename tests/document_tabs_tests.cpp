@@ -144,7 +144,7 @@ int main(int argc,char** argv){
             auto hit=[&](int id)->RectF{for(auto& h:hits)if(h.id==id)return h.box;return {};};
             auto present=[&](int id){return hit(id).Width>0;};
             sidebarPage=0;showLayers=false;repaint();
-            check(present(127)&&present(126)&&present(140)&&!present(137)&&!present(141),"mechanism tab groups settings, arrangement and example");
+            check(present(127)&&present(126)&&present(143)&&present(144)&&present(145)&&present(146)&&present(148)&&present(149)&&!present(137)&&!present(141),"mechanism tab groups settings, arrangement and stage/connection controls");
             for(int id:{100,101,102,104,105,107,125,155,156,170,171,172,173,174,160,161,162,163,164}){
                 check(present(id)&&hit(id).Y==hit(100).Y&&hit(id).Width==44&&hit(id).GetBottom()<89,"icon toolbar fits one row above document tabs");
                 check(!helpText(id).empty(),"each toolbar icon has Korean help");
@@ -360,6 +360,44 @@ int main(int argc,char** argv){
             writePreview(L"mechanism-vertical.png",doc);
             doc.reactions[0].vertical=false;optimizeMechanism(doc,{id});writePreview(L"mechanism-readable.png",doc);
             doc={};selection.clear();history.clear();dirty=false;
+        }
+        {
+            doc=mechanismDemo();history.clear();selection={doc.reactions[0].id};targetContainer=selection[0];targetSlot=1;targetAbove=false;dirty=false;
+            const auto original=doc;const auto bytes=toNative(doc);auto originalRunner=structureEditor;
+            bool isolated=false;
+            structureEditor=[&](const Document& source)->std::optional<Document>{
+                isolated=source.reactions.empty()&&source.plots.empty()&&source.atoms.size()<doc.atoms.size();
+                check(toNative(doc)==bytes,"opening isolated editor never mutates parent");
+                auto result=source;result.atoms.front().element=9;return result;
+            };
+            editTargetStructure();check(isolated&&dirty,"structure edit receives only the selected stage");
+            auto& current=doc.reactions[0];auto edited=structureInSlot(doc,current.id,1);check(edited.atoms.front().element==9,"applying edit replaces selected structure");
+            check(current.spacing==original.reactions[0].spacing&&current.slotWidth==original.reactions[0].slotWidth,"isolated apply preserves mechanism layout");
+            for(size_t i:{size_t(0),size_t(2)})for(int id:original.reactions[0].slots[i].members)if(auto atom=original.atom(id))check(doc.atom(id)&&(doc.atom(id)->p-atom->p).length()<1e-9,"other stages keep atom identities and positions");
+            check(history.undo(doc)&&toNative(doc)==bytes,"one undo restores complete original mechanism");
+            history.clear();dirty=false;structureEditor=[](const Document&)->std::optional<Document>{return {};};editTargetStructure();check(toNative(doc)==bytes&&!dirty&&!history.undo(doc),"cancel leaves parent and undo history unchanged");
+            structureEditor=[](const Document& source)->std::optional<Document>{return source;};editTargetStructure();check(toNative(doc)==bytes&&!history.undo(doc),"apply without editing is a no-op");
+            structureEditor=originalRunner;doc={};history.clear();selection.clear();targetContainer=0;dirty=false;
+        }
+        {
+            doc=mechanismDemo();makeMechanismGraph(doc.reactions[0]);while(!doc.reactions[0].links.empty())removeMechanismConnection(doc.reactions[0],0);
+            history.clear();hits.clear();tool=Select;selection={doc.reactions[0].id};targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;
+            origin={left+130.,top+130.};zoom=1;int owner=doc.reactions[0].id;command(145);
+            auto source=screen(reactionSlot(doc.reactions[0],0)),destination=screen(reactionSlot(doc.reactions[0],1));
+            mouseDown(source);check(mechanismConnectionDrag,"connect mode starts a native frame-to-frame drag");mouse=destination;mouseUp(destination);
+            check(doc.reactions[0].links.size()==1&&doc.reactions[0].links[0].from==0&&doc.reactions[0].links[0].to==1,"releasing over target creates a real mechanism connection");
+            fit();mechanismConnecting=false;selectedCycleOwner=owner;selectedCycleArrow=0;selection={owner};auto path=mechanismConnectionPath(owner,0);auto head=screen(path.back());destination=screen(reactionSlot(doc.reactions[0],2));
+            mouseDown(head);check(mechanismConnectionDrag,"selected arrowhead exposes a draggable reconnection handle");mouse=destination;mouseUp(destination);
+            check(doc.reactions[0].links[0].to==2,"dragging the arrowhead to another stage changes its endpoint");
+            fit();path=mechanismConnectionPath(owner,0);head=screen(path.back());auto extended=head+Vec{-30,0};mouseDown(head);check(mechanismConnectionDrag,"length drag starts on arrowhead handle");check(!mechanismSlotAt(owner,world(extended)),"length drag ends in empty corridor");mouse=extended;mouseUp(extended);
+            check(doc.reactions[0].arrowLength>0,"dragging arrowhead into empty space sets manual arrow length");
+            fit();command(145);source=screen(reactionSlot(doc.reactions[0],0));destination=screen(reactionSlot(doc.reactions[0],1));mouseDown(source);mouse=destination;mouseUp(destination);key(VK_ESCAPE);
+            check(doc.reactions[0].links.size()==2&&!mechanismConnecting,"second branch is added and Escape exits connection mode");selection={owner};command(125);
+            check(doc.reactions[0].slotGrid[1].x==doc.reactions[0].slotGrid[2].x&&doc.reactions[0].slotGrid[1].y!=doc.reactions[0].slotGrid[2].y,"alignment reorganizes the manually connected branch targets");
+            writePreview(L"mechanism-manual-connections.png",doc);
+            auto before=toNative(doc);selectedCycleOwner=owner;selectedCycleArrow=0;selection={owner};check(deleteSelectedCycleArrow()&&doc.reactions[0].links.size()==1,"Delete removes the selected graph connection");
+            check(history.undo(doc)&&toNative(doc)==before,"connection deletion can be undone completely");
+            doc={};history.clear();selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;mechanismConnecting=mechanismConnectionDrag=false;dirty=false;
         }
         if(argc>1&&std::string(argv[1])=="--live-chemdraw"){
             auto fragment=clipboardDocument();check(fragment&&fragment->atoms.size()==15&&fragment->bonds.size()==16,"actual Windows ChemDraw clipboard imports all atoms and bonds");

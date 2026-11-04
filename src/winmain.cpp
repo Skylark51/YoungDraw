@@ -20,6 +20,7 @@
 #include "win_ui.h"
 #include "win_splash.h"
 #include "win_storage.h"
+#include "win_projects.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -34,6 +35,16 @@ HWND win;Document doc,dragBefore,dragBase;History history;std::wstring filePath,
 std::vector<int> selection;int hoverAtom=0,hoverBond=0,element=6,startAtom=0,startBond=0,targetContainer=0;size_t targetSlot=0;bool targetAbove=false,dirty=false;
 std::function<void()> repeatAction;void alignSelection(int id);
 bool showLayers=false;int sidebarPage=0;OrbitalKind orbitalKind=OrbitalKind::P;int orbitalPhase=0;
+bool isolatedStructureEditing=false;
+std::wstring isolatedStructureResult;
+bool mechanismConnecting=false,mechanismConnectionDrag=false;
+int connectionOwner=0,connectionFrom=-1,connectionEdge=-1,connectionHandle=-1;
+void editTargetStructure();
+bool activeStructureTarget();
+void command(int id);
+bool beginMechanismConnection(Vec point);
+void finishMechanismConnection(Vec point);
+std::vector<Vec> mechanismConnectionPath(int owner,int edge);
 int ww=1360,wh=880;constexpr int left=180,right=260,top=122,bottom=34;double zoom=4;Vec origin{300,200},mouse,down,panOrigin;
 enum Tool{Select,Single,Double,Triple,Wedge,Hash,Ring5,Ring6,Benzene,Erase,Arrow,Curve,Fishhook,Text,ImageTool,Straight,Resonance,Delocalized,Orbital};Tool tool=Select;
 HWND documentTabs=nullptr;HFONT tabFont=nullptr;bool officeDocument=false;
@@ -69,7 +80,7 @@ std::optional<Scene> canvasSceneCache;
 std::unique_ptr<Bitmap> paintBuffer;
 bool contains(const std::vector<int>& v,int id){return std::find(v.begin(),v.end(),id)!=v.end();}
 void redraw(){canvasSceneCache.reset();InvalidateRect(win,nullptr,FALSE);}
-void repaintOnly(const RECT* region=nullptr){InvalidateRect(win,region,FALSE);}void title(){std::wstring s=L"YoungDraw 0.4 | "+(filePath.empty()?L"제목 없음":fs::path(filePath).filename().wstring())+(officeDocument&&office::editing()?L" [Office 개체 편집]":L"")+(dirty?L" *":L"");SetWindowTextW(win,s.c_str());refreshDocumentTabs();}
+void repaintOnly(const RECT* region=nullptr){InvalidateRect(win,region,FALSE);}void title(){std::wstring s=(isolatedStructureEditing?L"단계 구조 편집 | ":L"YoungDraw 0.4 | ")+(filePath.empty()?L"제목 없음":fs::path(filePath).filename().wstring())+(officeDocument&&office::editing()?L" [Office 개체 편집]":L"")+(dirty?L" *":L"");SetWindowTextW(win,s.c_str());refreshDocumentTabs();}
 void pruneLockedSelection(){selection.erase(std::remove_if(selection.begin(),selection.end(),[](int id){return doc.isLocked(id);}),selection.end());if(doc.isLocked(targetContainer))targetContainer=0;}
 void changed(){pruneLockedSelection();dirty=true;title();redraw();}Vec world(Vec p){return (p-origin)*(1/zoom);}Vec screen(Vec p){return origin+p*zoom;}Vec center(){return world({left+(ww-left-right)/2.,top+(wh-top-bottom)/2.});}
 bool canvas(Vec p){return p.x>left&&p.x<ww-right&&p.y>top&&p.y<wh-bottom;}RectF canvasBox(){return {float(left),float(top),float(std::max(1,ww-left-right)),float(std::max(1,wh-top-bottom))};}
@@ -90,7 +101,7 @@ void icon(Graphics& g,int id,RectF box,Color color){
     auto arrow=[&](){line(-20,0,19,0);line(19,0,12,-5);line(19,0,12,5);};
     switch(id){
     case 100:g.DrawRectangle(&pen,-15.f,-20.f,30.f,40.f);line(3,-20,15,-8);line(3,-20,3,-8);line(3,-8,15,-8);break;
-    case 101:{PointF folder[]={{-22,-10},{-5,-10},{0,-17},{18,-17},{18,15},{-22,15}};g.DrawPolygon(&pen,folder,6);line(-18,17,-11,-2);line(-11,-2,23,-2);line(23,-2,18,17);break;}
+    case 185:case 101:{PointF folder[]={{-22,-10},{-5,-10},{0,-17},{18,-17},{18,15},{-22,15}};g.DrawPolygon(&pen,folder,6);line(-18,17,-11,-2);line(-11,-2,23,-2);line(23,-2,18,17);if(id==185){line(-9,5,8,5);line(-9,10,8,10);}break;}
     case 102:g.DrawRectangle(&pen,-19.f,-20.f,38.f,40.f);g.DrawRectangle(&pen,-11.f,-20.f,22.f,14.f);g.DrawRectangle(&pen,-12.f,3.f,24.f,17.f);line(5,-17,5,-9);break;
     case 104:case 105:{auto mirror=g.Save();if(id==105)g.ScaleTransform(-1.f,1.f);g.DrawBezier(&pen,PointF(-18,-6),PointF(18,-23),PointF(26,4),PointF(9,17));line(-18,-6,-16,-19);line(-18,-6,-4,-4);g.Restore(mirror);break;}
     case 107:g.DrawEllipse(&pen,-20.f,-20.f,29.f,29.f);line(5,5,22,22);line(-14,-6,2,-6);line(-6,-14,-6,2);break;
@@ -180,6 +191,10 @@ const Scene& sceneForPaint(bool reuse){
 void fit(){auto b=scene().bounds;zoom=std::clamp(std::min((ww-left-right-65)/b.w,(wh-top-bottom-110)/b.h),.12,3.);origin={left+(ww-left-right)/2.-(b.x+b.w/2)*zoom,top+(wh-top-bottom)/2.-(b.y+b.h/2)*zoom};redraw();}
 HWND tooltip=nullptr;bool tipActive=false;RECT tipRect{};int tipCommand=0;std::wstring tipText;
 std::wstring helpText(int id){
+    if(id>=143&&id<=149)return L"단계·연결 편집\n단계 추가·삭제·합치기, 드래그 연결과 연결 표, 화살표 길이를 수정합니다. Ctrl+Z로 되돌릴 수 있습니다.";
+    if(id==186)return L"구조 고치기\n선택한 단계의 구조만 독립 창에서 수정합니다. 적용하면 해당 구조만 교체하며 Ctrl+Z로 되돌릴 수 있습니다.";
+    if(id==187)return L"취소\n독립 창의 수정을 버리고 메커니즘으로 돌아갑니다.";
+    if(id==185)return L"내 프로젝트\n프로젝트 생성·열기·삭제, 구조·CDXML·이미지 보관, 이름·노트 편집과 드래그 순서 변경을 지원합니다.";
     if(id==184)return L"배경 · 테마\n6가지 작업실 분위기와 도트·격자·줄노트·등각·육각 문양을 선택합니다. 문서와 내보내기에는 영향을 주지 않습니다.";
     if(id==156)return L"텍스트 색상표\n단계 이름·설명을 편집하는 중에 누르면 해당 텍스트의 색을 바꿉니다. 반응 블록을 선택하면 블록 전체 텍스트에 적용합니다. 일반 텍스트도 지원합니다. Ctrl+Z: 되돌리기.";
     if(id==155)return L"원자 색상표\n원자를 선택한 뒤 색상표에서 색을 고르면 선택한 원자의 색을 바꿉니다. 여러 원자를 한 번에 변경할 수 있습니다. Ctrl+Z: 되돌리기.";
@@ -444,12 +459,14 @@ void refreshDocumentTabs(){
     for(size_t i=0;i<documents.size();i++){
         auto path=i==activeDocument?filePath:documents[i].path;
         bool modified=i==activeDocument?dirty:documents[i].dirty;
-        std::wstring label=(path.empty()?L"제목 없음 "+std::to_wstring(i+1):fs::path(path).filename().wstring())+(modified?L" *":L"")+L"   ×";
+        auto projectName=projects::displayName(path);
+        std::wstring label=(path.empty()?L"제목 없음 "+std::to_wstring(i+1):projectName.empty()?fs::path(path).filename().wstring():projectName)+(modified?L" *":L"")+L"   ×";
         TCITEMW item{};item.mask=TCIF_TEXT;item.pszText=label.data();TabCtrl_InsertItem(documentTabs,int(i),&item);
     }
     TabCtrl_SetCurSel(documentTabs,int(activeDocument));
 }
 bool switchDocumentTab(size_t index){
+    mechanismConnecting=mechanismConnectionDrag=false;
     if(index>=documents.size())return false;
     if(!finishInline(true)){TabCtrl_SetCurSel(documentTabs,int(activeDocument));return false;}
     if(index==activeDocument)return true;
@@ -465,7 +482,7 @@ void newDocumentTab(Document document={},std::wstring path=L"",bool fromOffice=f
     if(!finishInline(true))return;
     storeDocumentTab();activeDocument=documents.size();documents.emplace_back();
     doc=std::move(document);history.clear();filePath=std::move(path);selection.clear();targetContainer=0;targetSlot=0;targetAbove=false;
-    Document beforeUpgrade=doc;bool upgraded=upgradeBondGeometry(doc);if(upgraded)history.checkpoint(beforeUpgrade);dirty=upgraded;officeDocument=fromOffice;tool=Select;hoverAtom=hoverBond=0;status=upgraded?L"벤젠 75%·벤질 연결 길이 기준을 적용했습니다. 저장하면 새 기준이 유지됩니다.":L"새 문서 탭 · Ctrl+Tab: 다음 탭 · Ctrl+W: 현재 탭 닫기";
+    Document beforeUpgrade=doc;normalizeChemicalLabels(doc);bool upgraded=upgradeBondGeometry(doc);upgraded=upgraded||toNative(doc)!=toNative(beforeUpgrade);if(upgraded)history.checkpoint(beforeUpgrade);dirty=upgraded;officeDocument=fromOffice;tool=Select;hoverAtom=hoverBond=0;status=upgraded?L"벤젠 75%·벤질 연결 길이 기준을 적용했습니다. 저장하면 새 기준이 유지됩니다.":L"새 문서 탭 · Ctrl+Tab: 다음 탭 · Ctrl+W: 현재 탭 닫기";
     fit();storeDocumentTab();title();
 }
 bool closeDocumentTab(size_t index){
@@ -484,6 +501,43 @@ bool closeAllDocuments(){
     size_t initial=activeDocument;
     for(size_t i=0;i<documents.size();i++){if(!switchDocumentTab(i)||!discard())return false;storeDocumentTab();}
     switchDocumentTab(initial);return true;
+}
+void manageProjects(){
+    if(!finishInline(true))return;
+    projects::Callbacks callbacks;
+    callbacks.blank=toNative(Document{});
+    callbacks.current=[]()->std::optional<std::pair<std::wstring,std::string>>{
+        if(!finishInline(true))return {};
+        auto name=projects::displayName(filePath);if(name.empty())name=filePath.empty()?L"새 구조":fs::path(filePath).stem().wstring();
+        return std::make_pair(name,toNative(doc));
+    };
+    callbacks.open=[](const std::wstring& source){
+        bool isImage=projects::image(source);auto path=isImage?source+L".ydraw":source;
+        for(size_t i=0;i<documents.size();i++){
+            auto current=i==activeDocument?filePath:documents[i].path;
+            if(!current.empty()&&_wcsicmp(fs::absolute(current).lexically_normal().c_str(),fs::absolute(path).lexically_normal().c_str())==0){switchDocumentTab(i);return;}
+        }
+        auto imported=isImage&&!fs::exists(path)?imageDocument(readFile(source)):fromCdxml(readFile(path));
+        newDocumentTab(std::move(imported),path);
+        if(isImage){status=L"이미지 원본은 보관됩니다. 수정 후 Ctrl+S를 누르면 프로젝트 안에 편집 문서를 저장합니다.";if(!fs::exists(path))dirty=true;}
+        else if(!doc.importWarnings.empty())MessageBoxW(win,L"일부 CDXML 객체는 표시·편집되지 않을 수 있습니다. 지원하지 않는 XML은 CDXML 저장 시 보존됩니다.",L"CDXML 열기",MB_OK|MB_ICONINFORMATION);
+        title();redraw();
+    };
+    callbacks.close=[](const std::vector<std::wstring>& paths){
+        for(size_t i=documents.size();i-->0;){auto path=i==activeDocument?filePath:documents[i].path;bool found=false;
+            for(auto& source:paths)if(_wcsicmp(path.c_str(),source.c_str())==0||(projects::image(source)&&_wcsicmp(path.c_str(),(source+L".ydraw").c_str())==0)){found=true;break;}
+            if(found&&!closeDocumentTab(i))return false;
+        }return true;
+    };
+    callbacks.preview=[](HDC dc,const RECT& area,const std::wstring& source){
+        auto path=projects::image(source)&&fs::exists(source+L".ydraw")?source+L".ydraw":source;
+        auto document=projects::image(path)?imageDocument(readFile(path)):fromCdxml(readFile(path));
+        normalizeChemicalLabels(document);auto sc=makeScene(document,measure);auto b=sc.bounds;
+        double scale=std::min(double(area.right-area.left-24)/std::max(1.,b.w),double(area.bottom-area.top-24)/std::max(1.,b.h));
+        Graphics g(dc);g.SetClip(Gdiplus::Rect(area.left,area.top,area.right-area.left,area.bottom-area.top));g.SetSmoothingMode(SmoothingModeHighQuality);g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+        g.TranslateTransform(float(area.left+(area.right-area.left-b.w*scale)/2-b.x*scale),float(area.top+(area.bottom-area.top-b.h*scale)/2-b.y*scale));g.ScaleTransform(float(scale),float(scale));render(g,sc);
+    };
+    projects::manage(win,callbacks);title();redraw();
 }
 Document officeCurrentDocument(){
     if(officeDocument)return doc;
@@ -512,6 +566,7 @@ LRESULT CALLBACK documentTabProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR
     return DefSubclassProc(hwnd,msg,wp,lp);
 }
 void createDocumentTabs(){
+    if(isolatedStructureEditing){storeDocumentTab();return;}
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_TAB_CLASSES};InitCommonControlsEx(&controls);
     documentTabs=CreateWindowExW(0,WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|TCS_FOCUSNEVER, left,89,ww-left-right,30,win,(HMENU)950,GetModuleHandleW(nullptr),nullptr);
     tabFont=CreateFontW(-14,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
@@ -599,7 +654,7 @@ LRESULT CALLBACK inlineProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_IME_ENDCOMPOSITION)inlineComposing=false;
     if(!inlineComposing&&inlineTarget.role!=8&&ui::scriptShortcut(hwnd,msg,wp))return 0;
     if(msg==WM_KEYDOWN&&!inlineComposing){
-        if((GetKeyState(VK_CONTROL)&0x8000)&&(wp==VK_TAB||wp=='W')){if(finishInline(true)){if(wp=='W')closeDocumentTab(activeDocument);else switchDocumentTab((activeDocument+documents.size()+((GetKeyState(VK_SHIFT)&0x8000)?-1:1))%documents.size());SetFocus(win);}return 0;}
+        if((GetKeyState(VK_CONTROL)&0x8000)&&(wp==VK_TAB||wp=='W')){if(isolatedStructureEditing){if(wp=='W')command(187);return 0;}if(finishInline(true)){if(wp=='W')closeDocumentTab(activeDocument);else switchDocumentTab((activeDocument+documents.size()+((GetKeyState(VK_SHIFT)&0x8000)?-1:1))%documents.size());SetFocus(win);}return 0;}
         if(wp=='A'&&(GetKeyState(VK_CONTROL)&0x8000)){SendMessageW(hwnd,EM_SETSEL,0,-1);return 0;}if(wp==VK_ESCAPE){finishInline(false);SetFocus(win);return 0;}
         if(wp==VK_TAB){std::vector<InlineTarget> targets;for(auto& t:scene().items)if(t.type==Primitive::Text&&!t.points.empty()&&(t.textRole||textObject(t.owner))&&std::none_of(targets.begin(),targets.end(),[&](const InlineTarget& a){return a.owner==t.owner&&a.role==t.textRole&&a.index==t.textIndex;}))targets.push_back({t.owner,t.textRole,t.textIndex,t.points[0],t.fontSize});
             auto current=std::find_if(targets.begin(),targets.end(),[](const InlineTarget& t){return t.owner==inlineTarget.owner&&t.role==inlineTarget.role&&t.index==inlineTarget.index;});
@@ -623,22 +678,17 @@ void beginInline(std::optional<InlineTarget> target,Vec at){
     oldEditProc=(WNDPROC)SetWindowLongPtrW(inlineEdit,GWLP_WNDPROC,(LONG_PTR)inlineProc);SendMessageW(inlineEdit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(2,2));sizeInline();SetFocus(inlineEdit);SendMessageW(inlineEdit,EM_SETSEL,0,-1);status=inlineTarget.role!=8?L"Ctrl+=: 아래첨자 · Ctrl+Shift+=: 위첨자 · 같은 키: 일반 입력 복귀 · Enter: 완료 · Esc: 취소":L"Enter: 완료 · Shift+Enter: 줄바꿈 · Tab/Shift+Tab: 다음/이전 텍스트 · Esc: 취소";redraw();
 }
 void editBranchedReaction(int id){
-    auto* ptr=reaction(id);if(!ptr)return;Document before=doc;Reaction original=*ptr;ui::Table rows;
+    auto* ptr=reaction(id);if(!ptr)return;Document before=doc;Reaction original=*ptr;makeMechanismGraph(original);ui::Table rows;
     for(size_t i=0;i<original.slots.size();i++)rows.push_back({"구조",std::to_string(i+1),"","",original.slots[i].label,original.slots[i].energy});
     for(size_t i=0;i<original.links.size();i++)rows.push_back({"화살표",std::to_string(i+1),std::to_string(original.links[i].from+1),std::to_string(original.links[i].to+1),i<original.above.size()?original.above[i]:"",i<original.below.size()?original.below[i]:""});
     auto update=[&](const ui::Table& cells)->std::wstring{
-        if(cells.size()!=rows.size())throw std::runtime_error("행은 유지하고 분기 추가 메뉴로 새 구조 칸을 만드세요.");
-        Reaction edited=original;
-        for(size_t i=0;i<cells.size();i++){auto& row=cells[i];if(row.size()!=6||row[0]!=rows[i][0]||row[1]!=rows[i][1])throw std::runtime_error("구분과 번호는 유지하세요.");
-            for(auto e:reactionEnergies(row[5]))if(e.value!="?"&&e.value!="?.?"){auto v=e.value;if(!v.empty()&&v.back()=='*')v.pop_back();numeric(v);}
-            if(i<edited.slots.size()){edited.slots[i].label=row[4];edited.slots[i].energy=row[5];}
-            else {size_t n=i-edited.slots.size();double from=numeric(row[2],0,double(edited.slots.size())),to=numeric(row[3],1,double(edited.slots.size()));if(from!=std::floor(from)||to!=std::floor(to)||from==to)throw std::runtime_error("서로 다른 구조 번호를 정수로 입력하세요.");edited.links[n].from=int(from)-1;edited.links[n].to=int(to)-1;edited.above[n]=row[4];edited.below[n]=row[5];}}
+        Reaction edited=mechanismGraphData(original,cells);
         doc=before;*reaction(id)=edited;optimizeMechanism(doc,{id},false);redraw();UpdateWindow(win);return {};
     };
-    auto result=ui::table(win,L"메커니즘 분기·프레임 편집",{L"구분",L"번호",L"시작 구조",L"도착 구조",L"이름 / TS 설명",L"에너지 (S=0 / 1 / 2)"},rows,update,true,L"시작 구조 0: 공통 세로선 · 한 구조 칸에 여러 분자를 묶을 수 있습니다 · 에너지는 /로 구분");
+    auto result=ui::table(win,L"메커니즘 분기·프레임 편집",{L"구분",L"번호",L"시작 구조",L"도착 구조",L"이름 / TS 설명",L"에너지 (S=0 / 1 / 2)"},rows,update,true,L"행 추가·삭제 가능 · 새 행의 번호는 비워 두세요 · 시작 0: 공통 세로선 · 삭제한 단계의 구조는 캔버스에 유지");
     if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();}}else{doc=before;redraw();}
 }
-void editReaction(int id){if(auto* r=reaction(id);r&&!r->links.empty()){editBranchedReaction(id);return;}auto* ptr=reaction(id);if(!ptr)return;Document before=doc;Reaction original=*ptr;
+void editReaction(int id){if(auto* r=reaction(id);r&&r->explicitConnections()){editBranchedReaction(id);return;}auto* ptr=reaction(id);if(!ptr)return;Document before=doc;Reaction original=*ptr;
     auto update=[&](const ui::Table& rows)->std::wstring{
         Document candidate=before;auto edited=mechanismGridData(original,rows);
         for(auto& item:candidate.reactions)if(item.id==id)item=std::move(edited);
@@ -651,7 +701,7 @@ void editReaction(int id){if(auto* r=reaction(id);r&&!r->links.empty()){editBran
 void reactionSettings(int id){
     auto* ptr=reaction(id);if(!ptr)throw std::runtime_error("반응 블록을 선택하세요.");Document before=doc;Reaction old=*ptr;
     auto update=[&](const std::vector<std::string>& v)->std::wstring{try{
-        int mode=std::stoi(v[1]);if(!old.links.empty()&&mode!=0)return L"분기 연결과 프레임을 유지하려면 가로 배치를 사용하세요.";double columns=numeric(v[3],1,40),gap=numeric(v[4],0,4000);
+        int mode=std::stoi(v[1]);if(old.explicitConnections()&&mode!=0)return L"분기 연결과 프레임을 유지하려면 가로 배치를 사용하세요.";double columns=numeric(v[3],1,40),gap=numeric(v[4],0,4000);
         if(columns!=std::floor(columns))return L"한 줄의 구조 수는 1~40의 정수로 입력하세요.";
         Document candidate=before;for(auto& r:candidate.reactions)if(r.id==id){r.unit=v[0];bool keepManual=mode==2&&!old.cyclic&&!old.vertical&&old.wrapColumns==0&&reactionRow(old,old.slots.empty()?0:old.slots.size()-1)>0&&columns==3;if(!keepManual){for(auto& slot:r.slots)slot.startsRow=false;r.wrapColumns=mode==2?int(columns):0;}r.arrowType=std::stoi(v[2]);r.vertical=mode==3;r.rowGap=gap;r.captionFontSize=numeric(v[5],0,100);if(v[6]=="1")r.hiddenArrows.clear();}
         optimizeMechanism(candidate,{id},mode==1);doc=std::move(candidate);redraw();UpdateWindow(win);return {};
@@ -853,7 +903,7 @@ bool editOrbital(int id){
 
 void editObject(int id){if(editOrbital(id))return;if(doc.isLocked(id)){status=L"레이어의 잠금을 해제한 뒤 편집하세요.";redraw();return;}if(auto* a=doc.atom(id)){auto r=ui::form(win,L"원자·라벨",{{L"원소 기호",symbol(a->element)},{L"라벨 (빈칸: 자동)",a->label,false,{},false,4,true},{L"형식 전하",std::to_string(a->charge)},{L"동위원소 (0: 자연 조성)",std::to_string(a->isotope)},{L"현재 구조 형태 보호",a->protect?"1":"0",false,{L"아니요",L"예"}}});if(!r)return;int e=atomicNumber((*r)[0]);if(!e)throw std::runtime_error("알 수 없는 원소 기호입니다.");int q=int(numeric((*r)[2],-8,8)),isotope=int(numeric((*r)[3],0,300));history.checkpoint(doc);a=doc.atom(id);setAtomElement(doc,id,e);a->label=chemicalScripts((*r)[1]);a->labelRuns.clear();a->charge=q;a->isotope=isotope;a->explicitH=-1;a->protect=(*r)[4]=="1";changed();return;}
  for(auto& o:doc.objects)if(o.id==id){std::string transformValue=o.kind==ObjectKind::Image?"1":"12";if(o.kind==ObjectKind::Curve&&o.points.size()==4){if(o.autoRoute)transformValue="자동";else{Vec delta=o.points.back()-o.points.front();double len=delta.length();if(len>.001){Vec n{-delta.y/len,delta.x/len};Vec bend=o.points[1]-o.points.front()-delta*(1./3);transformValue=number(bend.x*n.x+bend.y*n.y);}}}auto r=ui::form(win,L"그리기 속성",{{L"텍스트 (Ctrl+= / Ctrl+Shift+=)",o.text,true,{},false,4,true},{L"색상 (#RRGGBB)",o.color},{L"선 굵기 (pt)",number(o.width)},{L"선 종류",std::to_string(o.dash),false,{L"실선",L"파선",L"점선"}},{L"글자 크기 (pt)",number(o.fontSize)},{L"화살촉",std::to_string(o.head),false,{L"없음",L"전체 화살촉",L"반쪽 화살촉",L"공명 (양쪽 화살촉)"}},{L"곡률 (자동 또는 숫자) / 이미지 배율",transformValue}});if(!r)return;Object update=o;update.text=chemicalScripts((*r)[0]);update.color=colorValue((*r)[1]);update.width=numeric((*r)[2],.1,10);update.dash=std::stoi((*r)[3]);update.fontSize=numeric((*r)[4],4,100);update.head=std::stoi((*r)[5]);update.runs.clear();if(update.kind==ObjectKind::Curve&&(*r)[6]=="자동")update.autoRoute=true;else if(update.kind==ObjectKind::Curve&&update.points.size()==4&&(*r)[6]!=transformValue){update.points=routeArrow(doc,update);update.sourceAtom=update.targetAtom=update.sourceBond=update.targetBond=0;update.autoRoute=false;double bend=numeric((*r)[6],-200,200);Vec a=update.points.front(),b=update.points.back(),v=b-a;double len=v.length();if(len>.001){Vec n{-v.y/len,v.x/len};update.points[1]=a+v*(1./3)+n*bend;update.points[2]=a+v*(2./3)+n*bend;}}if(update.kind==ObjectKind::Image){double scale=numeric((*r)[6],.05,20);update.points[1]=update.points[0]+(update.points[1]-update.points[0])*scale;}history.checkpoint(doc);o=update;changed();return;}}
-void edit(){int id=primary();if(auto* o=textObject(id)){beginInline(InlineTarget{id,0,-1,o->points[0],o->fontSize},o->points[0]);return;}if(reaction(id))editReaction(id);else if(plot(id))editPlot(id);else editObject(id);}
+void edit(){if(activeStructureTarget()){editTargetStructure();return;}int id=primary();if(auto* o=textObject(id)){beginInline(InlineTarget{id,0,-1,o->points[0],o->fontSize},o->points[0]);return;}if(reaction(id))editReaction(id);else if(plot(id))editPlot(id);else editObject(id);}
 void addImage(Vec p){auto path=fileDialog(false,3);if(!path)return;insert(imageDocument(readFile(*path)),p);tool=Select;}
 
 
@@ -929,6 +979,45 @@ bool activeStructureTarget(){
     if(auto* r=reaction(targetContainer))return targetSlot<r->slots.size();
     if(auto* p=plot(targetContainer))return targetSlot<p->states.size();
     return false;
+}
+std::optional<Document> runStructureEditor(const Document& fragment){
+    wchar_t temporary[32768]{},name[32768]{},exe[32768]{};
+    if(!GetTempPathW(32768,temporary)||!GetTempFileNameW(temporary,L"YDS",0,name)||!GetModuleFileNameW(nullptr,exe,32768))throw std::runtime_error("구조 편집용 임시 파일을 만들 수 없습니다.");
+    fs::path folder(name);fs::remove(folder);fs::create_directory(folder);
+    struct Cleanup {fs::path path;~Cleanup(){std::error_code error;fs::remove_all(path,error);}} cleanup{folder};
+    auto input=folder/L"structure.ydraw",result=folder/L"result.ydraw";writeFile(input.wstring(),toNative(fragment));
+    std::wstring commandLine=L"\""+std::wstring(exe)+L"\" --edit-structure \""+input.wstring()+L"\" \""+result.wstring()+L"\"";
+    STARTUPINFOW startup{};startup.cb=sizeof(startup);startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_SHOWNORMAL;PROCESS_INFORMATION process{};
+    if(!CreateProcessW(exe,commandLine.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,&startup,&process))throw std::runtime_error("독립 구조 편집 창을 열 수 없습니다.");
+    CloseHandle(process.hThread);EnableWindow(win,FALSE);
+    bool quit=false;int quitCode=0;
+    while(WaitForSingleObject(process.hProcess,0)==WAIT_TIMEOUT){
+        if(MsgWaitForMultipleObjects(1,&process.hProcess,FALSE,100,QS_ALLINPUT)==WAIT_OBJECT_0+1){MSG message;while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){
+            if(message.message==WM_QUIT){quit=true;quitCode=int(message.wParam);continue;}
+            TranslateMessage(&message);DispatchMessageW(&message);
+        }}
+    }
+    DWORD exitCode=0;GetExitCodeProcess(process.hProcess,&exitCode);CloseHandle(process.hProcess);EnableWindow(win,TRUE);SetForegroundWindow(win);SetFocus(win);
+    if(quit)PostQuitMessage(quitCode);
+    if(exitCode)throw std::runtime_error("구조 편집 창이 종료되었습니다. 원래 메커니즘은 유지됩니다.");
+    if(!fs::exists(result))return {};return fromNative(readFile(result.wstring()));
+}
+std::function<std::optional<Document>(const Document&)> structureEditor=runStructureEditor;
+void editTargetStructure(){
+    if(isolatedStructureEditing)return;
+    if(!activeStructureTarget()){
+        auto chosen=selection;bool found=false;
+        for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size()&&!found;i++)if(std::any_of(r.slots[i].members.begin(),r.slots[i].members.end(),[&](int id){return contains(chosen,id);})){targetContainer=r.id;targetSlot=i;targetAbove=false;selection={r.id};found=true;}
+        if(!found)for(auto& p:doc.plots)for(size_t i=0;i<p.states.size()&&!found;i++)for(bool above:{false,true}){auto& members=above?p.states[i].above:p.states[i].below;if(std::any_of(members.begin(),members.end(),[&](int id){return contains(chosen,id);})){targetContainer=p.id;targetSlot=i;targetAbove=above;selection={p.id};found=true;break;}}
+    }
+    if(!activeStructureTarget())throw std::runtime_error("먼저 수정할 단계의 구조 영역을 선택하세요.");
+    if(!finishInline(true))return;
+    const int container=targetContainer;const size_t slot=targetSlot;const bool above=targetAbove;
+    const Document before=doc;const auto fragment=structureInSlot(before,container,slot,above);
+    auto result=structureEditor(fragment);if(!result||toNative(*result)==toNative(fragment))return;
+    Document candidate=before;replaceSlotStructure(candidate,*result,container,slot,above);
+    history.checkpoint(before);doc=std::move(candidate);selection={container};targetContainer=container;targetSlot=slot;targetAbove=above;
+    status=L"이 단계의 구조만 수정했습니다. 다른 단계와 배치는 유지됩니다. Ctrl+Z: 되돌리기";changed();
 }
 void insertStructureTarget(const Document& fragment){
     // Build before committing so invalid targets cannot partially change the document.
@@ -1016,7 +1105,7 @@ void textColorPalette(const std::optional<InlineTarget>& target){
 void editArrowCross(){
     int owner=primary();auto* r=reaction(owner);Object* object=nullptr;for(auto& o:doc.objects)if(o.id==owner&&o.head)object=&o;
     if(!r&&!object)throw std::runtime_error("반응 화살표 또는 메커니즘을 선택하세요.");
-    int count=r?int(r->links.empty()?(r->cyclic?r->slots.size():r->slots.size()-1):r->links.size()):1;if(count<1)return;
+    int count=r?int(!r->explicitConnections()?(r->cyclic?r->slots.size():r->slots.size()-1):r->links.size()):1;if(count<1)return;
     int index=r&&selectedCycleOwner==owner&&selectedCycleArrow>=0?selectedCycleArrow:0;ArrowCross old=object?object->cross:ArrowCross{};
     if(r)for(auto m:r->crosses)if(m.index==index)old=m;
     Document before=doc;
@@ -1073,7 +1162,30 @@ void arrangeImported(){
     auto error=update(*result);if(!error.empty())throw std::runtime_error(ui::utf8(error));
     if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();status=L"화살표 사이의 구조들을 반응 상태로 묶었습니다. 구조 칸에서 Ctrl+Shift+K: 모양 정돈 · Ctrl+K: 크기 조정";}
 }
-void command(int id){std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();
+Reaction* selectedMechanism(){
+    if(auto* r=reaction(primary()))return r;
+    if(auto* r=reaction(targetContainer))return r;
+    return reaction(selectedCycleOwner);
+}
+void editMechanismControls(int id){
+    auto* r=selectedMechanism();if(!r)throw std::runtime_error("메커니즘 또는 단계 영역을 먼저 선택하세요.");const int owner=r->id;
+    if(id==145){mechanismConnecting=!mechanismConnecting;connectionOwner=owner;selection={owner};tool=Select;guides=true;status=mechanismConnecting?L"연결 모드: 시작 구조 칸에서 도착 구조 칸으로 드래그하세요. Esc: 종료 · 자동 정렬: 연결에 맞춰 배치":L"연결 모드를 종료했습니다.";redraw();return;}
+    if(id==148){editBranchedReaction(owner);return;}
+    if(id==149){auto value=ui::form(win,L"화살표 길이",{{L"길이 (pt, 0: 설명에 맞춰 자동)",number(r->arrowLength)}});if(!value)return;double length=numeric((*value)[0],0,10000);if(length>0&&length<20)throw std::runtime_error("길이는 20 pt 이상 또는 0(자동)으로 입력하세요.");Document candidate=doc;for(auto& row:candidate.reactions)if(row.id==owner)row.arrowLength=length;optimizeMechanism(candidate,{owner},r->cyclic);history.checkpoint(doc);doc=std::move(candidate);changed();fit();return;}
+    if(id==147){if(selectedCycleOwner!=owner||selectedCycleArrow<0)throw std::runtime_error("제거할 화살표를 먼저 클릭하세요.");Document candidate=doc;for(auto& row:candidate.reactions)if(row.id==owner)removeMechanismConnection(row,size_t(selectedCycleArrow));history.checkpoint(doc);doc=std::move(candidate);selectedCycleArrow=-1;selection={owner};changed();return;}
+    size_t selected=targetContainer==owner?std::min(targetSlot,r->slots.size()-1):0;
+    if(id==143){auto value=ui::form(win,L"원하는 위치에 단계 추가",{{L"삽입할 위치 (1부터, 마지막 뒤: 단계 수+1)",std::to_string(selected+1)}});if(!value)return;double n=numeric((*value)[0],1,double(r->slots.size()+1));if(n!=std::floor(n))throw std::runtime_error("정수 위치를 입력하세요.");Document candidate=doc;for(auto& row:candidate.reactions)if(row.id==owner)insertMechanismStage(row,size_t(n)-1);optimizeMechanism(candidate,{owner});history.checkpoint(doc);doc=std::move(candidate);targetContainer=owner;targetSlot=size_t(n)-1;selection={owner};changed();fit();return;}
+    if(id==144||id==146){std::vector<ui::Field> fields={{L"제거하거나 합칠 단계 번호 (1부터)",std::to_string(selected+1)}};
+        if(id==146)fields.push_back({L"구조와 연결을 받을 단계 번호 (1부터)",std::to_string(selected?selected:std::min(size_t(2),r->slots.size()))});
+        else fields.push_back({L"해당 단계의 구조", "0",false,{L"캔버스에 유지 (단계·연결만 제거)",L"구조도 함께 삭제"}});
+        auto value=ui::form(win,id==146?L"잘못 나뉜 단계 합치기":L"단계 제거",fields);if(!value)return;
+        double stage=numeric((*value)[0],1,double(r->slots.size()));if(stage!=std::floor(stage))throw std::runtime_error("정수 단계 번호를 입력하세요.");int merge=-1;
+        if(id==146){double n=numeric((*value)[1],1,double(r->slots.size()));if(n!=std::floor(n))throw std::runtime_error("정수 단계 번호를 입력하세요.");merge=int(n)-1;}
+        Document candidate=doc;removeMechanismStage(candidate,owner,size_t(stage)-1,merge,id==144&&(*value)[1]=="1");
+        if(id==146&&std::any_of(candidate.reactions.begin(),candidate.reactions.end(),[&](const Reaction& row){return row.id==owner;}))optimizeMechanism(candidate,{owner});
+        history.checkpoint(doc);doc=std::move(candidate);selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;changed();fit();return;}
+}
+void command(int id){if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==167||id==220||id==221)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();
  if(id==184){appearance::picker(win,[](){refreshAppearance();});status=std::wstring(L"작업실 · ")+appearance::palette().name+L" / 테마는 출력에 포함되지 않습니다.";redraw();return;}
  if(id==156){pruneLockedSelection();textColorPalette(colorTarget);return;}
  if(id==155){pruneLockedSelection();atomColorPalette();return;}
@@ -1089,6 +1201,10 @@ void command(int id){std::optional<InlineTarget> colorTarget;if(id==156&&inlineE
  }
  pruneLockedSelection();if(id>=200&&id<=218){if(id==217){auto before=doc;if(delocalizeBonds(doc,selection)){history.checkpoint(before);changed();}tool=Delocalized;}else{tool=Tool(id-200);selection.clear();}redraw();return;}if(id>=301&&id<=418){element=id-300;int aid=hoverAtom?hoverAtom:(doc.atom(primary())?primary():0);if(aid){history.checkpoint(doc);auto a=doc.atom(aid);setAtomElement(doc,aid,element);a->label.clear();a->labelRuns.clear();a->explicitH=-1;changed();}redraw();return;}
  switch(id){
+ case 143:case 144:case 145:case 146:case 147:case 148:case 149:editMechanismControls(id);break;
+ case 186:if(isolatedStructureEditing){writeFile(isolatedStructureResult,toNative(doc));dirty=false;DestroyWindow(win);}else editTargetStructure();break;
+ case 187:if(isolatedStructureEditing)DestroyWindow(win);break;
+ case 185:manageProjects();break;
  case 166:{auto candidate=doc;auto ids=groupedSelection(selection);if(ids.empty())throw std::runtime_error("벤젠이 포함된 그룹이나 고리를 선택하세요.");int count=collapsePhenyl(candidate,ids);if(!count)throw std::runtime_error("단일 결합 하나로 연결된 비치환 벤젠을 찾지 못했습니다.");history.checkpoint(doc);doc=std::move(candidate);selection.erase(std::remove_if(selection.begin(),selection.end(),[&](int id){auto all=doc.allIds();return !contains(all,id);}),selection.end());changed();break;}
  case 167:arrangeImported();break;
  case 220:insertBranchArrows();break;case 221:externalMechanism();break;
@@ -1125,7 +1241,7 @@ void command(int id){std::optional<InlineTarget> colorTarget;if(id==156&&inlineE
  case 112:saveCurrentTemplate();break;
  case 113:{auto p=fileDialog(false);if(p)insert(fromCdxml(readFile(*p)),center());break;}
  case 120:{sidebarPage=0;history.checkpoint(doc);Reaction r;r.id=doc.nextId++;r.p=center()-Vec{120,0};r.slots={{"Reactant",{}},{"Intermediate",{}},{"Product",{}}};r.above={"Step 1","Step 2"};r.below={"",""};doc.reactions.push_back(r);selection={r.id};tool=Select;changed();editReaction(r.id);break;}
- case 121:edit();break;case 122:case 128:{auto* r=reaction(primary());if(!r)throw std::runtime_error("반응 메커니즘을 선택하세요.");if(r->slots.size()>=30)throw std::runtime_error("메커니즘은 최대 30칸까지 추가할 수 있습니다.");history.checkpoint(doc);appendMechanismStage(*r,id==128,targetContainer==r->id?targetSlot:size_t(-1));optimizeMechanism(doc,{r->id},r->cyclic);changed();fit();break;}case 123:fillTarget(false);break;case 124:fillTarget(true);break;
+ case 121:if(reaction(primary()))editReaction(primary());else edit();break;case 122:case 128:{auto* r=reaction(primary());if(!r)throw std::runtime_error("반응 메커니즘을 선택하세요.");if(r->slots.size()>=40)throw std::runtime_error("메커니즘은 최대 40칸까지 추가할 수 있습니다.");history.checkpoint(doc);appendMechanismStage(*r,id==128,targetContainer==r->id?targetSlot:size_t(-1));optimizeMechanism(doc,{r->id},r->cyclic);changed();fit();break;}case 123:fillTarget(false);break;case 124:fillTarget(true);break;
  case 130:{sidebarPage=1;history.checkpoint(doc);EnergyPlot p;p.id=doc.nextId++;p.p=center()-Vec{160,75};p.stages=defaultMechanismStages();p.states={{"R",0,{},{}},{"TS",20,{},{}},{"P",-10,{},{}}};p.series={{"Path 1","#000000",{0,20,-10},1,3.5}};doc.plots.push_back(p);selection={p.id};tool=Select;changed();editPlot(p.id);break;}
  case 131:if(plot(primary()))editPlot(primary());else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 132:if(plot(primary()))editSeries(primary(),true);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 133:if(plot(primary()))editSeries(primary(),false);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;
  case 125:case 126:{Document before=doc;try{optimizeMechanism(doc,selection,id==126);}catch(...){doc=before;throw;}history.checkpoint(before);selection.clear();changed();fit();break;}case 127:reactionSettings(primary());break;case 135:addBilateralBranch(primary());break;case 137:plotSettings(primary());break;case 138:publicationLayout(primary());break;case 139:editPlotStages(primary());break;case 136:snapPlotStages(primary());break;case 142:editPlotColors(primary());break;case 150:history.checkpoint(doc);applyHouseStyle(doc);status=L"Arial 굵게, 14 pt 라벨, 2 pt 결합선을 적용했습니다.";changed();fit();break;case 134:guides=!guides;break;case 140:case 141:sidebarPage=id==141?1:0;history.checkpoint(doc);doc=id==140?mechanismDemo():coordinateDemo();selection.clear();targetContainer=0;filePath.clear();tool=Select;status=L"배치 예제입니다. Ctrl+Z로 이전 문서를 복원합니다.";changed();fit();break;
@@ -1169,8 +1285,9 @@ void paint(HDC dc,bool reuseScene=false){const auto& palette=appearance::palette
      }
  };
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
- group({100,101,102});separator();group({104,105});separator();group({107,125,155,156});separator();
- group({170,171,172,173,174});separator();group({160,161,162,163,164});button(g,184,L"배경 · 테마  ◇",{float(ww-168),23,152,34});text(g,L"YOUNGDRAW  /  SCIENTIFIC ATELIER",16,70,9,muted,true);
+ if(!isolatedStructureEditing)group({185,100,101,102});else group({102});separator();group({104,105});separator();group({107,125,155,156});separator();
+ group({170,171,172,173,174});separator();group({160,161,162,163,164});if(isolatedStructureEditing){button(g,186,L"적용 · Ctrl+S",{float(ww-300),23,140,34});button(g,187,L"취소",{float(ww-152),23,136,34});}else button(g,184,L"배경 · 테마  ◇",{float(ww-168),23,152,34});text(g,L"YOUNGDRAW  /  SCIENTIFIC ATELIER",16,70,9,muted,true);
+ if(isolatedStructureEditing)text(g,L"이 창에서는 선택한 단계의 구조만 편집합니다. 적용하면 원래 메커니즘에 반영됩니다.",left+12,96,12,ink,true);
  text(g,L"그리기",16,101,11,muted,true);
  const std::vector<int> drawingTools={200,201,202,217,203,204,205,206,207,208,209,210,211,212,213,214,215,216,218,219};
  for(size_t i=0;i<drawingTools.size();i++)toolButton(g,drawingTools[i],{float(12+(i%2)*82),float(122+(i/2)*44),74,40},int(tool)==drawingTools[i]-200);
@@ -1189,9 +1306,11 @@ void paint(HDC dc,bool reuseScene=false){const auto& palette=appearance::palette
     if(snapStart)highlight(*snapStart);
     if(hovered){highlight(*hovered);if(auto* graph=plot(snapPlot)){auto label=ui::wide(graph->states[size_t(hovered->state)].label)+L" · "+(hovered->edge<0?L"왼쪽 끝":hovered->edge>0?L"오른쪽 끝":L"중앙");Vec at=screen(hovered->p);text(g,label,float(at.x+10),float(at.y-25),11,accent,true);}}
  }
- if(guides&&!snapPlot){for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();i++)guide(reactionSlot(r,i),r.slotWidth,r.slotHeight,r.slots[i].members.empty()?L"구조를 삽입하세요":L"",r.id,i,false);for(auto& p:doc.plots)if(!doc.isLocked(p.id))for(size_t i=0;i<p.states.size();i++){guide(plotAnchor(p,i,true),48,55,p.states[i].above.empty()?L"+ 구조 삽입":L"",p.id,i,true);guide(plotAnchor(p,i,false),48,55,p.states[i].below.empty()?L"+ 구조 삽입":L"",p.id,i,false);}}
- if(tool==Select&&!inlineEdit)for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id)){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=r.links.empty()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});if(!terminal)continue;for(bool below:{false,true}){if(below&&r.vertical)continue;Vec p=mechanismAddPosition(r,below,slot);SolidBrush body(white);Pen outline(accent,1.8f);g.FillEllipse(&body,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawEllipse(&outline,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawLine(&outline,float(p.x-5),float(p.y),float(p.x+5),float(p.y));g.DrawLine(&outline,float(p.x),float(p.y-5),float(p.x),float(p.y+5));}}}
+ if(guides&&!snapPlot){for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();i++)guide(reactionSlot(r,i),r.slotWidth,r.slotHeight,(mechanismConnecting?std::to_wstring(i+1)+L" · ":L"")+(r.slots[i].members.empty()?L"구조를 삽입하세요":L""),r.id,i,false);for(auto& p:doc.plots)if(!doc.isLocked(p.id))for(size_t i=0;i<p.states.size();i++){guide(plotAnchor(p,i,true),48,55,p.states[i].above.empty()?L"+ 구조 삽입":L"",p.id,i,true);guide(plotAnchor(p,i,false),48,55,p.states[i].below.empty()?L"+ 구조 삽입":L"",p.id,i,false);}}
+ if(tool==Select&&!inlineEdit)for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id)){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=!r.explicitConnections()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});if(!terminal)continue;for(bool below:{false,true}){if(below&&r.vertical)continue;Vec p=mechanismAddPosition(r,below,slot);SolidBrush body(white);Pen outline(accent,1.8f);g.FillEllipse(&body,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawEllipse(&outline,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawLine(&outline,float(p.x-5),float(p.y),float(p.x+5),float(p.y));g.DrawLine(&outline,float(p.x),float(p.y-5),float(p.x),float(p.y+5));}}}
  if(selectedCycleArrow>=0&&selection==std::vector<int>{selectedCycleOwner}){Scene highlight;for(auto item:sc.items)if(item.owner==selectedCycleOwner&&item.reactionArrow==selectedCycleArrow){item.color="#008778";item.width+=1;highlight.items.push_back(item);}auto saved=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,highlight);g.Restore(saved);}
+ if(mechanismConnectionDrag){Vec start=world(down);if(auto* r=reaction(connectionOwner);r&&connectionFrom>=0)start=reactionSlot(*r,size_t(connectionFrom));Object preview;preview.head=1;preview.color="#008778";preview.width=2;preview.points={start,world(mouse)};auto saved=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));Scene outline;outline.items=arrowPrimitives(preview);render(g,outline);g.Restore(saved);}
+ if(selectedCycleArrow>=0&&selection==std::vector<int>{selectedCycleOwner}){auto path=mechanismConnectionPath(selectedCycleOwner,selectedCycleArrow);if(!path.empty()){Pen outline(accent,2);SolidBrush body(white);for(auto at:{path.front(),path.back()}){auto p=screen(at);g.FillEllipse(&body,float(p.x-6),float(p.y-6),12.f,12.f);g.DrawEllipse(&outline,float(p.x-6),float(p.y-6),12.f,12.f);}}}
  if(!inlineEdit)for(int id:selection){auto it=sc.objectBounds.find(id);if(it!=sc.objectBounds.end()){auto r=it->second;Vec p=screen({r.x,r.y});Pen pen(Color(150,0,135,120),1.5);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,float(p.x-4),float(p.y-4),float(r.w*zoom+8),float(r.h*zoom+8));}else if(auto a=doc.atom(id)){Vec p=screen(a->p);Pen pen(accent,1.5);g.DrawEllipse(&pen,float(p.x-8),float(p.y-8),16.f,16.f);}}
  if(selection.size()==1){auto found=sc.arrowPaths.find(selection.front());if(found!=sc.arrowPaths.end()&&found->second.size()==4){const auto& path=found->second;Pen guidePen(Color(170,0,135,120),1);guidePen.SetDashStyle(DashStyleDash);for(int i:{0,2}){Vec a=screen(path[i]),b=screen(path[i+1]);g.DrawLine(&guidePen,float(a.x),float(a.y),float(b.x),float(b.y));}Pen outline(accent,1.5);SolidBrush body(white),control(accent);for(int i=0;i<4;i++){Vec p=screen(path[i]);g.FillEllipse(i==1||i==2?&control:&body,float(p.x-5),float(p.y-5),10.f,10.f);g.DrawEllipse(&outline,float(p.x-5),float(p.y-5),10.f,10.f);}}}
  if(hoverAtom){Vec p=screen(doc.atom(hoverAtom)->p);Pen pen(accent,1);g.DrawEllipse(&pen,float(p.x-7),float(p.y-7),14.f,14.f);}if(boxing){Pen p(accent,1);p.SetDashStyle(DashStyleDash);g.DrawRectangle(&p,float(std::min(down.x,mouse.x)),float(std::min(down.y,mouse.y)),float(std::abs(down.x-mouse.x)),float(std::abs(down.y-mouse.y)));}if(drawing){if(tool==Orbital){auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,makeScene(draftOrbital(mouse),measure),false,true);g.Restore(transform);}else if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance){Document preview=doc;preview.objects.push_back(draftArrow(mouse));auto all=makeScene(preview,measure);Scene arrow;for(auto& item:all.items)if(item.owner==-1)arrow.items.push_back(item);auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,arrow,false,true);g.Restore(transform);}else{Pen p(accent,1.5);p.SetDashStyle(DashStyleDash);g.DrawLine(&p,float(down.x),float(down.y),float(mouse.x),float(mouse.y));}}g.Restore(state);
@@ -1214,6 +1333,9 @@ void paint(HDC dc,bool reuseScene=false){const auto& palette=appearance::palette
     text(g,L"이미지와 그래프는 자동 분류됩니다.",rx+16,616,11,muted);
     text(g,L"잠금 상태도 문서에 저장됩니다.",rx+16,637,11,muted);
     text(g,L"Ctrl+Z로 잠금 변경을 되돌립니다.",rx+16,658,11,muted);
+ }else if(isolatedStructureEditing){
+    button(g,110,L"구조 정리  Ctrl+Shift+K",{rx+12,124,236,30});button(g,111,L"템플릿",{rx+12,164,236,30});button(g,113,L"구조·이미지 파일 삽입",{rx+12,204,236,30});button(g,165,L"크기 조정  Ctrl+K",{rx+12,244,236,30});
+    text(g,L"이 단계의 구조만 편집합니다.",rx+16,304,13,ink,true);text(g,L"상단 적용 또는 Ctrl+S: 반영",rx+16,342,12,muted);text(g,L"취소 / 창 닫기: 변경 버리기",rx+16,372,12,muted);
  }else{button(g,110,L"구조 정리  Ctrl+Shift+K",{rx+12,124,236,30});button(g,111,L"템플릿",{rx+12,160,114,30});button(g,112,L"보관",{rx+132,160,116,30});
  rule(g,rx+12,204,rx+248,204,border);
  button(g,182,L"메커니즘",{rx+12,218,114,32},sidebarPage==0);button(g,183,L"그래프",{rx+132,218,116,32},sidebarPage==1);
@@ -1223,16 +1345,16 @@ void paint(HDC dc,bool reuseScene=false){const auto& palette=appearance::palette
  if(sidebarPage==0){
     heading(L"반응 편집",270);pair(120,L"반응 추가",121,L"단계 표 편집",292);pair(122,L"단계 추가",127,L"메커니즘 설정",328);
     heading(L"배치",378);full(125,L"크기·간격 자동 정렬",400);full(126,L"촉매 순환 배치",436);
-    heading(L"구조 삽입",486);pair(123,L"붙여넣기",124,L"파일에서 삽입",508);full(134,L"구조 삽입 영역 표시",544,guides);
-    heading(L"시작하기",594);pair(221,L"첫 구조 없이 분기",140,L"메커니즘 예제",616);
+    heading(L"구조 삽입",486);pair(123,L"붙여넣기",124,L"파일에서 삽입",508);full(186,L"구조 고치기 · 독립 창",544);full(134,L"구조 삽입 영역 표시",580,guides);
+    heading(L"단계·연결",630);pair(143,L"단계 삽입",144,L"단계 제거",652);pair(145,L"드래그 연결",146,L"단계 합치기",688);pair(148,L"연결 표 편집",149,L"화살표 길이",724);
  }else{
     heading(L"데이터·경로",270);pair(130,L"그래프 추가",131,L"데이터 표 편집",292);pair(132,L"경로 추가",133,L"경로 스타일",328);
     pair(135,L"양쪽 분기 추가",138,L"출판용 정돈",364);
     heading(L"그래프 편집",410);pair(139,L"이름·화살표 표",136,L"화살표 자석",432);pair(137,L"그래프·축 설정",142,L"구간별 색상",468);
-    heading(L"구조 삽입",522);pair(123,L"붙여넣기",124,L"파일에서 삽입",544);full(134,L"구조 삽입 영역 표시",580,guides);
-    heading(L"시작하기",630);full(141,L"에너지 그래프 예제",652);
+    heading(L"구조 삽입",522);pair(123,L"붙여넣기",124,L"파일에서 삽입",544);full(186,L"구조 고치기 · 독립 창",580);full(134,L"구조 삽입 영역 표시",616,guides);
+    heading(L"시작하기",666);full(141,L"에너지 그래프 예제",688);
  }
- rule(g,rx+12,704,rx+248,704,border);full(113,L"구조 파일 열어 삽입",718);
+ rule(g,rx+12,768,rx+248,768,border);full(113,L"구조 파일 열어 삽입",782);
  }
  fill(g,{0,float(wh-bottom),float(ww),float(bottom)},palette.chrome);rule(g,0,float(wh-bottom),float(ww),float(wh-bottom),border);text(g,status,14,float(wh-bottom+9),11,muted);Graphics out(dc);presentBuffer(out,*paintBuffer);}
 BondKind kind(){return tool==Double?BondKind::Double:tool==Triple?BondKind::Triple:tool==Wedge?BondKind::Wedge:tool==Hash?BondKind::Hash:tool==Delocalized?BondKind::Aromatic:BondKind::Single;}
@@ -1256,13 +1378,40 @@ void updateDrag(){
     if(curveHandle>=0){for(auto& o:doc.objects)if(o.id==curveOwner){o.points[size_t(curveHandle)]=o.points[size_t(curveHandle)]+delta;}return;}
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
-void cancel(){selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();if(dragging)doc=dragBefore;drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;ReleaseCapture();redraw();}
+void cancel(){mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();if(dragging)doc=dragBefore;drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;ReleaseCapture();redraw();}
 Vec mechanismAddPosition(const Reaction& r,bool below,size_t slot){
     if(slot==size_t(-1))slot=r.slots.size()-1;
     Vec last=reactionSlot(r,slot);
     if(below||(r.vertical&&!r.cyclic))return screen(last+Vec{0,r.slotHeight/2+mechanismCaptionHeight(r,doc.style)})+Vec{0,28};
-    double direction=r.links.empty()&&reactionRow(r,slot)%2?-1.:1.;
+    double direction=!r.explicitConnections()&&reactionRow(r,slot)%2?-1.:1.;
     return screen(last+Vec{direction*r.slotWidth/2,0})+Vec{direction*28,0};
+}
+std::optional<size_t> mechanismSlotAt(int owner,Vec p){
+    auto* r=reaction(owner);if(!r||doc.isLocked(owner))return {};std::optional<size_t> best;double distance=1e30;
+    for(size_t i=0;i<r->slots.size();i++){Vec c=reactionSlot(*r,i);if(std::abs(p.x-c.x)<=r->slotWidth/2+8/zoom&&std::abs(p.y-c.y)<=r->slotHeight/2+8/zoom){double d=(p-c).length();if(d<distance){best=i;distance=d;}}}return best;
+}
+std::vector<Vec> mechanismConnectionPath(int owner,int edge){
+    auto* r=reaction(owner);if(!r||edge<0)return {};auto copy=*r;makeMechanismGraph(copy);if(size_t(edge)>=copy.links.size())return {};return mechanismLinkPath(copy,size_t(edge),doc.style);
+}
+bool beginMechanismConnection(Vec point){
+    if(isolatedStructureEditing||tool!=Select)return false;
+    if(selectedCycleOwner&&selectedCycleArrow>=0){auto path=mechanismConnectionPath(selectedCycleOwner,selectedCycleArrow);if(!path.empty())for(int handle:{0,1})if((point-screen(handle?path.back():path.front())).length()<=10){
+        connectionOwner=selectedCycleOwner;connectionEdge=selectedCycleArrow;connectionHandle=handle;connectionFrom=-1;mechanismConnectionDrag=true;dragBefore=doc;SetCapture(win);status=L"끝점을 다른 단계에 놓으면 연결을 변경합니다. 화살촉을 빈 곳에 가로로 끌면 길이를 조절합니다. Esc: 취소";return true;}}
+    if(!mechanismConnecting)return false;auto slot=mechanismSlotAt(connectionOwner,world(point));
+    if(slot){connectionFrom=int(*slot);connectionEdge=-1;connectionHandle=1;mechanismConnectionDrag=true;dragBefore=doc;selection={connectionOwner};SetCapture(win);status=L"도착 구조 칸까지 드래그하세요. 놓은 뒤 크기·간격 자동 정렬로 재배열합니다.";}
+    else status=L"연결 모드: 시작 구조 칸 안에서 드래그를 시작하세요. Esc: 종료";redraw();return true;
+}
+void finishMechanismConnection(Vec point){
+    const int owner=connectionOwner,edge=connectionEdge,handle=connectionHandle,from=connectionFrom;
+    mechanismConnectionDrag=false;ReleaseCapture();auto target=mechanismSlotAt(owner,world(point));Document candidate=dragBefore;
+    auto it=std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[&](const Reaction& r){return r.id==owner;});if(it==candidate.reactions.end())return;
+    makeMechanismGraph(*it);int selected=edge;
+    bool lengthDrag=edge>=0&&handle==1&&(point-down).length()>3&&(!target||int(*target)==it->links.at(size_t(edge)).to);
+    if(lengthDrag){auto path=mechanismConnectionPath(owner,edge);if(path.empty())return;double direction=path.back().x>=path[path.size()-2].x?1.:-1.;it->arrowLength=std::clamp(mechanismArrowLength(*it,candidate.style)+direction*(point.x-down.x)/zoom,20.,10000.);optimizeMechanism(candidate,{owner});}
+    else if(target){if(edge>=0){auto link=it->links.at(size_t(edge));selected=int(connectMechanismStages(*it,handle?link.from:int(*target),handle?int(*target):link.to,edge));}else selected=int(connectMechanismStages(*it,from,int(*target)));}
+    else{status=L"도착 단계를 지정하지 않아 연결을 변경하지 않았습니다.";redraw();return;}
+    if(toNative(candidate)==toNative(doc)){redraw();return;}history.checkpoint(doc);doc=std::move(candidate);selection={owner};selectedCycleOwner=owner;selectedCycleArrow=selected;targetContainer=0;
+    status=L"연결·길이를 변경했습니다. 크기·간격 자동 정렬: 연결에 맞춰 재배열 · Ctrl+Z: 되돌리기";changed();
 }
 std::optional<std::pair<int,int>> cycleArrowAt(Vec p){
     double tolerance=6/zoom;
@@ -1278,18 +1427,19 @@ std::optional<std::pair<int,int>> cycleArrowAt(Vec p){
 void mechanismContextMenu(Vec at){
     HWND hwnd=win;
     if(!finishInline(true))return;SetFocus(hwnd);if(auto hit=cycleArrowAt(world(at))){selection={hit->first};selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;}
-    else {int objectHit=doc.atomAt(world(at),10/zoom);if(!objectHit)objectHit=doc.bondAt(world(at),5/zoom);if(!objectHit)objectHit=objectAt(world(at));if(objectHit&&!contains(selection,objectHit))selection=groupedSelection({objectHit});}
-    HMENU menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING,166,L"벤젠을 Ph로 축약 (Ctrl+Shift+P)");AppendMenuW(menu,MF_STRING,167,L"가져온 메커니즘 정리 (구조 보존)");AppendMenuW(menu,MF_STRING,168,L"화살표 중앙 X 설정…");AppendMenuW(menu,MF_STRING,169,L"메커니즘 분기 추가…");AppendMenuW(menu,MF_STRING,220,L"세로선 분기 화살표…");POINT point{LONG(at.x),LONG(at.y)};ClientToScreen(hwnd,&point);int chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,hwnd,nullptr);DestroyMenu(menu);if(chosen)command(chosen);redraw();
+    else if(!pickSlot(world(at))){int objectHit=doc.atomAt(world(at),10/zoom);if(!objectHit)objectHit=doc.bondAt(world(at),5/zoom);if(!objectHit)objectHit=objectAt(world(at));if(objectHit&&!contains(selection,objectHit))selection=groupedSelection({objectHit});}
+    HMENU menu=CreatePopupMenu();AppendMenuW(menu,activeStructureTarget()?MF_STRING:MF_STRING|MF_GRAYED,186,L"구조 고치기 · 독립 창…");for(auto entry:std::initializer_list<std::pair<int,const wchar_t*>>{{143,L"단계 삽입…"},{144,L"단계 제거…"},{146,L"두 단계 합치기…"},{145,L"드래그로 단계 연결"},{148,L"단계·연결 표 편집…"},{149,L"화살표 길이…"},{147,L"선택한 연결 제거"}})AppendMenuW(menu,MF_STRING,entry.first,entry.second);AppendMenuW(menu,MF_STRING,166,L"벤젠을 Ph로 축약 (Ctrl+Shift+P)");AppendMenuW(menu,MF_STRING,167,L"가져온 메커니즘 정리 (구조 보존)");AppendMenuW(menu,MF_STRING,168,L"화살표 중앙 X 설정…");AppendMenuW(menu,MF_STRING,169,L"메커니즘 분기 추가…");AppendMenuW(menu,MF_STRING,220,L"세로선 분기 화살표…");POINT point{LONG(at.x),LONG(at.y)};ClientToScreen(hwnd,&point);int chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,hwnd,nullptr);DestroyMenu(menu);if(chosen)command(chosen);redraw();
 
 }
 bool deleteSelectedCycleArrow(){
     if(selectedCycleArrow<0||selection!=std::vector<int>{selectedCycleOwner})return false;
-    auto* r=reaction(selectedCycleOwner);if(!r||doc.isLocked(r->id)||size_t(selectedCycleArrow)>=(r->links.empty()?(r->cyclic?r->slots.size():r->slots.size()-1):r->links.size()))return false;
+    auto* r=reaction(selectedCycleOwner);if(!r||doc.isLocked(r->id)||size_t(selectedCycleArrow)>=(!r->explicitConnections()?(r->cyclic?r->slots.size():r->slots.size()-1):r->links.size()))return false;
     if(contains(r->hiddenArrows,selectedCycleArrow))return false;
+    if(!r->cyclic){history.checkpoint(doc);removeMechanismConnection(*r,size_t(selectedCycleArrow));selectedCycleOwner=0;selectedCycleArrow=-1;selection.clear();changed();return true;}
     history.checkpoint(doc);r->hiddenArrows.push_back(selectedCycleArrow);selectedCycleOwner=0;selectedCycleArrow=-1;selection.clear();
     status=L"순환 화살표를 삭제했습니다. Ctrl+Z: 되돌리기 · 메커니즘 설정에서 모두 복원";changed();return true;
 }
-void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contains(float(p.x),float(p.y))){command(156);return;}if(!finishInline(true))return;SetFocus(win);for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;down=mouse=p;annotationDrag=0;selectedCycleOwner=0;selectedCycleArrow=-1;
+void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contains(float(p.x),float(p.y))){command(156);return;}if(!finishInline(true))return;SetFocus(win);for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;down=mouse=p;annotationDrag=0;if(beginMechanismConnection(p))return;selectedCycleOwner=0;selectedCycleArrow=-1;
  if(tool==Select||tool==Erase)if(auto hit=cycleArrowAt(world(p))){selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;selection={hit->first};targetContainer=0;if(tool==Erase)deleteSelectedCycleArrow();else{status=L"반응 화살표 선택 · 우클릭: 중앙 X 설정 · Ctrl+Z: 되돌리기";redraw();}return;}
  if(snapPlot){
     auto* graph=plot(snapPlot);if(!graph||doc.isLocked(snapPlot)){snapPlot=0;snapStart.reset();return;}
@@ -1300,7 +1450,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
     history.checkpoint(doc);if(snapStage<0)graph->stages.push_back(label);else graph->stages.at(size_t(snapStage))=label;
     snapPlot=0;snapStart.reset();status=L"준위에 맞춰 반응 이름·양쪽 화살표를 배치했습니다. Ctrl+Z: 되돌리기";changed();return;
  }
- if(tool==Select)for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id) ){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=r.links.empty()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});if(!terminal)continue;for(bool below:{false,true}){if(below&&r.vertical)continue;if((p-mechanismAddPosition(r,below,slot)).length()<=13){selection={r.id};targetContainer=r.id;targetSlot=slot;command(below?128:122);return;}}}}
+ if(tool==Select)for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id) ){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=!r.explicitConnections()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});if(!terminal)continue;for(bool below:{false,true}){if(below&&r.vertical)continue;if((p-mechanismAddPosition(r,below,slot)).length()<=13){selection={r.id};targetContainer=r.id;targetSlot=slot;command(below?128:122);return;}}}}
  if(tool==Select){auto sc=scene();Vec w=world(p);for(auto i=sc.items.rbegin();i!=sc.items.rend();++i)if(i->textRole==13&&!groupedObject(i->owner)){Vec at=i->points[0];double width=measure(i->text,i->fontSize,i->font,i->face);if(w.x>=at.x-2&&w.x<=at.x+width+2&&w.y>=at.y-2&&w.y<=at.y+i->fontSize+2){annotationDrag=i->owner;annotationStart=at;dragBefore=dragBase=doc;selection={i->owner};curveHandle=-1;dragging=true;moved=copyDrag=false;SetCapture(win);status=L"전하·라디칼 표시 위치 이동 · Esc: 취소 · Ctrl+Z: 되돌리기";redraw();return;}}}
  if(beginCurveHandle(p))return;curveHandle=-1;Vec w=world(p);int aid=doc.atomAt(w,10/zoom),bid=doc.bondAt(w,5/zoom),oid=aid||bid?0:objectAt(w);hoverAtom=aid;hoverBond=aid?0:bid;
  if((GetKeyState(VK_CONTROL)&0x8000)&&!aid&&!bid&&!oid){panning=true;panOrigin=origin;SetCapture(win);return;}
@@ -1312,9 +1462,9 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
  if((GetKeyState(VK_MENU)&0x8000)&&aid){selection={aid};editObject(aid);return;}
  if(!aid&&bid){history.checkpoint(doc);auto b=doc.bond(bid);if(b->kind==BondKind::Aromatic&&kind()==BondKind::Aromatic){Vec a=doc.atom(b->a)->p,v=doc.atom(b->b)->p-a;for(auto& stroke:scene().items)if(stroke.owner==bid&&stroke.dash&&stroke.points.size()==2){Vec offset=(stroke.points[0]+stroke.points[1])*.5-a;b->doubleSide=(v.x*offset.y-v.y*offset.x)>0?-1:1;break;}}else if(b->kind==kind()&&(kind()==BondKind::Wedge||kind()==BondKind::Hash))std::swap(b->a,b->b);else setBondKind(doc,bid,kind());b->customOrder.clear();b->customDisplay.clear();selection={bid};changed();return;}
  startAtom=aid;drawing=true;SetCapture(win);redraw();}
-void mouseUp(Vec p){if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging){dragging=false;if(moved){history.checkpoint(dragBefore);changed();}else doc=dragBefore;curveHandle=-1;annotationDrag=0;ReleaseCapture();}if(boxing){boxing=false;ReleaseCapture();Vec a=world(down),b=world(p);double l=std::min(a.x,b.x),t=std::min(a.y,b.y),r=std::max(a.x,b.x),z=std::max(a.y,b.y);for(auto& atom:doc.atoms)if(atom.p.x>=l&&atom.p.x<=r&&atom.p.y>=t&&atom.p.y<=z&&!contains(selection,atom.id))selection.push_back(atom.id);auto sc=scene();for(auto& box:sc.objectBounds)if(!doc.atom(box.first)&&!doc.bond(box.first)&&!doc.isLocked(box.first)){auto q=box.second;if(q.x>=l&&q.y>=t&&q.x+q.w<=r&&q.y+q.h<=z&&!contains(selection,box.first))selection.push_back(box.first);}selection=groupedSelection(selection);redraw();}
+void mouseUp(Vec p){if(mechanismConnectionDrag){finishMechanismConnection(p);return;}if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging){dragging=false;if(moved){history.checkpoint(dragBefore);changed();}else doc=dragBefore;curveHandle=-1;annotationDrag=0;ReleaseCapture();}if(boxing){boxing=false;ReleaseCapture();Vec a=world(down),b=world(p);double l=std::min(a.x,b.x),t=std::min(a.y,b.y),r=std::max(a.x,b.x),z=std::max(a.y,b.y);for(auto& atom:doc.atoms)if(atom.p.x>=l&&atom.p.x<=r&&atom.p.y>=t&&atom.p.y<=z&&!contains(selection,atom.id))selection.push_back(atom.id);auto sc=scene();for(auto& box:sc.objectBounds)if(!doc.atom(box.first)&&!doc.bond(box.first)&&!doc.isLocked(box.first)){auto q=box.second;if(q.x>=l&&q.y>=t&&q.x+q.w<=r&&q.y+q.h<=z&&!contains(selection,box.first))selection.push_back(box.first);}selection=groupedSelection(selection);redraw();}
  if(drawing){if(tool==Orbital){auto fragment=draftOrbital(p);drawing=false;ReleaseCapture();history.checkpoint(doc);int first=doc.nextId;doc.append(fragment);selection.clear();for(auto& o:doc.objects)if(o.id>=first)selection.push_back(o.id);changed();return;}if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance){drawing=false;ReleaseCapture();if((p-down).length()<5)return;Object o=draftArrow(p);history.checkpoint(doc);o.id=doc.nextId++;doc.objects.push_back(o);selection={o.id};changed();return;}
- Vec end=endpoint(p),begin=startAtom?doc.atom(startAtom)->p:world(down);int target=doc.atomAt(end,8/zoom);drawing=false;ReleaseCapture();if(target==startAtom&&startAtom)return;if((end-begin).length()<1)return;history.checkpoint(doc);int a=startAtom?startAtom:doc.addAtom(begin),b=target?target:doc.addAtom(end,element);doc.addBond(a,b,kind());selection={b};changed();}redraw();}
+ Vec end=endpoint(p),begin=startAtom?doc.atom(startAtom)->p:world(down);int target=doc.atomAt(end,8/zoom);drawing=false;ReleaseCapture();if(target==startAtom&&startAtom)return;if((end-begin).length()<1)return;history.checkpoint(doc);int a=startAtom?startAtom:doc.addAtom(begin),b=target?target:doc.addAtom(end,element);if(!target)doc.atom(b)->drawingScale=doc.atom(a)->drawingScale;doc.addBond(a,b,kind());selection={b};changed();}redraw();}
 void hotkey(char c){
  if(snapPlot)return;
  if(c=='+'||c=='-'||c=='*'){
@@ -1329,33 +1479,36 @@ void hotkey(char c){
 bool deleteSelectedCycleArrow();
 #include "win_shortcuts.h"
 
-void menuBar(HWND hwnd){HMENU bar=CreateMenu();auto menu=[&](const wchar_t* label,std::initializer_list<std::pair<int,const wchar_t*>> items){HMENU m=CreatePopupMenu();for(auto& item:items)AppendMenuW(m,MF_STRING,item.first,item.second);AppendMenuW(bar,MF_POPUP|MF_OWNERDRAW,(UINT_PTR)m,label);MENUITEMINFOW info{sizeof(info)};info.fMask=MIIM_STRING;info.dwTypeData=const_cast<wchar_t*>(label);SetMenuItemInfoW(bar,UINT(GetMenuItemCount(bar)-1),TRUE,&info);};menu(L"파일(&F)",{{100,L"새 문서\tCtrl+N"},{101,L"열기…\tCtrl+O"},{102,L"저장\tCtrl+S"},{112,L"템플릿으로 저장…"},{109,L"현재 탭 닫기\tCtrl+W"},{108,L"CDXML 내보내기…"},{103,L"SVG 내보내기…"},{106,L"JACS 출판용 SVG…"}});menu(L"편집(&E)",{{104,L"실행 취소\tCtrl+Z"},{105,L"다시 실행\tCtrl+Shift+Z"},{198,L"그룹 만들기\tCtrl+G"},{199,L"그룹 해제\tCtrl+Shift+G"},{121,L"선택 항목 편집…"},{110,L"구조 정리\tCtrl+Shift+K"},{153,L"선택 부분을 뒤쪽으로 (옅은 회색)"},{154,L"선택 부분을 앞쪽으로 (검정)"},{160,L"선택 구조 좌우 반전"},{161,L"선택 구조 상하 반전"},{162,L"선택 구조 반시계 90° 회전"},{163,L"선택 구조 시계 90° 회전"},{164,L"선택 구조 각도 지정 회전…\tCtrl+R"},{165,L"선택 구조 크기 조정…\tCtrl+K"},{166,L"벤젠을 Ph로 축약\tCtrl+Shift+P"}});menu(L"삽입(&I)",{{111,L"템플릿…"},{113,L"구조 파일…"},{215,L"직선\tl"},{216,L"공명 화살표 ↔\tr"},{217,L"공명 결합 (실선+파선)\ta"},{218,L"오비탈 그리기"},{219,L"오비탈 설정…"},{221,L"첫 구조 없이 분기 메커니즘…"},{220,L"세로선 분기 화살표…"},{120,L"반응 메커니즘…"},{130,L"에너지 그래프…"}});menu(L"배치(&L)",{{167,L"가져온 메커니즘 정리 (구조 보존)"},{169,L"메커니즘 분기 추가…"},{168,L"화살표 중앙 X 설정…"},{125,L"크기·간격 자동 정렬"},{126,L"촉매 순환 배치"},{127,L"메커니즘 설정…"},{137,L"그래프·축 설정…"},{138,L"출판용 비율·여백 정돈"},{139,L"반응 이름·화살표…"},{136,L"화살표 자석 배치…"},{142,L"그래프 구간별 색상…"},{135,L"그래프 양쪽 분기 추가…"},{190,L"선택 객체 왼쪽 맞춤\tCtrl+Shift+Alt+L"},{191,L"선택 객체 가로 중앙 맞춤\tCtrl+Shift+Alt+C"},{192,L"선택 객체 오른쪽 맞춤\tCtrl+Shift+Alt+R"},{193,L"선택 객체 위쪽 맞춤\tCtrl+Shift+Alt+T"},{194,L"선택 객체 상하 중앙 맞춤\tCtrl+Shift+Alt+M"},{195,L"선택 객체 아래쪽 맞춤\tCtrl+Shift+Alt+B"},{196,L"선택 객체 가로 간격 배분\tCtrl+Shift+Alt+H"},{197,L"선택 객체 세로 간격 배분\tCtrl+Shift+Alt+V"}});menu(L"보기(&V)",{{184,L"배경 · 테마…"},{176,L"레이어 패널"},{107,L"화면 맞춤"},{134,L"구조 삽입 영역 표시"},{140,L"메커니즘 예제"},{141,L"에너지 그래프 예제"}});SetMenu(hwnd,bar);refreshAppearance();}
+void menuBar(HWND hwnd){HMENU bar=CreateMenu();auto menu=[&](const wchar_t* label,std::initializer_list<std::pair<int,const wchar_t*>> items){HMENU m=CreatePopupMenu();for(auto& item:items)AppendMenuW(m,MF_STRING,item.first,item.second);AppendMenuW(bar,MF_POPUP|MF_OWNERDRAW,(UINT_PTR)m,label);MENUITEMINFOW info{sizeof(info)};info.fMask=MIIM_STRING;info.dwTypeData=const_cast<wchar_t*>(label);SetMenuItemInfoW(bar,UINT(GetMenuItemCount(bar)-1),TRUE,&info);};menu(L"파일(&F)",{{185,L"내 프로젝트…"},{100,L"새 문서\tCtrl+N"},{101,L"열기…\tCtrl+O"},{102,L"저장\tCtrl+S"},{112,L"템플릿으로 저장…"},{109,L"현재 탭 닫기\tCtrl+W"},{108,L"CDXML 내보내기…"},{103,L"SVG 내보내기…"},{106,L"JACS 출판용 SVG…"}});menu(L"편집(&E)",{{186,L"구조 고치기 · 독립 창…"},{104,L"실행 취소\tCtrl+Z"},{105,L"다시 실행\tCtrl+Shift+Z"},{198,L"그룹 만들기\tCtrl+G"},{199,L"그룹 해제\tCtrl+Shift+G"},{121,L"선택 항목 편집…"},{110,L"구조 정리\tCtrl+Shift+K"},{153,L"선택 부분을 뒤쪽으로 (옅은 회색)"},{154,L"선택 부분을 앞쪽으로 (검정)"},{160,L"선택 구조 좌우 반전"},{161,L"선택 구조 상하 반전"},{162,L"선택 구조 반시계 90° 회전"},{163,L"선택 구조 시계 90° 회전"},{164,L"선택 구조 각도 지정 회전…\tCtrl+R"},{165,L"선택 구조 크기 조정…\tCtrl+K"},{166,L"벤젠을 Ph로 축약\tCtrl+Shift+P"}});menu(L"삽입(&I)",{{111,L"템플릿…"},{113,L"구조 파일…"},{215,L"직선\tl"},{216,L"공명 화살표 ↔\tr"},{217,L"공명 결합 (실선+파선)\ta"},{218,L"오비탈 그리기"},{219,L"오비탈 설정…"},{221,L"첫 구조 없이 분기 메커니즘…"},{220,L"세로선 분기 화살표…"},{120,L"반응 메커니즘…"},{130,L"에너지 그래프…"}});menu(L"배치(&L)",{{143,L"단계 삽입…"},{144,L"단계 제거…"},{146,L"두 단계 합치기…"},{145,L"드래그로 단계 연결"},{147,L"선택한 연결 제거"},{148,L"단계·연결 표 편집…"},{149,L"화살표 길이…"},{167,L"가져온 메커니즘 정리 (구조 보존)"},{169,L"메커니즘 분기 추가…"},{168,L"화살표 중앙 X 설정…"},{125,L"크기·간격 자동 정렬"},{126,L"촉매 순환 배치"},{127,L"메커니즘 설정…"},{137,L"그래프·축 설정…"},{138,L"출판용 비율·여백 정돈"},{139,L"반응 이름·화살표…"},{136,L"화살표 자석 배치…"},{142,L"그래프 구간별 색상…"},{135,L"그래프 양쪽 분기 추가…"},{190,L"선택 객체 왼쪽 맞춤\tCtrl+Shift+Alt+L"},{191,L"선택 객체 가로 중앙 맞춤\tCtrl+Shift+Alt+C"},{192,L"선택 객체 오른쪽 맞춤\tCtrl+Shift+Alt+R"},{193,L"선택 객체 위쪽 맞춤\tCtrl+Shift+Alt+T"},{194,L"선택 객체 상하 중앙 맞춤\tCtrl+Shift+Alt+M"},{195,L"선택 객체 아래쪽 맞춤\tCtrl+Shift+Alt+B"},{196,L"선택 객체 가로 간격 배분\tCtrl+Shift+Alt+H"},{197,L"선택 객체 세로 간격 배분\tCtrl+Shift+Alt+V"}});menu(L"보기(&V)",{{184,L"배경 · 테마…"},{176,L"레이어 패널"},{107,L"화면 맞춤"},{134,L"구조 삽입 영역 표시"},{140,L"메커니즘 예제"},{141,L"에너지 그래프 예제"}});if(isolatedStructureEditing){auto file=GetSubMenu(bar,0);while(GetMenuItemCount(file)>0)DeleteMenu(file,0,MF_BYPOSITION);AppendMenuW(file,MF_STRING,186,L"적용하고 돌아가기\tCtrl+S");AppendMenuW(file,MF_STRING,187,L"취소하고 돌아가기\tCtrl+W");for(int id:{120,130,167,169,220,221,186,140,141})EnableMenuItem(bar,id,MF_BYCOMMAND|MF_GRAYED);EnableMenuItem(file,186,MF_BYCOMMAND|MF_ENABLED);}
+ SetMenu(hwnd,bar);refreshAppearance();}
 void refreshAppearance(){const auto& p=appearance::palette();ink=p.text;muted=p.muted;accent=p.accent;border=p.edge;appearance::titlebar(win);HBRUSH old=menuBackground;menuBackground=CreateSolidBrush(RGB(p.chrome.GetR(),p.chrome.GetG(),p.chrome.GetB()));MENUINFO info{sizeof(info)};info.fMask=MIM_BACKGROUND;info.hbrBack=menuBackground;if(GetMenu(win))SetMenuInfo(GetMenu(win),&info);if(old)DeleteObject(old);DrawMenuBar(win);if(documentTabs)InvalidateRect(documentTabs,nullptr,FALSE);redraw();}
 LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){try{switch(msg){case WM_CREATE:win=hwnd;appearance::load();appearance::titlebar(hwnd);createTooltip();menuBar(hwnd);createDocumentTabs();title();return 0;case WM_GETMINMAXINFO:{auto* p=(MINMAXINFO*)lp;p->ptMinTrackSize={1200,880};return 0;}case WM_SIZE:hideTooltip();if(!finishInline(true))return 0;ww=LOWORD(lp);wh=HIWORD(lp);if(documentTabs)MoveWindow(documentTabs,left,89,std::max(1,ww-left-right),30,TRUE);redraw();return 0;case WM_ERASEBKGND:return 1;case WM_SETCURSOR:if(LOWORD(lp)==HTCLIENT&&panning){SetCursor(LoadCursorW(nullptr,IDC_HAND));return TRUE;}if(LOWORD(lp)==HTCLIENT&&canvas(mouse)&&tool==Text){SetCursor(LoadCursorW(nullptr,IDC_IBEAM));return TRUE;}break;case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(hwnd,&ps);paint(dc,true);EndPaint(hwnd,&ps);return 0;}
  case WM_MEASUREITEM:{auto* item=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(item->CtlType==ODT_MENU){auto label=reinterpret_cast<const wchar_t*>(item->itemData);item->itemWidth=UINT(wcslen(label)*8+16);item->itemHeight=24;return TRUE;}break;}
  case WM_DRAWITEM:{auto* item=reinterpret_cast<DRAWITEMSTRUCT*>(lp);if(item->CtlType==ODT_MENU){const auto& p=appearance::palette();Graphics g(item->hDC);RectF box(float(item->rcItem.left),float(item->rcItem.top),float(item->rcItem.right-item->rcItem.left),float(item->rcItem.bottom-item->rcItem.top));fill(g,box,(item->itemState&ODS_SELECTED)?p.hover:p.chrome);SetBkMode(item->hDC,TRANSPARENT);SetTextColor(item->hDC,RGB(p.text.GetR(),p.text.GetG(),p.text.GetB()));auto font=SelectObject(item->hDC,GetStockObject(DEFAULT_GUI_FONT));RECT rect=item->rcItem;rect.left+=8;DrawTextW(item->hDC,reinterpret_cast<const wchar_t*>(item->itemData),-1,&rect,DT_SINGLELINE|DT_VCENTER);SelectObject(item->hDC,font);return TRUE;}break;}
  case WM_CTLCOLOREDIT:if((HWND)lp==inlineEdit){SetTextColor((HDC)wp,inlineColor);SetBkColor((HDC)wp,RGB(255,255,255));return (LRESULT)GetStockObject(WHITE_BRUSH);}break;case WM_TIMER:if(wp==912){if(!IsIconic(hwnd)){auto box=canvasBox();RECT r{LONG(box.X),LONG(box.Y),LONG(box.GetRight()),LONG(box.GetBottom())};repaintOnly(&r);}return 0;}if(wp==911){showTooltip();return 0;}break;case WM_ACTIVATEAPP:if(!wp)hideTooltip();break;case WM_LBUTTONDOWN:mouseDown({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;case WM_LBUTTONUP:mouseUp({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;
- case WM_LBUTTONDBLCLK:{if(snapPlot){mouseDown({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;}Vec p=world({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});if(auto target=textAt(p);target&&!doc.atom(target->owner)){cancel();beginInline(target,p);return 0;}int aid=doc.atomAt(p,10/zoom);if(aid){selection=doc.component(aid);tool=Select;}else{int id=objectAt(p);if(id){selection={id};edit();}}redraw();return 0;}
+ case WM_LBUTTONDBLCLK:{if(snapPlot){mouseDown({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;}Vec p=world({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});if(!isolatedStructureEditing&&tool==Select&&pickSlot(p)){cancel();editTargetStructure();return 0;}if(auto target=textAt(p);target&&!doc.atom(target->owner)){cancel();beginInline(target,p);return 0;}int aid=doc.atomAt(p,10/zoom);if(aid){selection=doc.component(aid);tool=Select;}else{int id=objectAt(p);if(id){selection={id};edit();}}redraw();return 0;}
  case WM_MBUTTONDOWN:if(canvas({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))})){cancel();panning=true;down={double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};panOrigin=origin;SetCapture(hwnd);}return 0;case WM_MBUTTONUP:if(panning&&!rightPanning){panning=false;ReleaseCapture();redraw();}return 0;
  case WM_RBUTTONDOWN:{Vec at{double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};if((wp&MK_CONTROL)&&canvas(at)){
     hideTooltip();if(!finishInline(true))return 0;cancel();SetFocus(hwnd);down=mouse=at;panOrigin=origin;panning=rightPanning=true;SetCapture(hwnd);SetCursor(LoadCursorW(nullptr,IDC_HAND));
  }return 0;}
  case WM_RBUTTONUP:if(rightPanning){mouse={double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};origin=panOrigin+mouse-down;panning=rightPanning=false;ReleaseCapture();SetCursor(LoadCursorW(nullptr,IDC_ARROW));redraw();}else{Vec at{double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};if(canvas(at))mechanismContextMenu(at);}return 0;
  case WM_MOUSELEAVE:hideTooltip();hoverAtom=hoverBond=0;repaintOnly();return 0;case WM_MOUSEMOVE:{TRACKMOUSEEVENT tracking{sizeof(tracking),TME_LEAVE,hwnd,0};TrackMouseEvent(&tracking);mouse={double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};hoverAtom=canvas(mouse)?doc.atomAt(world(mouse),10/zoom):0;hoverBond=canvas(mouse)&&!hoverAtom?doc.bondAt(world(mouse),5/zoom):0;updateDrag();if(panning)origin=panOrigin+mouse-down;updateTooltip();if(!inlineEdit){if(dragging)redraw();else repaintOnly();}return 0;}
- case WM_CAPTURECHANGED:if((drawing||dragging||boxing||panning)&&(HWND)lp!=hwnd){if(dragging)doc=dragBefore;drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;redraw();}return 0;
+ case WM_CAPTURECHANGED:if(mechanismConnectionDrag&&(HWND)lp!=hwnd){mechanismConnectionDrag=false;redraw();}if((drawing||dragging||boxing||panning)&&(HWND)lp!=hwnd){if(dragging)doc=dragBefore;drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;redraw();}return 0;
  case WM_MOUSEWHEEL:{POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hwnd,&p);Vec at{double(p.x),double(p.y)};if(canvas(at)){Vec anchor=world(at);zoom=std::clamp(zoom*(GET_WHEEL_DELTA_WPARAM(wp)>0?1.15:1/1.15),.12,12.);origin=at-anchor*zoom;repaintOnly();}return 0;}
- case WM_NOTIFY:if(documentTabs&&((NMHDR*)lp)->hwndFrom==documentTabs&&((NMHDR*)lp)->code==TCN_SELCHANGE){switchDocumentTab(size_t(TabCtrl_GetCurSel(documentTabs)));SetFocus(win);return 0;}break;case WM_APP+3:closeDocumentTab(size_t(wp));return 0;case WM_SYSKEYDOWN:if((GetKeyState(VK_CONTROL)&0x8000)||wp==VK_LEFT||wp==VK_RIGHT||wp==VK_UP||wp==VK_DOWN||wp=='K'){key(wp);return 0;}break;case WM_KEYDOWN:key(wp);return 0;case WM_CHAR:if(!(GetKeyState(VK_CONTROL)&0x8000)&&!dragging&&!drawing&&!boxing&&!panning&&wp<128)hotkey(char(wp));return 0;case WM_COMMAND:if(LOWORD(wp)>=100&&(LOWORD(wp)<=199||LOWORD(wp)==215||LOWORD(wp)==216||LOWORD(wp)==217||LOWORD(wp)==218||LOWORD(wp)==219)){command(LOWORD(wp));return 0;}if(LOWORD(wp)==900){if(HIWORD(wp)==EN_CHANGE)previewInline();else if(HIWORD(wp)==EN_KILLFOCUS&&!inlineClosing)PostMessageW(hwnd,WM_APP+1,0,0);return 0;}break;case WM_APP+1:if(inlineEdit&&GetFocus()!=inlineEdit)finishInline(true);return 0;case WM_CLOSE:if(!finishInline(true))return 0;if(closeAllDocuments()){if(office::editing()){office::close();dirty=false;}else DestroyWindow(hwnd);}return 0;case WM_DESTROY:KillTimer(hwnd,912);canvasSceneCache.reset();paintBuffer.reset();if(menuBackground){DeleteObject(menuBackground);menuBackground=nullptr;}if(tabFont){DeleteObject(tabFont);tabFont=nullptr;}PostQuitMessage(0);return 0;
+ case WM_NOTIFY:if(documentTabs&&((NMHDR*)lp)->hwndFrom==documentTabs&&((NMHDR*)lp)->code==TCN_SELCHANGE){switchDocumentTab(size_t(TabCtrl_GetCurSel(documentTabs)));SetFocus(win);return 0;}break;case WM_APP+3:closeDocumentTab(size_t(wp));return 0;case WM_SYSKEYDOWN:if((GetKeyState(VK_CONTROL)&0x8000)||wp==VK_LEFT||wp==VK_RIGHT||wp==VK_UP||wp==VK_DOWN||wp=='K'){key(wp);return 0;}break;case WM_KEYDOWN:key(wp);return 0;case WM_CHAR:if(!(GetKeyState(VK_CONTROL)&0x8000)&&!dragging&&!drawing&&!boxing&&!panning&&wp<128)hotkey(char(wp));return 0;case WM_COMMAND:if(LOWORD(wp)>=100&&(LOWORD(wp)<=199||LOWORD(wp)==215||LOWORD(wp)==216||LOWORD(wp)==217||LOWORD(wp)==218||LOWORD(wp)==219)){command(LOWORD(wp));return 0;}if(LOWORD(wp)==900){if(HIWORD(wp)==EN_CHANGE)previewInline();else if(HIWORD(wp)==EN_KILLFOCUS&&!inlineClosing)PostMessageW(hwnd,WM_APP+1,0,0);return 0;}break;case WM_APP+1:if(inlineEdit&&GetFocus()!=inlineEdit)finishInline(true);return 0;case WM_CLOSE:if(!finishInline(true))return 0;if(isolatedStructureEditing){DestroyWindow(hwnd);return 0;}if(closeAllDocuments()){if(office::editing()){office::close();dirty=false;}else DestroyWindow(hwnd);}return 0;case WM_DESTROY:KillTimer(hwnd,912);canvasSceneCache.reset();paintBuffer.reset();if(menuBackground){DeleteObject(menuBackground);menuBackground=nullptr;}if(tabFont){DeleteObject(tabFont);tabFont=nullptr;}PostQuitMessage(0);return 0;
  }}catch(const std::exception& e){MessageBoxW(hwnd,ui::wide(e.what()).c_str(),L"YoungDraw",MB_OK|MB_ICONWARNING);redraw();}return DefWindowProcW(hwnd,msg,wp,lp);}
 }
-int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIAware();int argc=0;LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);OleInitialize(nullptr);bool embedding=argc>1&&(_wcsicmp(argv[1],L"/Embedding")==0||_wcsicmp(argv[1],L"-Embedding")==0);GdiplusStartupInput start;ULONG_PTR token;GdiplusStartup(&token,&start,nullptr);
+int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIAware();int argc=0;LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);OleInitialize(nullptr);bool embedding=argc>1&&(_wcsicmp(argv[1],L"/Embedding")==0||_wcsicmp(argv[1],L"-Embedding")==0);GdiplusStartupInput start;ULONG_PTR token;GdiplusStartup(&token,&start,nullptr);setMechanismTextMeasure(measure);
  if(argc==2&&std::wstring(argv[1])==L"--copy-office-demo"){office::start({nullptr,[](const Document&){},[](){return coordinateDemo();},officePicture},false);auto result=office::copy(coordinateDemo());if(SUCCEEDED(result))result=OleFlushClipboard();LocalFree(argv);imageCache.clear();GdiplusShutdown(token);OleUninitialize();return FAILED(result)?int(result):0;}
  if(argc==2&&std::wstring(argv[1])==L"--test-office"){office::start({nullptr,[](const Document&){},[](){return coordinateDemo();},officePicture},false,false);auto result=office::selfTest();LocalFree(argv);imageCache.clear();GdiplusShutdown(token);OleUninitialize();return FAILED(result)?int(result):0;}
  if(argc==3&&std::wstring(argv[1])==L"--export-lab-templates"){try{fs::create_directories(argv[2]);size_t i=0;for(auto& entry:labTemplates){auto d=fromNative(entry.data);auto path=fs::path(argv[2])/std::to_wstring(i++);writePreview(path.wstring()+L".png",d);writeFile(path.wstring()+L".svg",toSvg(makeScene(d)));writeFile(path.wstring()+L".cdxml",toCdxml(d));}writePreview((fs::path(argv[2])/L"chair.png").wstring(),chairTemplate());writeFile((fs::path(argv[2])/L"chair.svg").wstring(),toSvg(makeScene(chairTemplate())));LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(...){LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
  if(argc==3&&std::wstring(argv[1])==L"--export-demo"){try{writeFile(std::wstring(argv[2])+L".cdxml",toCdxml(doc));writeFile(std::wstring(argv[2])+L".svg",toSvg(makeScene(doc)));writeFile(std::wstring(argv[2])+L"-mechanism.ydraw",toNative(mechanismDemo()));writeFile(std::wstring(argv[2])+L"-mechanism.cdxml",toCdxml(mechanismDemo()));writeFile(std::wstring(argv[2])+L"-mechanism.svg",toSvg(makeScene(mechanismDemo())));writeFile(std::wstring(argv[2])+L"-coordinate.ydraw",toNative(coordinateDemo()));writeFile(std::wstring(argv[2])+L"-coordinate.cdxml",toCdxml(coordinateDemo()));writeFile(std::wstring(argv[2])+L"-coordinate.svg",toSvg(makeScene(coordinateDemo())));Document rigid=coordinateDemo();rigid.plots[0].mode=3;rigid.plots[0].series[0].dash=1;rigid.plots[0].series[0].color="#0e6d89";rigid.plots[0].states[1].marker=3;rigid.plots[0].states[3].marker=4;rigid.plots[0].series.push_back({"Path 2","#b44758",{0,26,10,19,-9.9},0,2,2,2.5});writeFile(std::wstring(argv[2])+L"-rigid.ydraw",toNative(rigid));writeFile(std::wstring(argv[2])+L"-rigid.cdxml",toCdxml(rigid));writeFile(std::wstring(argv[2])+L"-rigid.svg",toSvg(makeScene(rigid)));writePreview(std::wstring(argv[2])+L"-rigid.png",rigid);writePreview(std::wstring(argv[2])+L"-coordinate.png",coordinateDemo());writePreview(std::wstring(argv[2])+L"-mechanism.png",mechanismDemo());Document partial;int pa=partial.addAtom({30,45}),pb=partial.addAtom({56,30}),pc=partial.addAtom({82,45});partial.addBond(pa,pb);partial.addBond(pc,pb);delocalizeBonds(partial,partial.allIds());writeFile(std::wstring(argv[2])+L"-delocalized.ydraw",toNative(partial));writeFile(std::wstring(argv[2])+L"-delocalized.cdxml",toCdxml(partial));writeFile(std::wstring(argv[2])+L"-delocalized.svg",toSvg(makeScene(partial)));writePreview(std::wstring(argv[2])+L"-delocalized.png",partial);Document cyclic=mechanismDemo();optimizeMechanism(cyclic,{},true);writeFile(std::wstring(argv[2])+L"-cycle.ydraw",toNative(cyclic));writePreview(std::wstring(argv[2])+L"-cycle.png",cyclic);LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(...){LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
  if(argc==4&&std::wstring(argv[1])==L"--convert"){try{doc=fromCdxml(readFile(argv[2]));writeFile(std::wstring(argv[3])+L".ydraw",toNative(doc));writeFile(std::wstring(argv[3])+L".cdxml",toCdxml(doc));writeFile(std::wstring(argv[3])+L".svg",toSvg(scene()));LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(const std::exception& e){try{writeFile(std::wstring(argv[3])+L".error.txt",e.what());}catch(...){} LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
- StartupSplash splash(instance,!embedding && show!=SW_HIDE && show!=SW_SHOWMINIMIZED && show!=SW_SHOWMINNOACTIVE && show!=SW_MINIMIZE);
+ isolatedStructureEditing=argc==4&&std::wstring(argv[1])==L"--edit-structure";if(isolatedStructureEditing)isolatedStructureResult=argv[3];
+ StartupSplash splash(instance,!embedding && !isolatedStructureEditing && show!=SW_HIDE && show!=SW_SHOWMINIMIZED && show!=SW_SHOWMINNOACTIVE && show!=SW_MINIMIZE);
  std::vector<std::pair<Document,std::wstring>> startupDocuments;
- if(!embedding)for(int i=1;i<argc;i++){try{startupDocuments.push_back({fromCdxml(readFile(argv[i])),argv[i]});}catch(...){}}
- if(!startupDocuments.empty()){doc=std::move(startupDocuments[0].first);filePath=startupDocuments[0].second;Document beforeUpgrade=doc;dirty=upgradeBondGeometry(doc);if(dirty)history.checkpoint(beforeUpgrade);tool=Select;}
+ if(isolatedStructureEditing){try{startupDocuments.push_back({fromNative(readFile(argv[2])),argv[2]});}catch(const std::exception& e){MessageBoxW(nullptr,ui::wide(e.what()).c_str(),L"구조 편집",MB_OK|MB_ICONWARNING);LocalFree(argv);return 1;}}
+ else if(!embedding)for(int i=1;i<argc;i++){try{startupDocuments.push_back({fromCdxml(readFile(argv[i])),argv[i]});}catch(...){}}
+ if(!startupDocuments.empty()){doc=std::move(startupDocuments[0].first);filePath=startupDocuments[0].second;Document beforeUpgrade=doc;if(!isolatedStructureEditing)normalizeChemicalLabels(doc);dirty=!isolatedStructureEditing&&(upgradeBondGeometry(doc)||toNative(doc)!=toNative(beforeUpgrade));if(dirty)history.checkpoint(beforeUpgrade);tool=Select;}
 
- LocalFree(argv);WNDCLASSW wc{};wc.style=CS_DBLCLKS;wc.lpfnWndProc=proc;wc.hInstance=instance;wc.lpszClassName=L"YoungDrawWindow";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(101));RegisterClassW(&wc);HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"YoungDraw",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1440,940,nullptr,nullptr,instance,nullptr);if(!hwnd)return 1;SendMessageW(hwnd,WM_SETICON,ICON_SMALL,reinterpret_cast<LPARAM>(LoadImageW(instance,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_SHARED)));fit();for(size_t i=1;i<startupDocuments.size();i++)newDocumentTab(std::move(startupDocuments[i].first),startupDocuments[i].second);if(FAILED(office::start({hwnd,[](const Document& d){storeDocumentTab();for(auto& tab:documents)tab.office=false;officeDocument=false;newDocumentTab(d,L"",true);},[](){return officeCurrentDocument();},officePicture},embedding)))MessageBoxW(hwnd,L"Office 편집 개체를 등록하지 못했습니다.",L"YoungDraw",MB_OK|MB_ICONWARNING);if(!embedding)splash.finish(hwnd,show);fit();UpdateWindow(hwnd);MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}office::stop();imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return int(msg.wParam);}
+ LocalFree(argv);WNDCLASSW wc{};wc.style=CS_DBLCLKS;wc.lpfnWndProc=proc;wc.hInstance=instance;wc.lpszClassName=L"YoungDrawWindow";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(101));RegisterClassW(&wc);HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"YoungDraw",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1440,940,nullptr,nullptr,instance,nullptr);if(!hwnd)return 1;SendMessageW(hwnd,WM_SETICON,ICON_SMALL,reinterpret_cast<LPARAM>(LoadImageW(instance,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_SHARED)));fit();for(size_t i=1;i<startupDocuments.size();i++)newDocumentTab(std::move(startupDocuments[i].first),startupDocuments[i].second);if(!isolatedStructureEditing&&FAILED(office::start({hwnd,[](const Document& d){storeDocumentTab();for(auto& tab:documents)tab.office=false;officeDocument=false;newDocumentTab(d,L"",true);},[](){return officeCurrentDocument();},officePicture},embedding)))MessageBoxW(hwnd,L"Office 편집 개체를 등록하지 못했습니다.",L"YoungDraw",MB_OK|MB_ICONWARNING);if(!embedding)splash.finish(hwnd,show);fit();UpdateWindow(hwnd);MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}office::stop();imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return int(msg.wParam);}

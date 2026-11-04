@@ -19,13 +19,13 @@ static std::vector<ScriptRun> scriptRuns(const std::string& input){
     }if(!normal.empty())runs.push_back({normal,0});return runs;
 }
 static double textWidth(const Measure& m,const std::string& s,double size,const std::string& font="Arial",int face=1){
-    double width=0;std::istringstream lines(s);std::string line;while(std::getline(lines,line)){if(!line.empty()&&line.back()=='\r')line.pop_back();double row=0;for(auto& run:scriptRuns(line)){double fs=size*(run.script?.7:1);size_t chars=0;for(unsigned char c:run.text)if((c&0xc0)!=0x80)chars++;row+=m?m(run.text,fs,font,face):chars*fs*(face&1?.62:.56);}width=std::max(width,row);}return width;
+    double width=0;std::istringstream lines(s);std::string line;while(std::getline(lines,line)){if(!line.empty()&&line.back()=='\r')line.pop_back();double row=0;for(auto& run:scriptRuns(line)){double fs=size*(run.script?(run.script==1?chemicalScriptScale(run.text):.7):1);size_t chars=0;for(unsigned char c:run.text)if((c&0xc0)!=0x80)chars++;row+=m?m(run.text,fs,font,face):chars*fs*(face&1?.62:.56);}width=std::max(width,row);}return width;
 }
 static void emitText(std::vector<Primitive>& items,Primitive base,Vec at,bool center,const Measure& measure){
     auto value=base.text;std::istringstream rows(value);std::string row;size_t line=0;
     while(std::getline(rows,row)){
         if(!row.empty()&&row.back()=='\r')row.pop_back();double x=at.x-(center?textWidth(measure,row,base.fontSize,base.font,base.face)/2:0),y=at.y+line++*base.fontSize*1.3;
-        for(auto& run:scriptRuns(row)){auto t=base;t.text=run.text;t.fontSize*=run.script?.7:1;t.points={{x,y+(run.script==1?-base.fontSize*.35:run.script==-1?base.fontSize*.3:0)}};items.push_back(t);x+=textWidth(measure,run.text,t.fontSize,t.font,t.face);}
+        for(auto& run:scriptRuns(row)){auto t=base;t.text=run.text;t.fontSize*=run.script?(run.script==1?chemicalScriptScale(run.text):.7):1;t.points={{x,y+(run.script==1?-base.fontSize*.35:run.script==-1?base.fontSize*.3:0)}};items.push_back(t);x+=textWidth(measure,run.text,t.fontSize,t.font,t.face);}
     }if(value.empty()){base.points={at};items.push_back(base);}
 }
 // Find a shortest alternate path. Its centroid chooses the inside of a ring.
@@ -38,21 +38,22 @@ Scene makeScene(const Document& d,const Measure& measure){
     Scene s;std::map<int,Rect> boxes;std::vector<Primitive> labels;
     int owner=0;std::string strokeColor="#000000"; auto line=[&](Vec a,Vec b,double w,int dash=0){Primitive p;p.points={a,b};p.width=w;p.dash=dash;p.owner=owner;p.color=strokeColor;s.items.push_back(p);};
     for(auto& a:d.atoms){
+        Style atomStyle=d.style;atomStyle.fontSize*=a.drawingScale;atomStyle.margin*=a.drawingScale;
         owner=a.id; bool isolated=true;Vec neighbors;for(auto& b:d.bonds)if(b.a==a.id||b.b==a.id){isolated=false;neighbors=neighbors+d.atom(b.a==a.id?b.b:b.a)->p-a.p;}
         if(!a.labelRuns.empty()&&!a.label.empty()){
-            Vec cursor=a.p+a.labelOffset;double base=d.style.fontSize*.91;double l=cursor.x,t=cursor.y,r=cursor.x,b=cursor.y;
+            Vec cursor=a.p+a.labelOffset;double base=atomStyle.fontSize*.91;double l=cursor.x,t=cursor.y,r=cursor.x,b=cursor.y;
             for(auto& run:a.labelRuns){Primitive p;p.type=Primitive::Text;p.owner=a.id;p.text=run.text;p.font=run.font;p.fontSize=run.size;p.face=run.face;p.color=run.color;int script=run.face&96;double offset=script==32?run.size*.4:script==64?-run.size*.4:0;p.points={{cursor.x,cursor.y+base-run.size*.91+offset}};labels.push_back(p);r=std::max(r,cursor.x+textWidth(measure,run.text,run.size,run.font,run.face));t=std::min(t,p.points[0].y);b=std::max(b,p.points[0].y+run.size);cursor.x+=textWidth(measure,run.text,run.size,run.font,run.face);}
-            boxes[a.id]={l-d.style.margin,t-d.style.margin,r-l+2*d.style.margin,b-t+2*d.style.margin};continue;
+            boxes[a.id]={l-atomStyle.margin,t-atomStyle.margin,r-l+2*atomStyle.margin,b-t+2*atomStyle.margin};continue;
         }
         if(a.element==6&&!isolated&&a.label.empty()&&!a.charge&&!a.isotope&&!a.radical)continue;
-        std::string el=a.label.empty()?symbol(a.element):a.label;double fs=d.style.fontSize,w=textWidth(measure,el,fs,"Arial",d.style.labelFace);
+        std::string el=a.label.empty()?symbol(a.element):a.label;double fs=atomStyle.fontSize,w=textWidth(measure,el,fs,"Arial",atomStyle.labelFace);
         double anchor=w/2;
         if(!a.label.empty()){
             auto formatted=chemicalScripts(el);auto script=formatted.find("^{");auto sym=symbol(a.element);auto pos=formatted.find(sym);
-            if(script!=std::string::npos&&pos!=std::string::npos&&pos<script)anchor=textWidth(measure,formatted.substr(0,pos),fs,"Arial",d.style.labelFace)+textWidth(measure,sym,fs,"Arial",d.style.labelFace)/2;
+            if(script!=std::string::npos&&pos!=std::string::npos&&pos<script)anchor=textWidth(measure,formatted.substr(0,pos),fs,"Arial",atomStyle.labelFace)+textWidth(measure,sym,fs,"Arial",atomStyle.labelFace)/2;
         }
-        double x=a.p.x-anchor,y=a.p.y-fs/2;boxes[a.id]={x-d.style.margin,y-d.style.margin,w+2*d.style.margin,fs+2*d.style.margin};
-        Primitive t;t.owner=a.id;t.type=Primitive::Text;t.points={{x,y}};t.fontSize=fs;t.face=d.style.labelFace;t.color=a.color;t.text=el;emitText(labels,t,{x,y},false,measure);
+        double x=a.p.x-anchor,y=a.p.y-fs/2;boxes[a.id]={x-atomStyle.margin,y-atomStyle.margin,w+2*atomStyle.margin,fs+2*atomStyle.margin};
+        Primitive t;t.owner=a.id;t.type=Primitive::Text;t.points={{x,y}};t.fontSize=fs;t.face=atomStyle.labelFace;t.color=a.color;t.text=el;emitText(labels,t,{x,y},false,measure);
         if(chemicalScripts(el).find("^{")!=std::string::npos){boxes[a.id].y-=fs*.35;boxes[a.id].h+=fs*.35;}
         // Only neutral common heteroatoms get automatic H labels in v0.1.
         int h=a.label.empty()&&(a.element==7||a.element==8||a.element==16)?d.hydrogens(a.id):0;
@@ -60,13 +61,13 @@ Scene makeScene(const Document& d,const Measure& measure){
             bool leftBond=false,rightBond=false;for(auto& bond:d.bonds)if(bond.a==a.id||bond.b==a.id){Vec v=d.atom(bond.a==a.id?bond.b:bond.a)->p-a.p;if(v.x>v.length()*.3)rightBond=true;if(v.x<-v.length()*.3)leftBond=true;}
             bool vertical=leftBond&&rightBond;double hx=vertical?a.p.x-(hw+nw)/2:neighbors.x>1?x-hw-nw:x+w;double hy=vertical?y+(neighbors.y>0?-fs-1:fs+1):y;Primitive ht=t;ht.text="H";ht.points={{hx,hy}};labels.push_back(ht);
             if(h>1){ht.text=std::to_string(h);ht.fontSize=fs*.7;ht.points={{hx+hw,hy+fs*.4}};labels.push_back(ht);}
-            Rect& box=boxes[a.id];double left=std::min(box.x,hx-d.style.margin),right=std::max(box.x+box.w,hx+hw+nw+d.style.margin);box.x=left;box.w=right-left;if(vertical){double top=std::min(box.y,hy-d.style.margin),bottom=std::max(box.y+box.h,hy+fs+d.style.margin);box.y=top;box.h=bottom-top;}
+            Rect& box=boxes[a.id];double left=std::min(box.x,hx-atomStyle.margin),right=std::max(box.x+box.w,hx+hw+nw+atomStyle.margin);box.x=left;box.w=right-left;if(vertical){double top=std::min(box.y,hy-atomStyle.margin),bottom=std::max(box.y+box.h,hy+fs+atomStyle.margin);box.y=top;box.h=bottom-top;}
         }
         if(a.label.empty()&&a.isotope){Primitive isotope=t;isotope.fontSize=fs*.65;isotope.text=std::to_string(a.isotope);double iw=textWidth(measure,isotope.text,isotope.fontSize);isotope.points={{x-iw,y-fs*.3}};labels.push_back(isotope);boxes[a.id].x-=iw;boxes[a.id].w+=iw;}
     }
     // Place charges and radical dots independently of custom or imported atom labels.
     for(const auto& a:d.atoms)if((a.charge&&!atomLabelHasCharge(a))||a.radical){
-        double fs=d.style.fontSize;auto box=boxes.at(a.id);
+        double fs=d.style.fontSize*a.drawingScale;auto box=boxes.at(a.id);
         Primitive mark;mark.type=Primitive::Text;mark.owner=a.id;mark.textRole=13;mark.fontSize=fs*.7;mark.face=d.style.labelFace;mark.color=a.color;
         int charge=atomLabelHasCharge(a)?0:a.charge;
         mark.text=(std::abs(charge)>1?std::to_string(std::abs(charge)):"")+(charge>0?"+":charge<0?"\xe2\x88\x92":"")+(a.radical==1?"\xe2\x80\xa2\xe2\x80\xa2":a.radical==3?"\xe2\x80\xa2\xe2\x80\xa2":a.radical?"\xe2\x80\xa2":"");
@@ -99,24 +100,25 @@ Scene makeScene(const Document& d,const Measure& measure){
     };
     std::vector<const Bond*> orderedBonds;for(auto& b:d.bonds)orderedBonds.push_back(&b);std::stable_sort(orderedBonds.begin(),orderedBonds.end(),[](const Bond* a,const Bond* b){return (a->color!="#000000")>(b->color!="#000000");});
     for(const auto* bond:orderedBonds){const auto& b=*bond;
-        owner=b.id;strokeColor=b.color;double bondWidth=b.customDisplay=="Bold"?d.style.boldWidth:d.style.lineWidth; Vec origA=d.atom(b.a)->p,origB=d.atom(b.b)->p,a=clip(b.a,origA,origB),z=clip(b.b,origB,origA),v=z-a;double len=v.length();
+        Style bondStyle=d.style;bondStyle.lineWidth*=b.drawingScale;bondStyle.boldWidth*=b.drawingScale;bondStyle.bondLength*=b.drawingScale;bondStyle.hashSpacing*=b.drawingScale;
+        owner=b.id;strokeColor=b.color;double bondWidth=b.customDisplay=="Bold"?bondStyle.boldWidth:bondStyle.lineWidth; Vec origA=d.atom(b.a)->p,origB=d.atom(b.b)->p,a=clip(b.a,origA,origB),z=clip(b.b,origB,origA),v=z-a;double len=v.length();
         if(len<.2 || (a-origA).length()+(z-origB).length()>=(origB-origA).length())continue;
-        Vec u=v*(1/len),n={-u.y,u.x};double gap=d.style.bondLength*d.style.bondSpacing;
+        Vec u=v*(1/len),n={-u.y,u.x};double gap=bondStyle.bondLength*bondStyle.bondSpacing;
         // BoldWidth is the full width, also at the broad end of a wedge.
         // Keep short, label-clipped coordination bonds from becoming squat triangles.
-        double wedgeWidth=std::min(d.style.boldWidth,len*.35);
+        double wedgeWidth=std::min(bondStyle.boldWidth,len*.35);
         if(b.kind==BondKind::Wedge){Primitive p;p.owner=owner;p.color=b.color;p.type=Primitive::Polygon;p.points={a,z+n*(wedgeWidth/2),z-n*(wedgeWidth/2)};s.items.push_back(p);}
         else if(b.kind==BondKind::Hash){
-            double ink=std::min(d.style.lineWidth*.6,len/6);
-            int count=std::max(2,int(len/std::max(d.style.hashSpacing,ink*2.2)));
+            double ink=std::min(bondStyle.lineWidth*.6,len/6);
+            int count=std::max(2,int(len/std::max(bondStyle.hashSpacing,ink*2.2)));
             for(int i=0;i<=count;i++){double t=double(i)/count;Vec c=a+v*((ink/2+(len-ink)*t)/len);double w=std::max(ink*.4,wedgeWidth*t/2);line(c+n*w,c-n*w,ink);s.items.back().flatStart=s.items.back().flatEnd=true;}}
         else if(b.kind==BondKind::Double){auto path=ringPath(d,b);
             if(!path.empty()&&b.doubleSide==0){Vec center;for(int id:path)center=center+d.atom(id)->p;center=center*(1./path.size());double side=((center-a).x*n.x+(center-a).y*n.y)>0?1:-1;
-                line(a,z,bondWidth);double inset=std::min(len*.25,gap*.65+std::max(0.,bondWidth-d.style.lineWidth)/2);line(a+u*inset+n*(side*gap),z-u*inset+n*(side*gap),d.style.lineWidth);}
-            else if(b.doubleSide){line(a,z,bondWidth);line(a+n*(gap*b.doubleSide),z+n*(gap*b.doubleSide),d.style.lineWidth);}else{line(a+n*(gap/2),z+n*(gap/2),bondWidth);line(a-n*(gap/2),z-n*(gap/2),d.style.lineWidth);}}
+                line(a,z,bondWidth);double inset=std::min(len*.25,gap*.65+std::max(0.,bondWidth-bondStyle.lineWidth)/2);line(a+u*inset+n*(side*gap),z-u*inset+n*(side*gap),bondStyle.lineWidth);}
+            else if(b.doubleSide){line(a,z,bondWidth);line(a+n*(gap*b.doubleSide),z+n*(gap*b.doubleSide),bondStyle.lineWidth);}else{line(a+n*(gap/2),z+n*(gap/2),bondWidth);line(a-n*(gap/2),z-n*(gap/2),bondStyle.lineWidth);}}
         else if(b.kind==BondKind::Triple){line(a,z,bondWidth);line(a+n*gap,z+n*gap,bondWidth);line(a-n*gap,z-n*gap,bondWidth);}
-        else if(b.kind==BondKind::Wavy){Vec last=a;for(int i=1;i<=24;i++){double t=double(i)/24;Vec q=a+v*t+n*(std::sin(t*pi*8)*.8);line(last,q,bondWidth);last=q;}}
-        else if(b.kind==BondKind::Dative){line(a,z,bondWidth);line(z,z-u*3+n*1.4,bondWidth);line(z,z-u*3-n*1.4,bondWidth);}
+        else if(b.kind==BondKind::Wavy){Vec last=a;for(int i=1;i<=24;i++){double t=double(i)/24;Vec q=a+v*t+n*(std::sin(t*pi*8)*.8*b.drawingScale);line(last,q,bondWidth);last=q;}}
+        else if(b.kind==BondKind::Dative){line(a,z,bondWidth);line(z,z-u*(3*b.drawingScale)+n*(1.4*b.drawingScale),bondWidth);line(z,z-u*(3*b.drawingScale)-n*(1.4*b.drawingScale),bondWidth);}
         else if(b.kind==BondKind::Aromatic){
             // The solid stroke stays on the skeleton; put the partial second
             // stroke inside the ring or delocalized fragment, independent of
@@ -129,11 +131,11 @@ Scene makeScene(const Document& d,const Measure& measure){
             }
             line(a,z,bondWidth);double inset=std::min(len*.25,gap*.8);line(a+u*inset+n*(side*gap),z-u*inset+n*(side*gap),bondWidth,1);
         }
-        else line(a,z,b.kind==BondKind::Bold?d.style.boldWidth:bondWidth,b.kind==BondKind::Dash?1:0);
+        else line(a,z,b.kind==BondKind::Bold?bondStyle.boldWidth:bondWidth,b.kind==BondKind::Dash?1:0);
     }
     strokeColor="#000000";s.items.insert(s.items.end(),labels.begin(),labels.end());
     int arrowIndex=-1;std::vector<int> hiddenArrowIndices;
-    auto arrow=[&](Vec a,Vec z,const std::string& color,double width,int head,double headScale=1.){if(arrowIndex>=0&&std::find(hiddenArrowIndices.begin(),hiddenArrowIndices.end(),arrowIndex)!=hiddenArrowIndices.end())return;Vec v=z-a;double len=v.length();if(len<1e-6)return;Vec u=v*(1/len),n{-u.y,u.x};Primitive p;p.reactionArrow=arrowIndex;p.owner=owner;p.points={a,head?z-u*(4.8*headScale):z};p.width=width;p.color=color;s.items.push_back(p);if(head){p.type=Primitive::Polygon;p.points=head==2?std::vector<Vec>{z,z-u*(5*headScale)+n*(2*headScale)}:std::vector<Vec>{z,z-u*(5*headScale)+n*(2*headScale),z-u*(5*headScale)-n*(2*headScale)};s.items.push_back(p);}};
+    auto arrow=[&](Vec a,Vec z,const std::string& color,double width,int head,double headScale=1.){if(arrowIndex>=0&&std::find(hiddenArrowIndices.begin(),hiddenArrowIndices.end(),arrowIndex)!=hiddenArrowIndices.end())return;Vec v=z-a;double len=v.length();if(len<1e-6)return;headScale=std::min(headScale,len/8);Vec u=v*(1/len),n{-u.y,u.x};Primitive p;p.reactionArrow=arrowIndex;p.owner=owner;p.points={a,head?z-u*(4.8*headScale):z};p.width=width;p.color=color;s.items.push_back(p);if(head){p.type=Primitive::Polygon;p.points=head==2?std::vector<Vec>{z,z-u*(5*headScale)+n*(2*headScale)}:std::vector<Vec>{z,z-u*(5*headScale)+n*(2*headScale),z-u*(5*headScale)-n*(2*headScale)};s.items.push_back(p);}};
     auto addText=[&](std::string value,Vec p,double size=9,std::string color="#000000",bool center=false,int role=0,int index=-1){Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=value;t.fontSize=size*d.style.fontSize/10.;t.face=d.style.labelFace;t.color=color;for(unsigned char c:value)if(c>=0xe3)t.font="Malgun Gothic";emitText(s.items,t,p,center,measure);};
     for(auto& o:d.objects){owner=o.id;Primitive p;p.owner=o.id;p.points=o.points;p.width=o.width;p.color=o.color;p.filled=o.filled;p.fontSize=o.fontSize;p.font=o.font;p.dash=o.dash;p.face=o.face;p.closed=o.closed;p.text=o.text;
         if(o.points.empty())continue;
@@ -177,15 +179,15 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(r.cyclic){
                 bool hidden=std::find(r.hiddenArrows.begin(),r.hiddenArrows.end(),int(i))!=r.hiddenArrows.end();
                 double radius=(c-r.p).length(),step=2*pi/r.slots.size(),start=-pi/2+step*i,trim=std::asin(std::min(.95,(mechanismCycleNodeRadius(r,d.style)+font*.5)/radius));
-                auto arc=[&](double rad,double begin,double end){double bend=4./3*std::tan((end-begin)/4);Vec a=r.p+Vec{std::cos(begin),std::sin(begin)}*rad,z=r.p+Vec{std::cos(end),std::sin(end)}*rad,t0{-std::sin(begin),std::cos(begin)},t1{-std::sin(end),std::cos(end)};double direction=end>begin?1:-1;Vec u=t1*direction,n{-u.y,u.x};Primitive curve;curve.reactionArrow=int(i);curve.owner=owner;curve.type=Primitive::Bezier;curve.width=std::max(1.1,font*.085);double headSize=std::max(6.,font*.5);curve.points={a,a+t0*(bend*rad),z-t1*(bend*rad),z-u*(headSize*.96)};s.items.push_back(curve);Primitive head;head.reactionArrow=int(i);head.owner=owner;head.type=Primitive::Polygon;head.points={z,z-u*headSize+n*(headSize*.4),z-u*headSize-n*(headSize*.4)};s.items.push_back(head);};
+                auto arc=[&](double rad,double begin,double end){double bend=4./3*std::tan((end-begin)/4);Vec a=r.p+Vec{std::cos(begin),std::sin(begin)}*rad,z=r.p+Vec{std::cos(end),std::sin(end)}*rad,t0{-std::sin(begin),std::cos(begin)},t1{-std::sin(end),std::cos(end)};double direction=end>begin?1:-1;Vec u=t1*direction,n{-u.y,u.x};Primitive curve;curve.reactionArrow=int(i);curve.owner=owner;curve.type=Primitive::Bezier;curve.width=mechanismArrowWeight(r,d.style);double headSize=5*mechanismArrowHead(r,d.style);curve.points={a,a+t0*(bend*rad),z-t1*(bend*rad),z-u*(headSize*.96)};s.items.push_back(curve);Primitive head;head.reactionArrow=int(i);head.owner=owner;head.type=Primitive::Polygon;head.points={z,z-u*headSize+n*(headSize*.4),z-u*headSize-n*(headSize*.4)};s.items.push_back(head);};
                 if(!hidden){arc(radius-(r.arrowType==1?2:0),start+trim,start+step-trim);if(r.arrowType==1)arc(radius+2,start+step-trim,start+trim);}
                 Vec mid=mechanismCycleTransitionPosition(r,i,d.style,radius);
                 transitionLabels(r,i,mid,-font*1.7,font*.65);continue;
             }
-            if(!r.links.empty())continue;
+            if(r.explicitConnections())continue;
             if(i+1<r.slots.size()){Vec next=reactionSlot(r,(i+1)%r.slots.size()),v=next-c;double len=v.length();if(len<1)continue;Vec u=v*(1/len);
                 if(r.vertical){
-                    double margin=mechanismArrowMargin(r,d.style),weight=std::max(1.1,font*.085),head=std::max(1.25,font/10);
+                    double margin=mechanismArrowMargin(r,d.style),weight=mechanismArrowWeight(r,d.style),head=mechanismArrowHead(r,d.style);
                     Vec a=c+Vec{0,r.slotHeight/2+mechanismCaptionHeight(r,d.style)+margin},b=next-Vec{0,r.slotHeight/2+margin};
                     if(r.arrowType==1){arrow(a+Vec{-2,0},b+Vec{-2,0},"#000000",weight,1,head);arrow(b+Vec{2,0},a+Vec{2,0},"#000000",weight,1,head);}else arrow(a,b,"#000000",weight,1,head);
                     auto caption=transitionCaption(i<r.above.size()?r.above[i]:"");Vec mid=(a+b)*.5;
@@ -200,7 +202,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                     // Connect row ends around the outside of the structure and its captions.
                     double direction=reactionRow(r,i)%2?-1.:1.;
                     double margin=mechanismArrowMargin(r,d.style),edge=r.slotWidth/2+margin;
-                    double outside=c.x+direction*(edge+font*2),weight=std::max(1.1,font*.085),head=std::max(1.25,font/10);
+                    double outside=c.x+direction*(edge+font*2),weight=mechanismArrowWeight(r,d.style),head=mechanismArrowHead(r,d.style);
                     Vec a=c+Vec{direction*edge,0},b=next+Vec{direction*edge,0};
                     auto bent=[&](Vec from,Vec to,double x,double dy){from.y+=dy;to.y+=dy;Vec p{x,from.y},q{x,to.y};arrow(from,p,"#000000",weight,0);arrow(p,q,"#000000",weight,0);arrow(q,to,"#000000",weight,1,head);};
                     if(r.arrowType==1){bent(a,b,outside+direction*2,-2);bent(b,a,outside-direction*2,2);}else bent(a,b,outside,0);
@@ -211,7 +213,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                     transitionLabels(r,i,mid,-font*1.7,font*.65);continue;
                 }
                 double trim=std::min(len*.49,r.slotWidth/2+mechanismArrowMargin(r,d.style));Vec a=c+u*trim,b=next-u*trim,n{-u.y,u.x};
-                double weight=std::max(1.1,font*.085),head=std::max(1.25,font/10);
+                double weight=mechanismArrowWeight(r,d.style),head=mechanismArrowHead(r,d.style);
                 if(r.arrowType==1){arrow(a-n*2,b-n*2,"#000000",weight,1,head);arrow(b+n*2,a+n*2,"#000000",weight,1,head);}else arrow(a,b,"#000000",weight,1,head);
                 Vec mid=(a+b)*.5;transitionLabels(r,i,mid,-font*1.7,font*.65);
             }
@@ -220,9 +222,9 @@ Scene makeScene(const Document& d,const Measure& measure){
         // spine joins their horizontal arrow tails.
         bool external=false;double stemX=0,top=1e30,bottom=-1e30;
         for(size_t e=0;e<r.links.size();e++)if(r.links[e].from<0){auto path=mechanismLinkPath(r,e,d.style);external=true;stemX=path[0].x;top=std::min(top,path[0].y);bottom=std::max(bottom,path[0].y);}
-        if(external){arrowIndex=-1;arrow({stemX,top},{stemX,bottom},"#000000",std::max(1.1,font*.085),0);}
+        if(external){arrowIndex=-1;arrow({stemX,top},{stemX,bottom},"#000000",mechanismArrowWeight(r,d.style),0);}
         for(size_t e=0;e<r.links.size();e++){
-            arrowIndex=int(e);auto path=mechanismLinkPath(r,e,d.style);double weight=std::max(1.1,font*.085),head=std::max(1.25,font/10);
+            arrowIndex=int(e);auto path=mechanismLinkPath(r,e,d.style);double weight=mechanismArrowWeight(r,d.style),head=mechanismArrowHead(r,d.style);
             auto draw=[&](std::vector<Vec> points,double offset){for(auto& p:points)p=p+Vec{offset,offset};for(size_t j=1;j<points.size();j++)arrow(points[j-1],points[j],"#000000",weight,j+1==points.size()?1:0,head);};
             draw(path,r.arrowType==1?-2:0);if(r.arrowType==1){std::reverse(path.begin(),path.end());draw(path,2);}
             transitionLabels(r,e,mechanismLinkCaption(r,e,d.style),-font*1.7,font*.65);
@@ -239,13 +241,13 @@ Scene makeScene(const Document& d,const Measure& measure){
     auto axisText=[&](const std::string& value,Vec anchor,double size,const std::string& color,bool vertical,int role=0,int index=-1){
         struct Run{std::string text;int script;};std::vector<Run> runs;std::string normal;
         for(size_t i=0;i<value.size();){if((value[i]=='^'||value[i]=='_')&&i+1<value.size()&&value[i+1]=='{'){if(!normal.empty()){runs.push_back({normal,0});normal.clear();}int script=value[i]=='^'?1:-1;size_t end=value.find('}',i+2);if(end==std::string::npos){normal+=value.substr(i);break;}runs.push_back({value.substr(i+2,end-i-2),script});i=end+1;}else normal+=value[i++];}if(!normal.empty())runs.push_back({normal,0});
-        double total=0;for(auto& r:runs)total+=textWidth(measure,r.text,size*(r.script?.7:1),"Arial",d.style.labelFace);double cursor=-total/2;
-        for(auto& r:runs){double fs=size*(r.script?.7:1),offset=r.script==1?-size*.4:r.script==-1?size*.35:0;Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=r.text;for(unsigned char c:r.text)if(c>=0xe3)t.font="Malgun Gothic";t.fontSize=fs;t.face=d.style.labelFace;t.color=color;t.rotation=vertical?-90:0;t.points={vertical?anchor+Vec{offset,-cursor}:anchor+Vec{cursor,offset}};s.items.push_back(t);cursor+=textWidth(measure,r.text,fs,"Arial",t.face);}
+        double total=0;for(auto& r:runs)total+=textWidth(measure,r.text,size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),"Arial",d.style.labelFace);double cursor=-total/2;
+        for(auto& r:runs){double fs=size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),offset=r.script==1?-size*.4:r.script==-1?size*.35:0;Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=r.text;for(unsigned char c:r.text)if(c>=0xe3)t.font="Malgun Gothic";t.fontSize=fs;t.face=d.style.labelFace;t.color=color;t.rotation=vertical?-90:0;t.points={vertical?anchor+Vec{offset,-cursor}:anchor+Vec{cursor,offset}};s.items.push_back(t);cursor+=textWidth(measure,r.text,fs,"Arial",t.face);}
     };
     auto scriptWidth=[&](const std::string& text,double size){
         double width=0;for(size_t i=0;i<text.size();){
             if((text[i]=='^'||text[i]=='_')&&i+1<text.size()&&text[i+1]=='{'){
-                size_t end=text.find('}',i+2);if(end!=std::string::npos){width+=textWidth(measure,text.substr(i+2,end-i-2),size*.7,"Arial",d.style.labelFace);i=end+1;continue;}
+                size_t end=text.find('}',i+2);if(end!=std::string::npos){width+=textWidth(measure,text.substr(i+2,end-i-2),size*(text[i]=='^'?chemicalScriptScale(text.substr(i+2,end-i-2)):.7),"Arial",d.style.labelFace);i=end+1;continue;}
             }
             size_t end=i+1;while(end<text.size()&&!(end+1<text.size()&&(text[end]=='^'||text[end]=='_')&&text[end+1]=='{'))end++;
             width+=textWidth(measure,text.substr(i,end-i),size,"Arial",d.style.labelFace);i=end;

@@ -44,8 +44,9 @@ std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,d
     if(factor==1)return {ids.begin(),ids.end()};
     Vec anchor=center.value_or(Vec{(l+r)/2,(t+b)/2});
     for(auto& o:d.objects)if(ids.count(o.id)&&o.autoRoute&&missingAnchor(d,o,ids)){o.points=routeArrow(d,o);o.autoRoute=false;o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;}
-    for(auto& a:d.atoms)if(ids.count(a.id)){a.p=anchor+(a.p-anchor)*factor;a.labelOffset=a.labelOffset*factor;if(a.annotationManual)a.annotationOffset=a.annotationOffset*factor;}
-    for(auto& o:d.objects)if(ids.count(o.id)){for(auto& p:o.points)p=anchor+(p-anchor)*factor;if(o.kind==ObjectKind::Text){o.fontSize*=factor;for(auto& run:o.runs)run.size*=factor;}}
+    for(auto& a:d.atoms)if(ids.count(a.id)){a.p=anchor+(a.p-anchor)*factor;a.labelOffset=a.labelOffset*factor;a.drawingScale*=factor;for(auto& run:a.labelRuns)run.size*=factor;if(a.annotationManual)a.annotationOffset=a.annotationOffset*factor;}
+    for(auto& bond:d.bonds)if(ids.count(bond.id))bond.drawingScale*=factor;
+    for(auto& o:d.objects)if(ids.count(o.id)){for(auto& p:o.points)p=anchor+(p-anchor)*factor;if(o.kind!=ObjectKind::Image){o.width*=factor;if(o.cross.enabled){o.cross.width*=factor;o.cross.size*=factor;}}if(o.kind==ObjectKind::Text){o.fontSize*=factor;for(auto& run:o.runs)run.size*=factor;}}
     return {ids.begin(),ids.end()};
 }
 std::vector<int> transformStructures(Document& d,const std::vector<int>& selection,double degrees,bool flipX,bool flipY){
@@ -163,15 +164,15 @@ size_t reactionRow(const Reaction& r,size_t i){
 void appendMechanismStage(Reaction& r,bool below,size_t source){
     if(source==size_t(-1))source=r.slots.size()-1;
     if(source>=r.slots.size())throw std::runtime_error("Invalid stage source");
-    if(r.links.empty()&&source+1!=r.slots.size()){
+    if(!r.explicitConnections()&&source+1!=r.slots.size()){
         for(size_t i=0;i<r.slots.size();i++){auto delta=reactionSlot(r,i)-r.p;r.slotGrid.push_back({delta.x/r.spacing,delta.y/(r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80))});if(i)r.links.push_back({int(i)-1,int(i)});}
     }
-    if(r.slots.size()>=30)throw std::runtime_error("메커니즘은 최대 30칸까지 추가할 수 있습니다.");
+    if(r.slots.size()>=40)throw std::runtime_error("메커니즘은 최대 40칸까지 추가할 수 있습니다.");
     if(below&&!r.cyclic&&!r.vertical){
         // Preserve existing automatic row breaks before switching to manual rows.
         if(r.wrapColumns>0){for(size_t i=1;i<r.slots.size();i++)r.slots[i].startsRow=i%size_t(r.wrapColumns)==0;r.wrapColumns=0;}
     }
-    if(!r.links.empty()){r.links.push_back({int(source),int(r.slots.size())});Vec next=r.slotGrid[source]+Vec{1,below?1.:0.};
+    if(r.explicitConnections()){r.links.push_back({int(source),int(r.slots.size())});Vec next=r.slotGrid[source]+Vec{1,below?1.:0.};
         while(std::any_of(r.slotGrid.begin(),r.slotGrid.end(),[&](Vec p){return (p-next).length()<.1;}))next.y++;
         r.slotGrid.push_back(next);}
     r.slots.push_back({"Stage "+std::to_string(r.slots.size()+1),{},"",below&&!r.cyclic&&!r.vertical});
@@ -189,6 +190,39 @@ Vec reactionSlot(const Reaction& r,size_t i){
     return r.p+Vec{col*r.spacing,double(row)*(r.slotHeight+std::max(r.rowGap,captionHeight+80))};
 }
 Vec plotAnchor(const EnergyPlot& p,size_t i,bool above){double x=p.p.x+100+(p.width-154)*double(i)/std::max(size_t(1),p.states.size()-1);return {x,p.p.y+(above?-85:p.height+70)};}
+static std::pair<Vec,std::vector<int>> slotContents(const Document& d,int container,size_t index,bool above){
+    if(d.isLocked(container))throw std::runtime_error("잠긴 구조는 편집할 수 없습니다.");
+    for(const auto& r:d.reactions)if(r.id==container&&index<r.slots.size())return {reactionSlot(r,index),r.slots[index].members};
+    for(const auto& p:d.plots)if(p.id==container&&index<p.states.size())return {plotAnchor(p,index,above),above?p.states[index].above:p.states[index].below};
+    throw std::runtime_error("편집할 단계의 구조 영역을 선택하세요.");
+}
+Document structureInSlot(const Document& d,int container,size_t index,bool above){
+    auto content=slotContents(d,container,index,above);Document flat=d;flat.groups.clear();
+    // Parent containers and cross-stage groups must never enter the isolated editor.
+    flat.reactions.clear();flat.plots.clear();Document result=flat.subset(content.second);
+    auto ids=result.allIds();for(const auto& group:d.groups)if(!group.members.empty()&&std::all_of(group.members.begin(),group.members.end(),[&](int id){return has(ids,id);}))result.groups.push_back(group);
+    for(auto& group:result.groups)result.nextId=std::max(result.nextId,group.id+1);
+    result.translate(result.allIds(),content.first*-1);result.bondGeometryVersion=d.bondGeometryVersion;return result;
+}
+void replaceSlotStructure(Document& d,const Document& fragment,int container,size_t index,bool above){
+    auto content=slotContents(d,container,index,above);
+    if(!fragment.reactions.empty()||!fragment.plots.empty())throw std::runtime_error("개별 구조 편집에는 구조·텍스트·이미지만 사용할 수 있습니다.");
+    Document candidate=d;
+    // Erase exactly this frame; a user group spanning several stages cannot expand deletion.
+    for(auto& group:candidate.groups)group.members.erase(std::remove_if(group.members.begin(),group.members.end(),[&](int id){return has(content.second,id);}),group.members.end());
+    candidate.groups.erase(std::remove_if(candidate.groups.begin(),candidate.groups.end(),[](const Group& g){return g.members.empty();}),candidate.groups.end());
+    candidate.erase(content.second);
+    Document edited=fragment;
+    for(auto& atom:edited.atoms)atom.drawingScale*=fragment.style.fontSize/candidate.style.fontSize;
+    for(auto& bond:edited.bonds)bond.drawingScale*=fragment.style.lineWidth/candidate.style.lineWidth;
+    edited.style=candidate.style;
+    auto bounds=makeScene(edited).bounds;Vec delta=content.first-Vec{bounds.x+bounds.w/2,bounds.y+bounds.h/2};
+    int first=candidate.nextId;candidate.append(edited,delta);std::vector<int> added;for(int id:candidate.allIds())if(id>=first)added.push_back(id);
+    for(auto& r:candidate.reactions)if(r.id==container)r.slots[index].members=added;
+    for(auto& p:candidate.plots)if(p.id==container)(above?p.states[index].above:p.states[index].below)=added;
+    // Applying a local edit keeps other stages and their layout fixed.
+    d=std::move(candidate);
+}
 void fillSlot(Document& d,const Document& source,int container,size_t index,bool above){
     Document fragment=source;upgradeBondGeometry(fragment);
     // Vector structures retain their editable coordinates. Images retain original bytes.
@@ -212,7 +246,7 @@ void fillSlot(Document& d,const Document& source,int container,size_t index,bool
 void optimizeMechanism(Document& d,const std::vector<int>& selection,bool cyclic){
     bool found=false;
     for(auto& r:d.reactions)if(selection.empty()||has(selection,r.id)){
-        found=true;if(cyclic&&!r.links.empty())throw std::runtime_error("분기 연결을 유지하려면 가로 메커니즘 배치를 사용하세요.");Reaction old=r;r.cyclic=cyclic;
+        found=true;if(cyclic&&r.explicitConnections())throw std::runtime_error("분기 연결을 유지하려면 가로 메커니즘 배치를 사용하세요.");Reaction old=r;r.cyclic=cyclic;
         if(cyclic){
             r.above.resize(r.slots.size());r.below.resize(r.slots.size());
             if(!old.cyclic){
@@ -225,9 +259,10 @@ void optimizeMechanism(Document& d,const std::vector<int>& selection,bool cyclic
         double widest=64,tallest=65;
         for(auto& slot:r.slots)if(!slot.members.empty()){auto b=makeScene(d.subset(slot.members)).bounds;widest=std::max(widest,b.w+12);tallest=std::max(tallest,b.h+12);}
         r.slotWidth=widest;r.slotHeight=tallest;
+        if(r.explicitConnections())arrangeMechanismGraph(r);
         // Every connector uses the longest caption's width and identical margins.
         if(r.cyclic)r.cycleRadius=mechanismCycleRadius(r,d.style);
-        r.spacing=widest+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style)+(r.links.empty()?0:mechanismFontSize(r,d.style)*4);
+        r.spacing=widest+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style)+(!r.explicitConnections()?0:mechanismFontSize(r,d.style)*1.5);
         if(r.vertical&&!r.cyclic){
             r.spacing=tallest+mechanismCaptionHeight(r,d.style)+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style);
         }
