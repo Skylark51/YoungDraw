@@ -2,12 +2,50 @@
 #include "mechanism_data.h"
 #include "scene.h"
 #include "cdxml.h"
+#include "mechanism_layout_fixture.h"
 #include <iostream>
 #include <stdexcept>
 #include <fstream>
 using namespace yd;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 int main(){try{
+    {
+        auto d=parallelMechanismFixture();auto original=d;int owner=d.reactions[0].id;optimizeMechanism(d,{owner});auto& r=d.reactions[0];
+        double upper=r.slotGrid[0].y,lower=r.slotGrid[4].y;
+        check(upper<lower&&r.slotGrid[10].y>lower,"parallel roots retain globally separate rows");
+        for(size_t i=0;i<4;i++)check(r.slotGrid[i].y==upper,"upper pathway stays on its original row");
+        for(size_t i=4;i<10;i++)check(r.slotGrid[i].y==lower,"longer lower pathway does not jump to the middle after the upper path ends");
+        check(r.slotGrid[11].y>upper&&r.slotGrid[11].y<lower,"short side branch keeps its row between the two pathways");
+        check(r.links.size()==original.reactions[0].links.size()&&r.above==original.reactions[0].above&&r.below==original.reactions[0].below,"alignment preserves connection identities and captions");
+        auto stable=d;optimizeMechanism(d,{owner});
+        for(size_t i=0;i<r.slotGrid.size();i++)check((r.slotGrid[i]-stable.reactions[0].slotGrid[i]).length()<1e-9,"repeated alignment never changes row/column placement");
+        for(auto a:stable.atoms)check((d.atom(a.id)->p-a.p).length()<1e-8,"repeated alignment does not drift molecules");
+        std::ofstream("mechanism-parallel-preserved.svg")<<toSvg(makeScene(d));
+        for(auto restored:{fromNative(toNative(d)),fromCdxml(toCdxml(d))}){optimizeMechanism(restored,{owner});for(size_t i=0;i<r.slotGrid.size();i++)check((restored.reactions[0].slotGrid[i]-r.slotGrid[i]).length()<1e-9,"saved parallel pathways retain rows when realigned");}
+    }
+    {
+        auto d=parallelMechanismFixture();auto& r=d.reactions[0];r.links.push_back({7,5,{}});r.above.push_back("Reversible step");r.below.push_back("1.0");
+        optimizeMechanism(d,{r.id});double widest=0;for(auto p:r.slotGrid)widest=std::max(widest,p.x);
+        check(widest<=5,"cycle and its downstream stages do not unroll into an arbitrarily long horizontal chain");
+        for(size_t i=4;i<10;i++)check(r.slotGrid[i].y==r.slotGrid[4].y,"cycle preserves the lower pathway row");
+        auto stable=r.slotGrid;optimizeMechanism(d,{r.id});for(size_t i=0;i<stable.size();i++)check((stable[i]-r.slotGrid[i]).length()<1e-9,"cycle layout is stable on repeated alignment");
+    }
+    {
+        Reaction r;r.manualConnections=true;r.slots.resize(7);r.slotGrid.resize(7);r.links={{0,1},{1,2},{2,3},{0,4},{4,5},{5,6}};
+        arrangeMechanismGraph(r);check(r.slotGrid[1].y!=r.slotGrid[4].y,"new overlapping branches get separate lanes");
+        check(r.slotGrid[1].y==r.slotGrid[2].y&&r.slotGrid[2].y==r.slotGrid[3].y&&r.slotGrid[4].y==r.slotGrid[5].y&&r.slotGrid[5].y==r.slotGrid[6].y,"every downstream stage inherits its branch lane");
+        auto old=r.slotGrid;arrangeMechanismGraph(r);for(size_t i=0;i<old.size();i++)check((old[i]-r.slotGrid[i]).length()<1e-9,"new branch lanes remain stable");
+    }
+    {
+        auto d=parallelMechanismFixture(true);auto groups=d.groups;int outsider=d.addAtom({-400,-500});d.groups[0].members.push_back(outsider);auto before=d;
+        int owner=d.reactions[0].id;Vec anchor=d.reactions[0].p;optimizeMechanism(d,{owner});auto& r=d.reactions[0];
+        check(d.groups[0].members==before.groups[0].members,"alignment retains cross-stage visual groups");
+        check((r.p-anchor).length()<1e-9&&(d.atom(outsider)->p-before.atom(outsider)->p).length()<1e-9,"frame alignment cannot translate the parent mechanism or unrelated grouped atoms");
+        check(r.slotWidth<250&&r.slotHeight<250,"frame size is measured from its own structure instead of the whole visual group");
+        Document exact=d;exact.groups.clear();exact.reactions.clear();
+        for(size_t i=0;i<r.slots.size();i++){auto bounds=makeScene(exact.subset(r.slots[i].members)).bounds;check((reactionSlot(r,i)-Vec{bounds.x+bounds.w/2,bounds.y+bounds.h/2}).length()<1e-7,"every grouped molecule is centered on its own frame");}
+        for(auto bond:before.bonds)check(((d.atom(bond.a)->p-d.atom(bond.b)->p)-(before.atom(bond.a)->p-before.atom(bond.b)->p)).length()<1e-7,"alignment keeps every molecular bond vector rigid");
+    }
     {
         auto d=mechanismDemo();int owner=d.reactions[0].id;auto original=d;makeMechanismGraph(d.reactions[0]);
         insertMechanismStage(d.reactions[0],1);auto& r=d.reactions[0];check(r.slots.size()==4&&r.links.size()==3,"insert in the middle splits incoming connector");check(r.slots[2].members==original.reactions[0].slots[1].members,"insertion preserves original stage structures by identity");

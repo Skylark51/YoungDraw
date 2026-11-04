@@ -61,16 +61,51 @@ void removeMechanismStage(Document& d,int owner,size_t stage,int mergeInto,bool 
 }
 void arrangeMechanismGraph(Reaction& r){
     if(!r.explicitConnections()||r.slots.empty())return;
-    const size_t n=r.slots.size();std::vector<int> degree(n),rank(n),done(n);std::vector<std::vector<int>> next(n);
-    for(auto l:r.links)if(l.from>=0){next.at(size_t(l.from)).push_back(l.to);degree.at(size_t(l.to))++;}
-    std::queue<int> queue;for(size_t i=0;i<n;i++)if(!degree[i])queue.push(int(i));
-    while(!queue.empty()){int a=queue.front();queue.pop();done[size_t(a)]=1;for(int b:next[size_t(a)]){rank[size_t(b)]=std::max(rank[size_t(b)],rank[size_t(a)]+1);if(--degree[size_t(b)]==0)queue.push(b);}}
-    int last=*std::max_element(rank.begin(),rank.end());for(size_t i=0;i<n;i++)if(!done[i])rank[i]=++last;
-    if(r.links.empty())for(size_t i=0;i<n;i++)rank[i]=int(i);
-    std::map<int,std::vector<size_t>> columns;for(size_t i=0;i<n;i++)columns[rank[i]].push_back(i);
-    auto old=r.slotGrid;r.slotGrid.resize(n);
-    for(auto& column:columns){auto& list=column.second;std::stable_sort(list.begin(),list.end(),[&](size_t a,size_t b){return a<old.size()&&b<old.size()?old[a].y<old[b].y:a<b;});for(size_t j=0;j<list.size();j++)r.slotGrid[list[j]]={double(column.first),double(j)-(list.size()-1)*.5};}
-    for(auto column=columns.rbegin();column!=columns.rend();++column)if(column->second.size()==1){size_t a=column->second[0];double total=0;size_t count=0;for(int b:next[a])if(rank[size_t(b)]>rank[a]){total+=r.slotGrid[size_t(b)].y;count++;}if(count)r.slotGrid[a].y=total/count;}
+    const size_t n=r.slots.size();auto old=r.slotGrid;old.resize(n);
+    // Keep the drawing's rows globally. Centering each depth independently folds
+    // unequal-length parallel pathways into one row as soon as a short path ends.
+    auto cluster=[&](bool horizontal){
+        std::vector<size_t> order(n);std::iota(order.begin(),order.end(),0);
+        auto value=[&](size_t i){return horizontal?old[i].x:old[i].y;};
+        std::stable_sort(order.begin(),order.end(),[&](size_t a,size_t b){return value(a)<value(b);});
+        std::vector<int> group(n);int rank=-1;double first=0;
+        for(size_t i:order){if(rank<0||value(i)-first>.25){rank++;first=value(i);}group[i]=rank;}return group;
+    };
+    auto oldColumn=cluster(true),oldRow=cluster(false);
+    std::vector<std::vector<int>> next(n),previous(n);
+    for(auto l:r.links)if(l.from>=0){next.at(size_t(l.from)).push_back(l.to);previous.at(size_t(l.to)).push_back(l.from);}
+    // Collapse cycles before assigning columns. Previously every unresolved node
+    // (including everything downstream of a cycle) received another new column.
+    std::vector<int> discovery(n,-1),low(n),component(n,-1),stack;std::vector<bool> active(n);int clock=0,count=0;
+    std::function<void(int)> visit=[&](int a){
+        discovery[size_t(a)]=low[size_t(a)]=clock++;stack.push_back(a);active[size_t(a)]=true;
+        for(int b:next[size_t(a)]){if(discovery[size_t(b)]<0){visit(b);low[size_t(a)]=std::min(low[size_t(a)],low[size_t(b)]);}else if(active[size_t(b)])low[size_t(a)]=std::min(low[size_t(a)],discovery[size_t(b)]);}
+        if(low[size_t(a)]==discovery[size_t(a)]){for(;;){int b=stack.back();stack.pop_back();active[size_t(b)]=false;component[size_t(b)]=count;if(a==b)break;}count++;}
+    };
+    for(size_t i=0;i<n;i++)if(discovery[i]<0)visit(int(i));
+    std::vector<int> first(static_cast<size_t>(count),static_cast<int>(n)),last(static_cast<size_t>(count),-1),degree(static_cast<size_t>(count),0),start(static_cast<size_t>(count),0);std::vector<std::set<int>> successors{size_t(count)};
+    for(size_t i=0;i<n;i++){size_t c=size_t(component[i]);first[c]=std::min(first[c],oldColumn[i]);last[c]=std::max(last[c],oldColumn[i]);}
+    for(size_t a=0;a<n;a++)for(int b:next[a])if(component[a]!=component[size_t(b)]&&successors[size_t(component[a])].insert(component[size_t(b)]).second)degree[size_t(component[size_t(b)])]++;
+    std::queue<int> queue;for(int c=0;c<count;c++){if(!degree[size_t(c)])queue.push(c);}
+    // Unconnected standalone frames keep their existing columns. Connected DAG
+    // branches use depth, so siblings created by dragging still align together.
+    for(size_t i=0;i<n;i++)if(next[i].empty()&&previous[i].empty())start[size_t(component[i])]=oldColumn[i];
+    while(!queue.empty()){int a=queue.front();queue.pop();int end=start[size_t(a)]+last[size_t(a)]-first[size_t(a)]+1;
+        for(int b:successors[size_t(a)]){start[size_t(b)]=std::max(start[size_t(b)],end);if(--degree[size_t(b)]==0)queue.push(b);}}
+    std::map<int,std::vector<size_t>> columns;
+    for(size_t i=0;i<n;i++){size_t c=size_t(component[i]);int col=start[c]+oldColumn[i]-first[c];columns[col].push_back(i);}
+    const int existingRows=*std::max_element(oldRow.begin(),oldRow.end())+1;std::vector<int> placedRow(n,-1);r.slotGrid.resize(n);
+    int compactColumn=0;
+    for(auto& column:columns){auto& nodes=column.second;std::stable_sort(nodes.begin(),nodes.end(),[&](size_t a,size_t b){return oldRow[a]<oldRow[b];});std::set<int> occupied;
+        for(size_t i:nodes){int row=oldRow[i],distance=int(n)+1;
+            // A continuation follows its predecessor's lane, including a lane
+            // allocated to a newly dragged branch. Explicit row changes survive.
+            for(int parent:previous[i]){size_t a=size_t(parent);if(placedRow[a]>=0&&oldRow[a]==oldRow[i]){int delta=std::abs(placedRow[a]-oldRow[i]);if(delta<distance){distance=delta;row=placedRow[a];}}}
+            if(occupied.count(row)){row=existingRows;while(occupied.count(row))row++;}
+            placedRow[i]=row;occupied.insert(row);r.slotGrid[i]={double(compactColumn),double(row)};
+        }
+        compactColumn++;
+    }
 }
 Reaction mechanismGraphData(const Reaction& original,const MechanismRows& rows){
     Reaction result=original;makeMechanismGraph(result);auto base=result;result.slots.clear();result.slotGrid.clear();result.links.clear();result.above.clear();result.below.clear();result.hiddenArrows.clear();result.crosses.clear();result.captionColors.clear();

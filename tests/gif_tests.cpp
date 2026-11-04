@@ -11,7 +11,7 @@ static void putClipboard(UINT format,const void* bytes,size_t size){
 int main(){
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
     Microsoft::WRL::ComPtr<IDataObject> previous;OleGetClipboard(&previous);
-    int result=0;
+    int result=0;bool clipboardRestored=false;
     try{
         WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawGifRegression";RegisterClassW(&wc);
         auto hwnd=CreateWindowW(wc.lpszClassName,L"GIF test",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);check(hwnd!=nullptr,"create canvas window");
@@ -45,7 +45,10 @@ int main(){
         auto saved=toNative(doc);SendMessageW(hwnd,WM_TIMER,912,0);check(toNative(doc)==saved,"animation timer never changes saved document or undo state");
         doc={};dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);check(!animationVisible,"empty canvas stops animation redraws");
         bool failed=false;try{imageDocument("GIF89a broken");}catch(...){failed=true;}check(failed,"reject damaged GIF data without inserting anything");
+        // Release clipboard ownership while its native owner window is alive.
+        // OLE may dispatch clipboard callbacks during owner destruction.
+        OleSetClipboard(previous.Get());if(previous)OleFlushClipboard();previous.Reset();clipboardRestored=true;
         DestroyWindow(hwnd);std::cout<<"Animated GIF regression tests passed\n";
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';result=1;}
-    OleSetClipboard(previous.Get());if(previous)OleFlushClipboard();previous.Reset();office::stop();imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return result;
+    if(!clipboardRestored){OleSetClipboard(previous.Get());if(previous)OleFlushClipboard();previous.Reset();}office::stop();imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return result;
 }
