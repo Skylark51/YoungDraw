@@ -256,8 +256,14 @@ void optimizeMechanism(Document& d,const std::vector<int>& selection,bool cyclic
                 for(auto& energy:r.below)if(energy.empty())energy="0.0";
             }
         }
+        // Layout operates on explicit frame membership. A visual user group may
+        // span several stages (or include the parent reaction); expanding it here
+        // measures/moves the entire mechanism once for every individual frame.
+        Document content=d;content.groups.clear();content.reactions.clear();content.plots.clear();
+        struct FrameGroups {Document& document;std::vector<Group> saved;explicit FrameGroups(Document& d):document(d),saved(std::move(d.groups)){d.groups.clear();}~FrameGroups(){document.groups=std::move(saved);}} frameGroups(d);
+        auto frameBounds=[&](const std::vector<int>& ids){return makeScene(content.subset(ids)).bounds;};
         double widest=64,tallest=65;
-        for(auto& slot:r.slots)if(!slot.members.empty()){auto b=makeScene(d.subset(slot.members)).bounds;widest=std::max(widest,b.w+12);tallest=std::max(tallest,b.h+12);}
+        for(auto& slot:r.slots)if(!slot.members.empty()){auto b=frameBounds(slot.members);widest=std::max(widest,b.w+12);tallest=std::max(tallest,b.h+12);}
         r.slotWidth=widest;r.slotHeight=tallest;
         if(r.explicitConnections())arrangeMechanismGraph(r);
         // Every connector uses the longest caption's width and identical margins.
@@ -266,8 +272,8 @@ void optimizeMechanism(Document& d,const std::vector<int>& selection,bool cyclic
         if(r.vertical&&!r.cyclic){
             r.spacing=tallest+mechanismCaptionHeight(r,d.style)+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style);
         }
-        for(size_t i=0;i<r.slots.size();i++)if(!r.slots[i].members.empty()){auto b=makeScene(d.subset(r.slots[i].members)).bounds;d.translate(r.slots[i].members,reactionSlot(r,i)-Vec{b.x+b.w/2,b.y+b.h/2});}
-        for(size_t e=0;e<r.links.size();e++){auto& l=r.links[e];if(!l.members.empty()){auto b=makeScene(d.subset(l.members)).bounds;Vec mid=mechanismLinkCaption(r,e,d.style);d.translate(l.members,mid-Vec{0,mechanismFontSize(r,d.style)*3+b.h/2}-Vec{b.x+b.w/2,b.y+b.h/2});}}
+        for(size_t i=0;i<r.slots.size();i++)if(!r.slots[i].members.empty()){auto b=frameBounds(r.slots[i].members);d.translate(r.slots[i].members,reactionSlot(r,i)-Vec{b.x+b.w/2,b.y+b.h/2});}
+        for(size_t e=0;e<r.links.size();e++){auto& l=r.links[e];if(!l.members.empty()){auto b=frameBounds(l.members);Vec mid=mechanismLinkCaption(r,e,d.style);d.translate(l.members,mid-Vec{0,mechanismFontSize(r,d.style)*3+b.h/2}-Vec{b.x+b.w/2,b.y+b.h/2});}}
     }
     if(found)return;
     struct Part{std::vector<int> ids;Vec center;double w,h;};std::vector<Part> parts;std::set<int> seen;

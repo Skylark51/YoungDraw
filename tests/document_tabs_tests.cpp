@@ -1,6 +1,7 @@
 // Exercise the production document switching and saving code in a hidden window.
 #include "../src/winmain.cpp"
 #include <iostream>
+#include "mechanism_layout_fixture.h"
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 static int formAction=0;static bool formDriven=false,previewObserved=false;static std::string formBefore;
 static bool paletteDriven=false;
@@ -398,6 +399,13 @@ int main(int argc,char** argv){
             auto before=toNative(doc);selectedCycleOwner=owner;selectedCycleArrow=0;selection={owner};check(deleteSelectedCycleArrow()&&doc.reactions[0].links.size()==1,"Delete removes the selected graph connection");
             check(history.undo(doc)&&toNative(doc)==before,"connection deletion can be undone completely");
             doc={};history.clear();selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;mechanismConnecting=mechanismConnectionDrag=false;dirty=false;
+        }
+        {
+            doc=parallelMechanismFixture(true);history.clear();selection={doc.reactions[0].id};targetContainer=0;auto before=toNative(doc);
+            writePreview(L"mechanism-parallel-before.png",doc);command(125);
+            auto& r=doc.reactions[0];for(size_t i=4;i<10;i++)check(r.slotGrid[i].y==r.slotGrid[4].y,"native automatic alignment keeps the lower path horizontal across unequal pathway lengths");
+            writePreview(L"mechanism-parallel-after.png",doc);check(history.undo(doc)&&toNative(doc)==before,"parallel pathway alignment is exactly undoable");
+            doc={};history.clear();selection.clear();dirty=false;
         }
         if(argc>1&&std::string(argv[1])=="--live-chemdraw"){
             auto fragment=clipboardDocument();check(fragment&&fragment->atoms.size()==15&&fragment->bonds.size()==16,"actual Windows ChemDraw clipboard imports all atoms and bonds");
