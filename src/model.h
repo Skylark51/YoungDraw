@@ -28,7 +28,7 @@ struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,
 struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; std::string customOrder,customDisplay; std::string color="#000000"; };
 enum class ObjectKind { Line, Curve, Text, Ellipse, Rectangle, Image };
 struct ArrowCross { int index=-1; bool enabled=false; double width=4,size=14; std::string color="#ff0000"; };
-struct MechanismLink { int from=0,to=1; std::vector<int> members; };
+struct MechanismLink { int from=0,to=1; std::vector<int> members; }; // from -1: common external vertical spine.
 struct Object {
     int id=0; ObjectKind kind=ObjectKind::Line; std::vector<Vec> points;
     std::string text,color="#000000",imageHex,mime="image/png",font="Arial";
@@ -124,6 +124,8 @@ void fillSlot(Document& d,const Document& fragment,int container,size_t index,bo
 int collapsePhenyl(Document& d,const std::vector<int>& selection);
 int arrangeImportedMechanism(Document& d,const std::vector<int>& selection={});
 void addMechanismBranch(Reaction& r,size_t source);
+std::vector<int> addBranchArrows(Document& d,Vec top,double height,double length,size_t count,bool left=false,int stemId=0);
+void normalizeChemicalLabels(Document& d,const std::vector<int>& selection={});
 bool atomLabelHasCharge(const Atom& a);
 Document chairTemplate();
 Document mechanismDemo();
