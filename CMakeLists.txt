@@ -9,7 +9,7 @@ endif()
 add_library(youngdraw_core src/model.cpp src/layout.cpp src/plot_data.cpp src/mechanism_data.cpp src/mechanism_graph.cpp src/mechanism_edit.cpp src/scene.cpp src/arrows.cpp)
 target_include_directories(youngdraw_core PUBLIC src)
 if(WIN32)
-  add_library(youngdraw_storage src/win_storage.cpp src/win_projects.cpp src/win_project_manager.cpp)
+  add_library(youngdraw_storage src/win_storage.cpp src/win_projects.cpp)
   target_compile_definitions(youngdraw_storage PUBLIC UNICODE _UNICODE NOMINMAX)
   target_include_directories(youngdraw_storage PUBLIC src)
   add_library(youngdraw_cdxml src/cdxml.cpp src/cdx.cpp)
@@ -20,6 +20,7 @@ if(WIN32)
     src/win_editor_state.cpp
     src/win_editor_chrome.cpp
     src/win_editor_images.cpp
+    src/win_editor_animation.cpp
     src/win_editor_render.cpp
     src/win_editor_files.cpp
     src/win_editor_clipboard.cpp
@@ -34,6 +35,7 @@ if(WIN32)
     src/win_editor_pointer.cpp
     src/win_editor_shortcuts.cpp
     src/win_editor_window.cpp
+    src/win_project_manager.cpp
     src/win_splash.cpp
     src/win_dialogs.cpp
     src/win_grid.cpp
@@ -65,11 +67,11 @@ if(WIN32)
   target_link_libraries(file_save_tests PRIVATE youngdraw_storage)
   add_test(NAME atomic_file_save COMMAND file_save_tests)
   add_executable(project_tests tests/project_tests.cpp)
-  target_link_libraries(project_tests PRIVATE youngdraw_storage)
+  target_link_libraries(project_tests PRIVATE youngdraw_editor)
   add_test(NAME project_management COMMAND project_tests)
   add_test(NAME office_roundtrip COMMAND YoungDraw --test-office)
   add_executable(grid_tests tests/grid_tests.cpp)
-  target_link_libraries(grid_tests PRIVATE youngdraw_cdxml comctl32)
+  target_link_libraries(grid_tests PRIVATE youngdraw_editor)
   add_test(NAME grid_regression COMMAND grid_tests)
   add_executable(document_tabs_tests tests/document_tabs_tests.cpp)
   target_link_libraries(document_tabs_tests PRIVATE youngdraw_editor)

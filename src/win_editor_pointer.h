@@ -12,5 +12,6 @@ void updateDrag();
 void cancel();
 void mouseDown(Vec p);
 void mouseUp(Vec p);
+Scene energyDragPreview(const Scene& scene);
 
 } // namespace yd::editor

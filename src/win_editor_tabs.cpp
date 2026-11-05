@@ -115,7 +115,12 @@ void manageProjects(){
         normalizeChemicalLabels(document);auto sc=makeScene(document,measure);auto b=sc.bounds;
         double scale=std::min(double(area.right-area.left-24)/std::max(1.,b.w),double(area.bottom-area.top-24)/std::max(1.,b.h));
         Graphics g(dc);g.SetClip(Gdiplus::Rect(area.left,area.top,area.right-area.left,area.bottom-area.top));g.SetSmoothingMode(SmoothingModeHighQuality);g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
-        g.TranslateTransform(float(area.left+(area.right-area.left-b.w*scale)/2-b.x*scale),float(area.top+(area.bottom-area.top-b.h*scale)/2-b.y*scale));g.ScaleTransform(float(scale),float(scale));render(g,sc);
+        g.TranslateTransform(float(area.left+(area.right-area.left-b.w*scale)/2-b.x*scale),float(area.top+(area.bottom-area.top-b.h*scale)/2-b.y*scale));g.ScaleTransform(float(scale),float(scale));render(g,sc,false,true);
+    };
+    callbacks.writePng=[](const fs::path& drawing,const fs::path& png){
+        auto document=fromCdxml(readFile(drawing.wstring()));
+        normalizeChemicalLabels(document);
+        writePreview(png.wstring(),document,true);
     };
     callbacks.saveForExport=[](const fs::path& folder){
         const auto initial=activeDocument;

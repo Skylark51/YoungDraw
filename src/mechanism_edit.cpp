@@ -19,8 +19,59 @@ void eraseExact(Document& d,const std::vector<int>& ids){
     for(auto& p:d.plots)for(auto& s:p.states){prune(s.above);prune(s.below);}
 }
 Rect bounds(const Document& d,const std::vector<int>& ids){auto plain=d;plain.groups.clear();return makeScene(plain.subset(ids)).bounds;}
+}
+std::string importedEnergy(std::string text){
+    for(size_t at=0;(at=text.find("−",at))!=std::string::npos;++at)text.replace(at,std::string("−").size(),"-");
+    static const std::string value=R"((?:[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\*?|\?(?:\.\?)?))";
+    static const std::string prefix=R"((?:[sS]\s*=\s*(?:[0-9](?:\.[05])?|10(?:\.0)?)\s*[:=]\s*|[mM]\s*=\s*(?:[1-9]|1\d|2[01])\s*[:=]\s*)?)";
+    static const std::string unit=R"((?:\s*(?:kcal|kJ)\s*/\s*mol|\s*(?:eV|hartree))?)";
+    static const std::regex pattern("^\\s*"+prefix+value+unit+"(?:\\s*/\\s*"+prefix+value+unit+")*\\s*$",std::regex::icase);
+    if(!std::regex_match(text,pattern))return {};
+    // Canonicalize units so their slash is distinguishable from an energy-list separator.
+    static const std::regex molar(R"((kcal|kJ)\s*/\s*mol)",std::regex::icase);
+    text=std::regex_replace(text,molar,"$1·mol⁻¹");
+    static const std::regex spinLabel(R"([sS]\s*=\s*([\d.]+)\s*[:=]\s*)");
+    text=std::regex_replace(text,spinLabel,"S=$1:");
+    static const std::regex multiplicity(R"([mM]\s*=\s*(\d+)\s*[:=]\s*)");
+    std::string normalized;
+    size_t cursor=0;
+    for(std::sregex_iterator it(text.begin(),text.end(),multiplicity),end;it!=end;++it){
+        normalized.append(text,cursor,size_t(it->position())-cursor);
+        int spin=std::stoi((*it)[1])-1;
+        normalized+="S="+std::to_string(spin/2)+(spin%2?".5:":":");
+        cursor=size_t(it->position()+it->length());
+    }
+    return normalized+text.substr(cursor);
+}
+namespace {
 Vec center(Rect b){return {b.x+b.w/2,b.y+b.h/2};}
 std::string caption(const Object& o){if(o.runs.empty())return o.text;std::string s;for(auto& r:o.runs)s+=(r.face&96)==64?"^{"+r.text+"}":(r.face&96)==32?"_{"+r.text+"}":r.text;return s;}
+}
+bool attachMechanismEnergy(Document& doc,int source,int role,int index,int owner,size_t slot){
+    auto target=std::find_if(doc.reactions.begin(),doc.reactions.end(),[&](const Reaction& r){return r.id==owner;});
+    if(target==doc.reactions.end()||slot>=target->slots.size()||target->slots[slot].members.empty()||
+       !target->slots[slot].energy.empty()||doc.isLocked(owner)||doc.isLocked(source))return false;
+    if(role==0){
+        auto object=std::find_if(doc.objects.begin(),doc.objects.end(),[&](const Object& o){return o.id==source&&o.kind==ObjectKind::Text;});
+        if(object==doc.objects.end())return false;
+        auto energy=importedEnergy(object->text);
+        if(energy.empty())return false;
+        target->slots[slot].energy=std::move(energy);
+        eraseExact(doc,{source});
+        return true;
+    }
+    if(source!=owner||index<0)return false;
+    size_t from=size_t(index);
+    std::string* energy=nullptr;
+    if(role==3&&from<target->below.size())energy=&target->below[from];
+    if(role==9&&from<target->slots.size())energy=&target->slots[from].energy;
+    if(!energy||energy->empty())return false;
+    target->slots[slot].energy.swap(*energy);
+    for(auto& color:target->captionColors)if(color.role==role&&color.index==index){
+        color.role=9;
+        color.index=int(slot);
+    }
+    return true;
 }
 bool atomLabelHasCharge(const Atom& a){
     // A charge already present in an explicit label is authoritative ink.
@@ -140,7 +191,8 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
                 bool hasArrow=std::any_of(arrows.begin(),arrows.end(),[&](const Object* o){return has(group.members,o->id);});
                 if(first&&second&&!hasArrow){grouped=true;break;}
             }
-            if((!grouped&&(gap>std::max(70.,d.style.bondLength*3)||std::abs(a.at.y-b.at.y)>std::max(25.,std::min(a.box.h,b.box.h)*.7)))||separated(a,b))continue;
+            bool overlapping=gap==0&&a.box.y<b.box.y+b.box.h&&b.box.y<a.box.y+a.box.h;
+            if((!grouped&&!overlapping&&(gap>std::max(70.,d.style.bondLength*3)||std::abs(a.at.y-b.at.y)>std::max(25.,std::min(a.box.h,b.box.h)*.7)))||separated(a,b))continue;
             a.ids.insert(a.ids.end(),b.ids.begin(),b.ids.end());
             double right=std::max(a.box.x+a.box.w,b.box.x+b.box.w),bottom=std::max(a.box.y+a.box.h,b.box.y+b.box.h);
             a.box.x=std::min(a.box.x,b.box.x);a.box.y=std::min(a.box.y,b.box.y);a.box.w=right-a.box.x;a.box.h=bottom-a.box.y;a.at=center(a.box);
@@ -182,14 +234,37 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
     }
     if(!r.explicitConnections())throw std::runtime_error("구조 사이 반응 화살표를 찾지 못했습니다. 구조와 화살표를 함께 선택하세요.");
     r.above.resize(r.links.size());r.below.resize(r.links.size());
-    static const std::regex energy(R"(^\s*(?:[-+]?\d+(?:\.\d+)?\*?|\?(?:\.\?)?)(?:\s*/\s*(?:[-+]?\d+(?:\.\d+)?\*?|\?(?:\.\?)?))*\s*$)");
     for(auto& o:d.objects)if(!o.points.empty()&&!owned.count(o.id)&&selected({o.id})&&!has(consumed,o.id)){
         if(o.kind==ObjectKind::Text&&o.text=="+"){r.slots[nearest(o.points[0])].members.push_back(o.id);continue;}
         if(o.kind==ObjectKind::Text){Vec p=center(bounds(d,{o.id}));size_t state=nearest(p),edge=0;double ds=(p-parts[state].at).length(),de=1e30;for(size_t e=0;e<mids.size();e++){double v=(p-mids[e]).length();if(v<de){de=v;edge=e;}}if(std::min(ds,de)>std::max(180.,d.style.bondLength*6))continue;
-            bool isEnergy=std::regex_match(o.text,energy);if(!isEnergy&&!o.text.empty()&&(o.text.front()=='+'||o.text.front()=='-')&&de<ds){r.links[edge].members.push_back(o.id);continue;}std::string& dest=de<ds?(isEnergy?r.below[edge]:r.above[edge]):(isEnergy?r.slots[state].energy:r.slots[state].label);
+            auto numericCaption=importedEnergy(o.text);bool isEnergy=!numericCaption.empty();
+            bool onEdge=de<ds;
+            if(isEnergy){
+                // A caption directly below a structure can be closer to the
+                // midpoint of its outgoing vertical arrow than to its center.
+                double closest=std::max(d.style.bondLength,r.captionFontSize*3);
+                for(size_t i=0;i<parts.size();i++){
+                    auto b=parts[i].box;double gap=p.y-(b.y+b.h);
+                    if(gap<0||gap>=closest||p.x<b.x-d.style.bondLength*.3||p.x>b.x+b.w+d.style.bondLength*.3)continue;
+                    closest=gap;state=i;onEdge=false;
+                }
+            }
+            if(!isEnergy&&!o.text.empty()&&(o.text.front()=='+'||o.text.front()=='-')&&onEdge){r.links[edge].members.push_back(o.id);continue;}std::string& dest=onEdge?(isEnergy?r.below[edge]:r.above[edge]):(isEnergy?r.slots[state].energy:r.slots[state].label);
             // Ambiguous multiple energy rows remain visible instead of being discarded.
-            if(isEnergy&&!dest.empty()){(de<ds?r.links[edge].members:r.slots[state].members).push_back(o.id);continue;}
-            if(!dest.empty())dest+='\n';dest+=isEnergy?o.text:caption(o);consumed.push_back(o.id);
+            if(isEnergy&&!dest.empty()){
+                auto entries=reactionEnergies(dest),extra=reactionEnergies(numericCaption);
+                const auto first=numericCaption.find_first_not_of(" \t\r\n");
+                if(numericCaption.compare(first,2,"S=")!=0||std::any_of(extra.begin(),extra.end(),[&](const SpinEnergy& item){
+                    return std::any_of(entries.begin(),entries.end(),[&](const SpinEnergy& saved){return item.spin==saved.spin;});
+                })){
+                    (onEdge?r.links[edge].members:r.slots[state].members).push_back(o.id);continue;
+                }
+                dest+=" / "+numericCaption;
+            }else{
+                if(!dest.empty())dest+='\n';
+                dest+=isEnergy?numericCaption:caption(o);
+            }
+            consumed.push_back(o.id);
         }else if(o.kind==ObjectKind::Curve){size_t i=nearest(o.points.front());r.slots[i].members.push_back(o.id);}
     }
     for(auto& p:notations){size_t edge=0;double best=1e30;for(size_t i=0;i<mids.size();i++){double v=(p.at-mids[i]).length();if(v<best){best=v;edge=i;}}if(best<180)r.links[edge].members.insert(r.links[edge].members.end(),p.ids.begin(),p.ids.end());}

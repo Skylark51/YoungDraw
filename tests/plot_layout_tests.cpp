@@ -159,6 +159,8 @@ int main(){try{
         check(stageBoxes.size()==3,"each mechanism stage is drawn");
         for(size_t i=0;i<defaults.size();i++){
             auto box=stageBoxes.at(int(i));double cy=box.y+box.h/2,first=graph.p.x+50+(graph.width-54)*defaults[i].start/100,last=graph.p.x+50+(graph.width-54)*defaults[i].end/100;
+            if(width>=520&&i==0)first=plotAnchor(graph,0,true).x;
+            if(width>=520&&i+1==defaults.size())last=plotAnchor(graph,graph.states.size()-1,true).x;
             check(std::abs(box.x+box.w/2-(first+last)/2)<.01,"stage text is centered on its chosen range");
             int heads=0;for(auto& item:drawing.items)if(item.type==Primitive::Polygon&&!item.points.empty()&&std::abs(item.points[0].y-cy)<.01&&(std::abs(item.points[0].x-first)<.01||std::abs(item.points[0].x-last)<.01))heads++;
             check(heads==2,"arrows point outward through the center of the text block");

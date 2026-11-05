@@ -27,15 +27,47 @@ void editBranchedReaction(int id){
     auto result=ui::table(win,L"메커니즘 분기·프레임 편집",{L"구분",L"번호",L"시작 구조",L"도착 구조",L"이름 / TS 설명",L"에너지 (S=0 / 1 / 2)"},rows,update,true,L"행 추가·삭제 가능 · 새 행의 번호는 비워 두세요 · 시작 0: 공통 세로선 · 삭제한 단계의 구조는 캔버스에 유지",false,4);
     if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();}}else{doc=before;redraw();}
 }
-void editReaction(int id){if(auto* r=reaction(id);r&&r->explicitConnections()){editBranchedReaction(id);return;}auto* ptr=reaction(id);if(!ptr)return;Document before=doc;Reaction original=*ptr;
+static bool editLinearReaction(const Document& base, const Reaction& original, Document& edited, bool preview){
     auto update=[&](const ui::Table& rows)->std::wstring{
-        Document candidate=before;auto edited=mechanismGridData(original,rows);
-        for(auto& item:candidate.reactions)if(item.id==id)item=std::move(edited);
-        optimizeMechanism(candidate,{id},original.cyclic);doc=std::move(candidate);redraw();UpdateWindow(win);return {};
+        Document candidate=base;
+        *std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[&](const Reaction& r){return r.id==original.id;})
+            =mechanismGridData(original,rows);
+        optimizeMechanism(candidate,{original.id},original.cyclic);
+        edited=std::move(candidate);
+        if(preview){doc=edited;redraw();UpdateWindow(win);}
+        return {};
     };
-    auto result=ui::table(win,L"메커니즘 단계 편집 · 중간체 → TS → 중간체",
-        {L"구분 (중간체 / TS)",L"이름 / TS 설명 (예: TS1 / 산화)",L"S (예: 0 / 2)",L"에너지 (숫자 또는 ?.?)"},mechanismRows(original),update,true,L"TS1 / 설명: 이름은 에너지 위, 설명은 화살표 위 · S와 에너지는 같은 순서로 / 구분 · Ctrl+=: 아래첨자 · Ctrl+Shift+=: 위첨자 · 미정 에너지: ? 또는 ?.? · S=0 검정, S=1 빨강, S=2 파랑",true);
-    if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();}}else{doc=before;redraw();}
+    return ui::table(win,L"메커니즘 단계 편집 · 중간체 → TS → 중간체",
+        {L"구분 (중간체 / TS)",L"이름 / TS 설명 (예: TS1 / 산화)",L"S (예: 0 / 2)",L"에너지 (숫자 또는 ?.?)"},mechanismRows(original),update,true,L"TS1 / 설명: 이름은 에너지 위, 설명은 화살표 위 · S와 에너지는 같은 순서로 / 구분 · Ctrl+=: 아래첨자 · Ctrl+Shift+=: 위첨자 · 미정 에너지: ? 또는 ?.? · S=0 검정, S=1 빨강, S=2 파랑",true).has_value();
+}
+void editReaction(int id){
+    auto* r=reaction(id);
+    if(!r)return;
+    if(r->explicitConnections()){editBranchedReaction(id);return;}
+    Document before=doc, edited;
+    Reaction original=*r;
+    if(editLinearReaction(before,original,edited,true)){
+        if(toNative(edited)!=toNative(before)){history.checkpoint(before);changed();fit();}
+    }else{doc=std::move(before);redraw();}
+}
+void newReaction(){
+    Document base=doc, edited;
+    Reaction r;
+    r.id=base.nextId++;
+    r.p=center()-Vec{120,0};
+    r.slots={{"Reactant",{}},{"Intermediate",{}},{"Product",{}}};
+    r.above={"Step 1","Step 2"};
+    r.below={"",""};
+    base.reactions.push_back(r);
+    if(!editLinearReaction(base,r,edited,false))return;
+    history.checkpoint(doc);
+    doc=std::move(edited);
+    sidebarPage=0;
+    selection={r.id};
+    targetContainer=0;
+    tool=Select;
+    changed();
+    fit();
 }
 void reactionSettings(int id){
     auto* ptr=reaction(id);if(!ptr)throw std::runtime_error("반응 블록을 선택하세요.");Document before=doc;Reaction old=*ptr;
@@ -97,8 +129,29 @@ void insertBranchArrows(){
     auto error=update(*result);if(!error.empty())throw std::runtime_error(ui::utf8(error));
     if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();status=L"세로선 분기 화살표를 만들었습니다. 그룹으로 이동 · Ctrl+Shift+G로 개별 편집 · Ctrl+Z로 되돌리기";}
 }
-void arrangeImported(){
-    Document before=doc;auto originalSelection=selection;auto ids=groupedSelection(selection);
+Reaction* selectedMechanism();
+void arrangeImported(bool editAfter){
+    if(editAfter){
+        auto* existing=selectedMechanism();
+        const bool hasArrow=std::any_of(doc.objects.begin(),doc.objects.end(),[](const Object& item){
+            return item.kind==ObjectKind::Line&&item.head&&item.points.size()>=2;
+        });
+        if(!existing&&!hasArrow&&!doc.reactions.empty()){
+            if(doc.reactions.size()!=1)throw std::runtime_error("편집할 메커니즘을 캔버스에서 선택하세요.");
+            existing=&doc.reactions.front();
+        }
+        if(existing){
+            const int id=existing->id;
+            sidebarPage=0;
+            selection={id};
+            redraw();
+            editReaction(id);
+            return;
+        }
+    }
+    Document before=doc;
+    auto originalSelection=selection;
+    auto ids=editAfter?std::vector<int>{}:groupedSelection(selection);
     auto update=[&](const std::vector<std::string>& values)->std::wstring{
         Document candidate=before;int owner=arrangeImportedMechanism(candidate,ids,values[4]=="0");
         auto slots=candidate.reactions.back().slots;double degrees=numeric(values[1],-36000,36000),factor=numeric(values[2],1,1000)/100.;
@@ -114,6 +167,13 @@ void arrangeImported(){
     if(!result){doc=before;selection=originalSelection;redraw();return;}
     auto error=update(*result);if(!error.empty())throw std::runtime_error(ui::utf8(error));
     if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();status=L"화살표 사이의 구조들을 반응 상태로 묶었습니다. 구조 칸에서 Ctrl+Shift+K: 모양 정돈 · Ctrl+K: 크기 조정";}
+    if(editAfter){
+        sidebarPage=0;
+        targetContainer=0;
+        tool=Select;
+        redraw();
+        editReaction(primary());
+    }
 }
 Reaction* selectedMechanism(){
     if(auto* r=reaction(primary()))return r;
@@ -127,7 +187,24 @@ void editMechanismControls(int id){
     if(id==149){auto value=ui::form(win,L"화살표 길이",{{L"길이 (pt, 0: 설명에 맞춰 자동)",number(r->arrowLength)}});if(!value)return;double length=numeric((*value)[0],0,10000);if(length>0&&length<20)throw std::runtime_error("길이는 20 pt 이상 또는 0(자동)으로 입력하세요.");Document candidate=doc;for(auto& row:candidate.reactions)if(row.id==owner)row.arrowLength=length;optimizeMechanism(candidate,{owner},r->cyclic);history.checkpoint(doc);doc=std::move(candidate);changed();fit();return;}
     if(id==147){if(selectedCycleOwner!=owner||selectedCycleArrow<0)throw std::runtime_error("제거할 화살표를 먼저 클릭하세요.");Document candidate=doc;for(auto& row:candidate.reactions)if(row.id==owner)removeMechanismConnection(row,size_t(selectedCycleArrow));history.checkpoint(doc);doc=std::move(candidate);selectedCycleArrow=-1;selection={owner};changed();return;}
     size_t selected=targetContainer==owner?std::min(targetSlot,r->slots.size()-1):0;
-    if(id==143){auto value=ui::form(win,L"원하는 위치에 단계 추가",{{L"삽입할 위치 (1부터, 마지막 뒤: 단계 수+1)",std::to_string(selected+1)}});if(!value)return;double n=numeric((*value)[0],1,double(r->slots.size()+1));if(n!=std::floor(n))throw std::runtime_error("정수 위치를 입력하세요.");Document candidate=doc;for(auto& row:candidate.reactions)if(row.id==owner)insertMechanismStage(row,size_t(n)-1);optimizeMechanism(candidate,{owner});history.checkpoint(doc);doc=std::move(candidate);targetContainer=owner;targetSlot=size_t(n)-1;selection={owner};changed();fit();return;}
+    if(id==143){
+        const size_t end=r->slots.size();
+        auto value=ui::form(win,L"단계 추가",{{L"삽입할 위치 (1부터, 마지막 뒤: 단계 수+1)",std::to_string(end+1)}});
+        if(!value)return;
+        double n=numeric((*value)[0],1,double(end+1));
+        if(n!=std::floor(n))throw std::runtime_error("정수 위치를 입력하세요.");
+        const size_t position=size_t(n)-1;
+        Document candidate=doc;
+        for(auto& row:candidate.reactions)if(row.id==owner){
+            if(position==end){
+                if(end>=40)throw std::runtime_error("단계는 최대 40개까지 추가할 수 있습니다.");
+                appendMechanismStage(row);
+            }else insertMechanismStage(row,position);
+        }
+        optimizeMechanism(candidate,{owner},position==end&&r->cyclic);
+        history.checkpoint(doc);doc=std::move(candidate);
+        targetContainer=owner;targetSlot=position;selection={owner};changed();fit();return;
+    }
     if(id==144||id==146){std::vector<ui::Field> fields={{L"제거하거나 합칠 단계 번호 (1부터)",std::to_string(selected+1)}};
         if(id==146)fields.push_back({L"구조와 연결을 받을 단계 번호 (1부터)",std::to_string(selected?selected:std::min(size_t(2),r->slots.size()))});
         else fields.push_back({L"해당 단계의 구조", "0",false,{L"캔버스에 유지 (단계·연결만 제거)",L"구조도 함께 삭제"}});

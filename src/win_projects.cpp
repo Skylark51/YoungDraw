@@ -21,6 +21,15 @@ bool supported(const fs::path& p){auto e=extension(p);return image(p)||e==L".ydr
 fs::path root(){wchar_t value[32768]{};DWORD n=GetEnvironmentVariableW(L"LOCALAPPDATA",value,32768);if(!n||n>=32768)throw std::runtime_error("프로젝트 저장 위치를 찾을 수 없습니다.");return fs::path(value)/L"YoungDraw"/L"Projects";}
 static std::wstring unique(){static unsigned serial=0;return std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(++serial);}
 static bool validName(const std::wstring& s){return !s.empty()&&s.find_first_not_of(L" \r\n\t")!=std::wstring::npos&&s.size()<=200;}
+static std::string readDrawing(const fs::path& path){
+    std::ifstream in(path,std::ios::binary|std::ios::ate);
+    auto size=in.tellg();
+    if(size<0||size>64*1024*1024)throw std::runtime_error("파일은 64 MB까지 지원합니다.");
+    std::string bytes(size_t(size),0);
+    in.seekg(0);
+    if(!in.read(bytes.data(),size))throw std::runtime_error("파일을 읽을 수 없습니다.");
+    return bytes;
+}
 void Project::save() const {
     if(!validName(name))throw std::runtime_error("이름을 1~200자로 입력하세요.");
     std::ostringstream out;out<<"YoungDrawProject 1\n"<<std::quoted(ui::utf8(name))<<' '<<std::quoted(ui::utf8(note))<<'\n';
@@ -52,36 +61,81 @@ size_t Project::add(const fs::path& source){
     bool legacy=ext==L".ydraw";
     do{item.file=unique()+(legacy?L".cdxml":ext);}while(fs::exists(folder/item.file));
     if(legacy){
-        std::ifstream in(source,std::ios::binary|std::ios::ate);
-        auto size=in.tellg();
-        if(size<0||size>64*1024*1024)throw std::runtime_error("파일은 64 MB까지 지원합니다.");
-        std::string bytes(size_t(size),0);
-        in.seekg(0);
-        if(!in.read(bytes.data(),size))throw std::runtime_error("파일을 읽을 수 없습니다.");
-        storage::writeAtomic((folder/item.file).wstring(),toCdxml(fromCdxml(bytes)),false);
+        storage::writeAtomic((folder/item.file).wstring(),toCdxml(fromCdxml(readDrawing(source))),false);
     }else fs::copy_file(source,folder/item.file);
     items.push_back(item);try{save();}catch(...){items.pop_back();fs::remove(folder/item.file);throw;}return items.size()-1;
 }
 Project Project::importFrom(const fs::path& manifest,const fs::path& base){
     return Project::load(fs::is_directory(manifest)?manifest:manifest.parent_path()).copyTo(base);
 }
-Project Project::copyTo(const fs::path& base) const {
+static std::wstring exportStem(std::wstring name){
+    for(auto& c:name)if(c<32||wcschr(L"<>:\"/\\|?*",c))c=L'_';
+    auto end=name.find_last_not_of(L" .");
+    if(end==std::wstring::npos)return L"Drawing";
+    name.resize(end+1);
+    auto device=name.substr(0,name.find(L'.'));
+    auto deviceEnd=device.find_last_not_of(L' ');
+    if(deviceEnd!=std::wstring::npos)device.resize(deviceEnd+1);
+    for(auto& c:device)c=wchar_t(towupper(c));
+    if(device==L"CON"||device==L"PRN"||device==L"AUX"||device==L"NUL"||
+       (device.size()==4&&(device.compare(0,3,L"COM")==0||device.compare(0,3,L"LPT")==0)&&
+        wcschr(L"123456789¹²³",device.back())))name.insert(0,1,L'_');
+    return name;
+}
+static Project transfer(const fs::path& folder,const fs::path& base,const PngWriter& writePng){
     // Validate the complete source before creating a destination. Keep relative
     // asset names so image edit sidecars and project notes survive relocation.
     auto source=Project::load(folder);
-    std::vector<fs::path> files;
+    std::vector<fs::path> sidecars;
     for(const auto& item:source.items){
         auto asset=source.folder/item.file;
         if(!fs::is_regular_file(asset))throw std::runtime_error(ui::utf8(L"프로젝트 파일이 없습니다: "+item.name+L"\nproject.ydproject와 같은 폴더의 구조·이미지 파일도 함께 가져오세요."));
-        files.push_back(asset);
-        if(image(asset)&&fs::is_regular_file(imageDrawing(asset)))files.push_back(imageDrawing(asset));
+        auto sidecar=image(asset)?imageDrawing(asset):fs::path{};
+        sidecars.push_back(!sidecar.empty()&&fs::is_regular_file(sidecar)?sidecar:fs::path{});
     }
     auto result=Project::create(base,source.name);
     try{
-        for(const auto& file:files)fs::copy_file(file,result.folder/file.filename());
-        result.note=source.note;result.items=source.items;result.save();
+        result.note=source.note;result.items=source.items;
+        // Reserve the filenames of plain images before choosing names for drawings.
+        for(size_t i=0;i<source.items.size();++i){
+            auto asset=source.folder/source.items[i].file;
+            if(!writePng||(image(asset)&&sidecars[i].empty())){
+                fs::copy_file(asset,result.folder/asset.filename());
+                if(!sidecars[i].empty())fs::copy_file(sidecars[i],result.folder/sidecars[i].filename());
+            }
+        }
+        if(writePng)for(size_t i=0;i<source.items.size();++i){
+            auto& item=result.items[i];
+            auto asset=source.folder/item.file;
+            bool editedImage=!sidecars[i].empty();
+            if(image(asset)&&!editedImage)continue;
+            auto stem=exportStem(item.name);
+            fs::path imagePath,cdxml,png;
+            for(size_t suffix=1;;++suffix){
+                auto name=suffix==1?stem:stem+L" ("+std::to_wstring(suffix)+L")";
+                imagePath=result.folder/(name+extension(asset));
+                auto drawingStem=editedImage?imagePath.filename().wstring():name;
+                cdxml=result.folder/(drawingStem+L".cdxml");
+                png=result.folder/(drawingStem+L".png");
+                if(!fs::exists(cdxml)&&!fs::exists(png)&&(!editedImage||!fs::exists(imagePath)))break;
+            }
+            auto drawing=editedImage?sidecars[i]:asset;
+            if(extension(drawing)==L".ydraw")
+                storage::writeAtomic(cdxml.wstring(),toCdxml(fromCdxml(readDrawing(drawing))),false);
+            else fs::copy_file(drawing,cdxml);
+            if(editedImage)fs::copy_file(asset,imagePath);
+            try{writePng(cdxml,png);}
+            catch(const std::exception& e){throw std::runtime_error(ui::utf8(item.name+L": ")+e.what());}
+            item.file=(editedImage?imagePath:cdxml).filename().wstring();
+        }
+        result.save();
     }catch(...){std::error_code ignored;fs::remove_all(result.folder,ignored);throw;}
     return result;
+}
+Project Project::copyTo(const fs::path& base) const {return transfer(folder,base,{});}
+Project Project::exportTo(const fs::path& base,const PngWriter& writePng) const {
+    if(!writePng)throw std::invalid_argument("PNG writer is required");
+    return transfer(folder,base,writePng);
 }
 size_t Project::addDrawing(const std::wstring& name,const std::string& bytes){
     if(!validName(name))throw std::runtime_error("이름을 1~200자로 입력하세요.");Item item{unique()+L".cdxml",name,L""};storage::writeAtomic((folder/item.file).wstring(),bytes);items.push_back(item);try{save();}catch(...){items.pop_back();fs::remove(folder/item.file);throw;}return items.size()-1;

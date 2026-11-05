@@ -1,5 +1,6 @@
 #include "win_projects.h"
 #include "win_storage.h"
+#include "win_editor_render.h"
 #include "cdxml.h"
 #include <fstream>
 #include <iostream>
@@ -9,6 +10,48 @@ namespace fs=std::filesystem;
 using namespace yd::projects;
 static void check(bool value,const char* text){if(!value)throw std::runtime_error(text);}
 static std::string read(const fs::path& path){std::ifstream file(path,std::ios::binary);return {std::istreambuf_iterator<char>(file),{}};}
+static void checkExport(const fs::path& temp,const yd::Document& drawing){
+    Gdiplus::GdiplusStartupInput input;
+    ULONG_PTR token{};
+    check(Gdiplus::GdiplusStartup(&token,&input,nullptr)==Gdiplus::Ok,"start GDI+");
+    struct Shutdown {ULONG_PTR token;~Shutdown(){Gdiplus::GdiplusShutdown(token);}} shutdown{token};
+    auto p=Project::create(temp/L"projects",L"그림 내보내기");
+    auto bytes=yd::toCdxml(drawing);
+    p.addDrawing(L"반응 / TS",bytes);
+    p.addDrawing(L"반응 _ ts",bytes);
+    p.addDrawing(L"CON",bytes);
+    auto originalImage=temp/L"참고 이미지.png";
+    yd::storage::writeAtomic(originalImage.wstring(),"original image bytes");
+    p.add(originalImage);
+    auto originalSidecar=imageDrawing(p.folder/p.items.back().file);
+    yd::storage::writeAtomic(originalSidecar.wstring(),bytes);
+    auto exportBase=temp/L"Named export";
+    auto exported=p.exportTo(exportBase,[](const fs::path& cdxml,const fs::path& png){
+        yd::editor::writePreview(png.wstring(),yd::fromCdxml(read(cdxml)),true);
+    });
+    check(exported.items[0].file==L"반응 _ TS.cdxml"&&exported.items[1].file==L"반응 _ ts (2).cdxml"&&exported.items[2].file==L"_CON.cdxml","export uses safe unique display names");
+    check(Project::load(p.folder).items[0].file==p.items[0].file,"export leaves source project files unchanged");
+    for(const auto& item:exported.items){
+        auto path=exported.folder/item.file;
+        auto cdxml=image(path)?imageDrawing(path):path;
+        check(read(cdxml)==bytes,"exported CDXML preserves original bytes");
+        auto png=cdxml;png.replace_extension(L".png");
+        Gdiplus::Bitmap bitmap(png.c_str());
+        Gdiplus::Color pixel;
+        check(bitmap.GetPixel(0,0,&pixel)==Gdiplus::Ok&&pixel.GetA()==0,"exported PNG has transparent margins");
+        bool ink=false;
+        for(UINT y=0;y<bitmap.GetHeight()&&!ink;y++)for(UINT x=0;x<bitmap.GetWidth()&&!ink;x++)
+            if(bitmap.GetPixel(x,y,&pixel)==Gdiplus::Ok&&pixel.GetA()==255)ink=true;
+        check(ink,"exported PNG contains the drawing");
+    }
+    auto imported=Project::importFrom(exported.folder,temp/L"Named import");
+    check(imported.items[0].file==exported.items[0].file&&read(imageDrawing(imported.folder/imported.items.back().file))==bytes,"named export reimports with linked image edit");
+    auto failedBase=temp/L"Failed export";
+    bool failed=false;
+    try{p.exportTo(failedBase,[](const fs::path&,const fs::path&){throw std::runtime_error("encoder failed");});}
+    catch(const std::exception&){failed=true;}
+    check(failed&&fs::is_empty(failedBase),"failed PNG export cleans up incomplete project");
+}
 int main(){
     const auto temp=fs::temp_directory_path()/(L"YoungDrawProjectsTest-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
     try{
@@ -48,6 +91,7 @@ int main(){
         check(fs::exists(imported.folder/imported.items[0].file),"import is independent of transferred source");
         auto before=read(p.folder/L"project.ydproject");loaded.name=L" ";rejected=false;try{loaded.save();}catch(...){rejected=true;}check(rejected&&read(p.folder/L"project.ydproject")==before,"invalid edit preserves saved manifest");
         auto corrupt=Project::create(temp/L"projects",L"경로 검사");yd::storage::writeAtomic((corrupt.folder/L"project.ydproject").wstring(),"YoungDrawProject 1\n\"test\" \"\"\n\"../escape.cdxml\" \"name\" \"\"\n");rejected=false;try{Project::load(corrupt.folder);}catch(...){rejected=true;}check(rejected,"manifest traversal rejected");
+        checkExport(temp,drawing);
         fs::remove_all(temp);std::cout<<"PASS: project assets, CDXML, image bytes, names, notes, order and recovery\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}
 }

@@ -1,4 +1,5 @@
 #include "model.h"
+#include "plot_data.h"
 #include "scene.h"
 #include "mechanism_data.h"
 #include <map>
@@ -736,7 +737,7 @@ Document catalyticCycleDemo(){
     optimizeMechanism(d,{r.id},true);
     return d;
 }
-Document coordinateDemo(){Document d;EnergyPlot p;p.id=d.nextId++;p.p={25,90};p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#000000",{0,37.2,17.7,27.3,-9.9},1,3.5}};d.plots.push_back(p);fillSlot(d,demo(),p.id,0,true);fillSlot(d,chairTemplate(),p.id,4,false);return d;}
+Document coordinateDemo(){Document d;EnergyPlot p;p.id=d.nextId++;p.p={25,90};p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#000000",{0,37.2,17.7,27.3,-9.9},1,3.5}};d.plots.push_back(p);fillSlot(d,demo(),p.id,0,true);fillSlot(d,chairTemplate(),p.id,4,false);d.plots.front().stages=defaultMechanismStages();return d;}
 void applyHouseStyle(Document& d){
     Style target;double scale=target.bondLength/d.style.bondLength;
     for(auto& a:d.atoms){a.p=a.p*scale;a.labelOffset=a.labelOffset*scale;for(auto& r:a.labelRuns){r.font="Arial";r.face|=1;r.size*=target.fontSize/d.style.fontSize;}}

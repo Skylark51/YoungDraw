@@ -1,3 +1,4 @@
+#include "win_editor_animation.h"
 #include "win_editor_chrome.h"
 #include "win_editor_clipboard.h"
 #include "win_editor_commands.h"
@@ -20,7 +21,7 @@
 
 namespace yd::editor {
 
-void command(int id){if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==167||id==220||id==221)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();
+void command(int id){if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==167||id==insertBranchArrowsCommand||id==externalMechanismCommand||id==bondAnimationCommand||id==recognizeMechanismCommand)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();
  if(id==184){appearance::picker(win,[](){refreshAppearance();});status=std::wstring(L"작업실 · ")+appearance::palette().name+L" / 테마는 출력에 포함되지 않습니다.";redraw();return;}
  if(id==156){pruneLockedSelection();textColorPalette(colorTarget);return;}
  if(id==155){pruneLockedSelection();atomColorPalette();return;}
@@ -36,13 +37,15 @@ void command(int id){if(isolatedStructureEditing){if(id==102)id=186;if(id==109)i
  }
  pruneLockedSelection();if(id>=200&&id<=218){if(id==217){auto before=doc;if(delocalizeBonds(doc,selection)){history.checkpoint(before);changed();}tool=Delocalized;}else{tool=Tool(id-200);selection.clear();}redraw();return;}if(id>=301&&id<=418){element=id-300;int aid=hoverAtom?hoverAtom:(doc.atom(primary())?primary():0);if(aid){history.checkpoint(doc);auto a=doc.atom(aid);setAtomElement(doc,aid,element);a->label.clear();a->labelRuns.clear();a->explicitH=-1;changed();}redraw();return;}
  switch(id){
+ case bondAnimationCommand:createBondAnimation();break;
  case 143:case 144:case 145:case 146:case 147:case 148:case 149:editMechanismControls(id);break;
  case 186:if(isolatedStructureEditing){writeFile(isolatedStructureResult,toNative(doc));dirty=false;DestroyWindow(win);}else editTargetStructure();break;
  case 187:if(isolatedStructureEditing)DestroyWindow(win);break;
  case 185:manageProjects();break;
  case 166:{auto candidate=doc;auto ids=groupedSelection(selection);if(ids.empty())throw std::runtime_error("벤젠이 포함된 그룹이나 고리를 선택하세요.");int count=collapsePhenyl(candidate,ids);if(!count)throw std::runtime_error("단일 결합 하나로 연결된 비치환 벤젠을 찾지 못했습니다.");history.checkpoint(doc);doc=std::move(candidate);selection.erase(std::remove_if(selection.begin(),selection.end(),[&](int id){auto all=doc.allIds();return !contains(all,id);}),selection.end());changed();break;}
  case 167:arrangeImported();break;
- case 220:insertBranchArrows();break;case 221:externalMechanism();break;
+ case recognizeMechanismCommand:arrangeImported(true);break;
+ case insertBranchArrowsCommand:insertBranchArrows();break;case externalMechanismCommand:externalMechanism();break;
  case 168:editArrowCross();break;case 169:branchMechanism();break;
  case 165:resizeSelected();break;case 160:case 161:case 162:case 163:case 164:transformSelected(id);break;case 170:library(L"전체");break;case 171:library(L"리간드");break;case 172:library(L"착물");break;case 173:library(L"기질");break;case 174:library(L"산·시약");break;case 100:newDocumentTab();break;case 109:closeDocumentTab(activeDocument);break;
  case 101:{for(const auto& path:openDocumentFiles()){
@@ -75,9 +78,17 @@ void command(int id){if(isolatedStructureEditing){if(id==102)id=186;if(id==109)i
  case 104:if(history.undo(doc)){selection.clear();targetContainer=0;changed();}break;case 105:if(history.redo(doc)){selection.clear();targetContainer=0;changed();}break;case 107:fit();break;case 110:clean();break;case 111:library();break;
  case 112:saveCurrentTemplate();break;
  case 113:{auto p=fileDialog(false);if(p)insert(fromCdxml(readFile(*p)),center());break;}
- case 120:{sidebarPage=0;history.checkpoint(doc);Reaction r;r.id=doc.nextId++;r.p=center()-Vec{120,0};r.slots={{"Reactant",{}},{"Intermediate",{}},{"Product",{}}};r.above={"Step 1","Step 2"};r.below={"",""};doc.reactions.push_back(r);selection={r.id};tool=Select;changed();editReaction(r.id);break;}
+ case 120:newReaction();break;
  case 121:if(reaction(primary()))editReaction(primary());else edit();break;case 122:case 128:{auto* r=reaction(primary());if(!r)throw std::runtime_error("반응 메커니즘을 선택하세요.");if(r->slots.size()>=40)throw std::runtime_error("메커니즘은 최대 40칸까지 추가할 수 있습니다.");history.checkpoint(doc);appendMechanismStage(*r,id==128,targetContainer==r->id?targetSlot:size_t(-1));optimizeMechanism(doc,{r->id},r->cyclic);changed();fit();break;}case 123:fillTarget(false);break;case 124:fillTarget(true);break;
- case 130:{sidebarPage=1;history.checkpoint(doc);EnergyPlot p;p.id=doc.nextId++;p.p=center()-Vec{160,75};p.stages=defaultMechanismStages();p.states={{"R",0,{},{}},{"TS",20,{},{}},{"P",-10,{},{}}};p.series={{"Path 1","#000000",{0,20,-10},1,3.5}};doc.plots.push_back(p);selection={p.id};tool=Select;changed();editPlot(p.id);break;}
+ case 130:{sidebarPage=1;history.checkpoint(doc);EnergyPlot p;p.id=doc.nextId++;p.stages=defaultMechanismStages();p.states={{"R",0,{},{}},{"TS",20,{},{}},{"P",-10,{},{}}};p.series={{"Path 1","#000000",{0,20,-10},1,3.5}};Document graph;graph.style=doc.style;graph.plots.push_back(p);
+     const auto bounds=makeScene(graph,measure).bounds;
+     const auto view=canvasBox();
+     const Vec target=center();
+     zoom=std::min({zoom,std::max(1.,view.Width-65.)/bounds.w,std::max(1.,view.Height-110.)/bounds.h});
+     const Vec midpoint{bounds.x+bounds.w/2,bounds.y+bounds.h/2};
+     origin={view.X+view.Width/2-target.x*zoom,view.Y+view.Height/2-target.y*zoom};
+     p.p=target-midpoint;
+     doc.plots.push_back(p);selection={p.id};tool=Select;changed();editPlot(p.id);break;}
  case 131:if(plot(primary()))editPlot(primary());else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 132:if(plot(primary()))editSeries(primary(),true);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 133:if(plot(primary()))editSeries(primary(),false);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;
  case 125:case 126:{Document before=doc;try{optimizeMechanism(doc,selection,id==126);}catch(...){doc=before;throw;}history.checkpoint(before);selection.clear();changed();fit();break;}case 127:reactionSettings(primary());break;case 135:addBilateralBranch(primary());break;case 137:plotSettings(primary());break;case 138:publicationLayout(primary());break;case 139:editPlotStages(primary());break;case 136:snapPlotStages(primary());break;case 142:editPlotColors(primary());break;case 150:history.checkpoint(doc);applyHouseStyle(doc);status=L"Arial 굵게, 14 pt 라벨, 2 pt 결합선을 적용했습니다.";changed();fit();break;case 134:guides=!guides;break;case 140:case 141:sidebarPage=id==141?1:0;history.checkpoint(doc);doc=id==140?mechanismDemo():coordinateDemo();selection.clear();targetContainer=0;filePath.clear();tool=Select;status=L"배치 예제입니다. Ctrl+Z로 이전 문서를 복원합니다.";changed();fit();break;
  }redraw();}

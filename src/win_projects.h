@@ -8,6 +8,7 @@
 
 namespace yd::projects {
 struct Item { std::wstring file, name, note; };
+using PngWriter = std::function<void(const std::filesystem::path& drawing,const std::filesystem::path& png)>;
 struct Project {
     std::filesystem::path folder;
     std::wstring name, note;
@@ -17,6 +18,7 @@ struct Project {
     static Project create(const std::filesystem::path& root, const std::wstring& name);
     static Project importFrom(const std::filesystem::path& manifest, const std::filesystem::path& root);
     Project copyTo(const std::filesystem::path& root) const;
+    Project exportTo(const std::filesystem::path& root,const PngWriter& writePng) const;
     size_t add(const std::filesystem::path& source);
     size_t addDrawing(const std::wstring& name, const std::string& bytes);
     void move(size_t from, size_t to);
@@ -33,6 +35,7 @@ struct Callbacks {
     std::function<bool(const std::vector<std::wstring>&)> close;
     std::function<void(HDC,const RECT&,const std::wstring&)> preview;
     std::function<bool(const std::filesystem::path&)> saveForExport;
+    PngWriter writePng;
 };
 void manage(HWND owner, const Callbacks& callbacks);
 }

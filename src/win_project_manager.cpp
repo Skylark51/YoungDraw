@@ -1,5 +1,6 @@
 #include "win_projects.h"
 #include "win_dialogs.h"
+#include "win_theme.h"
 #include "win_ui.h"
 #include <commctrl.h>
 #include <commdlg.h>
@@ -12,16 +13,54 @@
 namespace yd::projects {
 namespace fs=std::filesystem;
 namespace {
+COLORREF color(Gdiplus::Color value){return RGB(value.GetR(),value.GetG(),value.GetB());}
+void fill(HDC dc,const RECT& area,Gdiplus::Color value){
+    auto previous=SetDCBrushColor(dc,color(value));
+    FillRect(dc,&area,(HBRUSH)GetStockObject(DC_BRUSH));
+    SetDCBrushColor(dc,previous);
+}
+void frame(HDC dc,const RECT& area,Gdiplus::Color value){
+    auto previous=SetDCBrushColor(dc,color(value));
+    FrameRect(dc,&area,(HBRUSH)GetStockObject(DC_BRUSH));
+    SetDCBrushColor(dc,previous);
+}
+LRESULT CALLBACK itemListProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR){
+    if(msg==WM_NOTIFY){
+        auto* draw=reinterpret_cast<NMCUSTOMDRAW*>(lp);
+        if(draw->hdr.hwndFrom==ListView_GetHeader(hwnd)&&draw->hdr.code==NM_CUSTOMDRAW){
+            const auto& palette=appearance::palette();
+            if(draw->dwDrawStage==CDDS_PREPAINT){
+                RECT area{};GetClientRect(draw->hdr.hwndFrom,&area);
+                fill(draw->hdc,area,palette.panel);
+                return CDRF_NOTIFYITEMDRAW;
+            }
+            if(draw->dwDrawStage==CDDS_ITEMPREPAINT){
+                wchar_t label[256]{};HDITEMW item{};
+                item.mask=HDI_TEXT;item.pszText=label;item.cchTextMax=256;
+                Header_GetItem(draw->hdr.hwndFrom,int(draw->dwItemSpec),&item);
+                auto area=draw->rc;
+                fill(draw->hdc,area,palette.raised);frame(draw->hdc,area,palette.edge);
+                area.left+=6;area.right-=4;
+                SetBkMode(draw->hdc,TRANSPARENT);SetTextColor(draw->hdc,color(palette.text));
+                DrawTextW(draw->hdc,label,-1,&area,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);
+                return CDRF_SKIPDEFAULT;
+            }
+        }
+    }
+    return DefSubclassProc(hwnd,msg,wp,lp);
+}
 struct Manager {
     HWND window=nullptr, projects=nullptr, items=nullptr, note=nullptr, heading=nullptr, hint=nullptr;
     HFONT font=nullptr;
+    HBRUSH chromeBrush=nullptr,panelBrush=nullptr,raisedBrush=nullptr;
+    ~Manager(){if(font)DeleteObject(font);if(chromeBrush)DeleteObject(chromeBrush);if(panelBrush)DeleteObject(panelBrush);if(raisedBrush)DeleteObject(raisedBrush);}
     Callbacks callbacks;
     std::vector<Project> all;
     int selected=-1, item=-1, dragging=-1, insertion=-1;
     bool refreshing=false, noteDirty=false;
     RECT preview{};
     HWND control(const wchar_t* cls,const wchar_t* label,int id,DWORD style){
-        HWND c=CreateWindowExW((style&WS_BORDER)?WS_EX_CLIENTEDGE:0,cls,label,WS_CHILD|WS_VISIBLE|style,0,0,1,1,window,(HMENU)INT_PTR(id),GetModuleHandleW(nullptr),nullptr);
+        HWND c=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|style,0,0,1,1,window,(HMENU)INT_PTR(id),GetModuleHandleW(nullptr),nullptr);
         SendMessageW(c,WM_SETFONT,(WPARAM)font,TRUE);return c;
     }
     Project* project(){return selected>=0&&selected<int(all.size())?&all[selected]:nullptr;}
@@ -107,8 +146,8 @@ struct Manager {
             BROWSEINFOW info{};info.hwndOwner=window;info.lpszTitle=L"프로젝트를 복사할 폴더를 선택하세요 (USB 또는 공유 폴더)";info.ulFlags=BIF_RETURNONLYFSDIRS|BIF_NEWDIALOGSTYLE;
             auto chosen=SHBrowseForFolderW(&info);if(!chosen)return;wchar_t path[MAX_PATH]{};BOOL ok=SHGetPathFromIDListW(chosen,path);CoTaskMemFree(chosen);if(!ok)throw std::runtime_error("파일 시스템 폴더를 선택하세요.");
             if(callbacks.saveForExport&&!callbacks.saveForExport(p->folder))return;
-            auto exported=p->copyTo(path);
-            MessageBoxW(window,(L"프로젝트를 복사했습니다.\n\n"+exported.folder.wstring()+L"\n\n이 폴더 전체를 다른 PC로 옮긴 뒤, 내 프로젝트 → 불러오기에서 project.ydproject를 선택하세요.").c_str(),L"프로젝트 내보내기",MB_OK|MB_ICONINFORMATION);return;
+            auto exported=p->exportTo(path,callbacks.writePng);
+            MessageBoxW(window,(L"프로젝트를 내보냈습니다. 구조 문서와 투명 PNG가 같은 폴더에 저장됩니다.\n\n"+exported.folder.wstring()+L"\n\n다른 PC에서는 내 프로젝트 → 불러오기에서 project.ydproject를 선택하세요.").c_str(),L"프로젝트 내보내기",MB_OK|MB_ICONINFORMATION);return;
         }
         if(id==11){auto value=edit(L"프로젝트 이름·노트",p->name,p->note);if(!value)return;auto before=*p;p->name=ui::wide((*value)[0]);p->note=ui::wide((*value)[1]);try{p->save();}catch(...){*p=before;throw;}refreshProjects(selected);return;}
         if(id==12){if(MessageBoxW(window,L"이 프로젝트를 삭제하시겠습니까?\n파일은 프로젝트 휴지통에 보관됩니다.",L"프로젝트 삭제",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
@@ -138,10 +177,38 @@ struct Manager {
         ListView_SetInsertMark(items,&mark);
     }
     void paint(){
-        PAINTSTRUCT ps;HDC dc=BeginPaint(window,&ps);FillRect(dc,&preview,(HBRUSH)GetStockObject(WHITE_BRUSH));auto p=project();
+        const auto& palette=appearance::palette();
+        PAINTSTRUCT ps;HDC dc=BeginPaint(window,&ps);fill(dc,preview,palette.canvas);auto p=project();
+        for(HWND control:{projects,items,note}){
+            RECT area{};GetWindowRect(control,&area);
+            MapWindowPoints(nullptr,window,reinterpret_cast<POINT*>(&area),2);
+            InflateRect(&area,1,1);frame(dc,area,palette.edge);
+        }
+        auto previous=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,color(palette.canvasInk));
         try{if(p&&item>=0)callbacks.preview(dc,preview,(p->folder/p->items[item].file).wstring());else{SetBkMode(dc,TRANSPARENT);auto r=preview;DrawTextW(dc,L"항목을 선택하면 미리보기가 표시됩니다", -1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE);}}
         catch(const std::exception& e){auto r=preview;auto text=ui::wide(e.what());DrawTextW(dc,text.c_str(),-1,&r,DT_WORDBREAK);}
-        FrameRect(dc,&preview,(HBRUSH)GetStockObject(LTGRAY_BRUSH));EndPaint(window,&ps);
+        frame(dc,preview,palette.edge);SelectObject(dc,previous);EndPaint(window,&ps);
+    }
+    void drawControl(const DRAWITEMSTRUCT& draw){
+        const auto& palette=appearance::palette();
+        const bool list=draw.CtlType==ODT_LISTBOX;
+        const bool active=(draw.itemState&(list?ODS_SELECTED:ODS_SELECTED|ODS_HOTLIGHT))!=0;
+        const bool disabled=(draw.itemState&ODS_DISABLED)!=0;
+        const bool primary=!list&&(draw.CtlID==14||draw.CtlID==23);
+        const bool accent=!disabled&&(list?active:primary&&!active);
+        auto background=accent?palette.accent:active?palette.hover:list||disabled?palette.panel:palette.raised;
+        auto area=draw.rcItem;auto dc=draw.hDC;
+        fill(dc,area,background);
+        if(!list)frame(dc,area,draw.itemState&ODS_FOCUS?palette.accent:palette.edge);
+        SetTextColor(dc,color(disabled?palette.muted:accent?palette.onAccent:palette.text));SetBkMode(dc,TRANSPARENT);
+        auto previous=SelectObject(dc,font);
+        if(list)area.left+=8;
+        wchar_t label[256]{};
+        if(list&&draw.itemID<all.size())SendMessageW(draw.hwndItem,LB_GETTEXT,draw.itemID,(LPARAM)label);
+        if(!list)GetWindowTextW(draw.hwndItem,label,256);
+        DrawTextW(dc,label,-1,&area,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX|(list?DT_LEFT:DT_CENTER));
+        if(draw.itemState&ODS_FOCUS){area=draw.rcItem;InflateRect(&area,-3,-3);DrawFocusRect(dc,&area);}
+        SelectObject(dc,previous);
     }
     static LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
         auto self=reinterpret_cast<Manager*>(GetWindowLongPtrW(h,GWLP_USERDATA));
@@ -149,19 +216,43 @@ struct Manager {
         if(!self)return DefWindowProcW(h,msg,wp,lp);
         try{switch(msg){
             case WM_CREATE:{
+                const auto& palette=appearance::palette();
+                self->chromeBrush=CreateSolidBrush(color(palette.chrome));
+                self->panelBrush=CreateSolidBrush(color(palette.panel));
+                self->raisedBrush=CreateSolidBrush(color(palette.raised));
                 self->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
                 self->control(L"STATIC",L"내 프로젝트",1,0);self->control(L"STATIC",L"파일 노트 (항목 전환·닫을 때 자동 저장)",2,0);
                 self->heading=self->control(L"STATIC",L"",3,SS_ENDELLIPSIS);
-                const wchar_t* labels[]={L"새로",L"정보",L"삭제"};for(int i=0;i<3;i++)self->control(L"BUTTON",labels[i],10+i,WS_TABSTOP);
-                self->control(L"BUTTON",L"불러오기",13,WS_TABSTOP);self->control(L"BUTTON",L"내보내기",14,WS_TABSTOP);self->control(L"BUTTON",L"폴더",15,WS_TABSTOP);
-                const wchar_t* actions[]={L"새 구조",L"파일 추가",L"현재 문서 추가",L"열기 / 편집",L"이름·노트",L"항목 삭제",L"위로 ↑",L"아래로 ↓",L"노트 저장"};for(int i=0;i<9;i++)self->control(L"BUTTON",actions[i],20+i,WS_TABSTOP);
-                self->projects=self->control(L"LISTBOX",L"",40,WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_TABSTOP);
-                self->items=self->control(WC_LISTVIEWW,L"",41,WS_BORDER|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS|WS_TABSTOP);
+                const wchar_t* labels[]={L"새로",L"정보",L"삭제",L"불러오기",L"내보내기",L"폴더"};
+                for(int i=0;i<6;i++)self->control(L"BUTTON",labels[i],10+i,WS_TABSTOP|BS_OWNERDRAW);
+                const wchar_t* actions[]={L"새 구조",L"파일 추가",L"현재 문서 추가",L"열기 / 편집",L"이름·노트",L"항목 삭제",L"위로 ↑",L"아래로 ↓",L"노트 저장"};
+                for(int i=0;i<9;i++)self->control(L"BUTTON",actions[i],20+i,WS_TABSTOP|BS_OWNERDRAW);
+                self->projects=self->control(L"LISTBOX",L"",40,WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|WS_TABSTOP);
+                SendMessageW(self->projects,LB_SETITEMHEIGHT,0,24);
+                self->items=self->control(WC_LISTVIEWW,L"",41,LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS|WS_TABSTOP);
+                SetWindowSubclass(self->items,itemListProc,1,0);
+                ListView_SetBkColor(self->items,color(palette.panel));
+                ListView_SetTextBkColor(self->items,color(palette.panel));
+                ListView_SetTextColor(self->items,color(palette.text));
+                ListView_SetInsertMarkColor(self->items,color(palette.accent));
                 ListView_SetExtendedListViewStyle(self->items,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_INFOTIP);
                 LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=260;col.pszText=const_cast<wchar_t*>(L"이름 · 드래그로 순서 변경");ListView_InsertColumn(self->items,0,&col);col.cx=90;col.pszText=const_cast<wchar_t*>(L"형식");ListView_InsertColumn(self->items,1,&col);
-                self->note=self->control(L"EDIT",L"",42,WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_TABSTOP);SendMessageW(self->note,EM_SETLIMITTEXT,1024*1024,0);
+                self->note=self->control(L"EDIT",L"",42,WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_TABSTOP);SendMessageW(self->note,EM_SETLIMITTEXT,1024*1024,0);
                 self->hint=self->control(L"STATIC",L"다른 PC의 프로젝트: 폴더 전체를 옮긴 뒤 불러오기에서 project.ydproject 선택",43,SS_ENDELLIPSIS);
                 DragAcceptFiles(h,TRUE);self->layout();self->load();return 0;}
+            case WM_ERASEBKGND:{
+                RECT area{};GetClientRect(h,&area);fill((HDC)wp,area,appearance::palette().chrome);return TRUE;}
+            case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{
+                const auto& palette=appearance::palette();
+                auto dc=(HDC)wp;auto control=(HWND)lp;
+                SetTextColor(dc,color(IsWindowEnabled(control)?palette.text:palette.muted));
+                if(control==self->note||control==self->projects){
+                    bool raised=control==self->note&&IsWindowEnabled(control);
+                    SetBkColor(dc,color(raised?palette.raised:palette.panel));
+                    return (LRESULT)(raised?self->raisedBrush:self->panelBrush);
+                }
+                SetBkColor(dc,color(palette.chrome));return (LRESULT)self->chromeBrush;}
+            case WM_DRAWITEM:self->drawControl(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
             case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={1100,700};return 0;
             case WM_SIZE:self->layout();return 0;
             case WM_COMMAND:
@@ -171,6 +262,18 @@ struct Manager {
                 if(LOWORD(wp)==42&&HIWORD(wp)==EN_CHANGE&&!self->refreshing){self->noteDirty=true;return 0;}
                 if(HIWORD(wp)==BN_CLICKED){self->action(LOWORD(wp));return 0;}break;
             case WM_NOTIFY:{auto hdr=reinterpret_cast<NMHDR*>(lp);if(hdr->hwndFrom!=self->items)break;
+                if(hdr->code==NM_CUSTOMDRAW){
+                    auto* draw=reinterpret_cast<NMLVCUSTOMDRAW*>(lp);
+                    if(draw->nmcd.dwDrawStage==CDDS_PREPAINT)return CDRF_NOTIFYITEMDRAW;
+                    if(draw->nmcd.dwDrawStage==CDDS_ITEMPREPAINT){
+                        const auto& palette=appearance::palette();
+                        bool selected=(ListView_GetItemState(self->items,int(draw->nmcd.dwItemSpec),LVIS_SELECTED)&LVIS_SELECTED)!=0;
+                        draw->nmcd.uItemState&=~CDIS_SELECTED;
+                        draw->clrText=color(selected?palette.onAccent:palette.text);
+                        draw->clrTextBk=color(selected?palette.accent:palette.panel);
+                        return CDRF_NEWFONT;
+                    }
+                }
                 if(hdr->code==LVN_ITEMCHANGING&&!self->refreshing){auto n=reinterpret_cast<NMLISTVIEW*>(lp);if((n->uChanged&LVIF_STATE)&&(n->uOldState&LVIS_SELECTED)&&!(n->uNewState&LVIS_SELECTED))self->saveNote();}
                 if(hdr->code==LVN_ITEMCHANGED&&!self->refreshing){auto n=reinterpret_cast<NMLISTVIEW*>(lp);if((n->uNewState&LVIS_SELECTED)&&!(n->uOldState&LVIS_SELECTED))self->selectItem(n->iItem);}
                 if(hdr->code==NM_DBLCLK)self->open();
@@ -191,12 +294,13 @@ struct Manager {
 };
 }
 void manage(HWND owner,const Callbacks& callbacks){
-    WNDCLASSW wc{};wc.lpfnWndProc=Manager::procedure;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawProjectManager";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);
+    WNDCLASSW wc{};wc.lpfnWndProc=Manager::procedure;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawProjectManager";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
     Manager manager;manager.callbacks=callbacks;RECT r;GetWindowRect(owner,&r);int w=1140,h=760;
     HWND window=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,L"내 프로젝트 — YoungDraw",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,std::max(0L,r.left+(r.right-r.left-w)/2),std::max(0L,r.top+(r.bottom-r.top-h)/2),w,h,owner,nullptr,wc.hInstance,&manager);
-    if(!window){if(manager.font)DeleteObject(manager.font);throw std::runtime_error("프로젝트 창을 열 수 없습니다.");}
+    if(!window)throw std::runtime_error("프로젝트 창을 열 수 없습니다.");
+    appearance::titlebar(window);
     EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);MSG msg{};
     while(IsWindow(window)){BOOL result=GetMessageW(&msg,nullptr,0,0);if(result<=0){if(result==0)PostQuitMessage(int(msg.wParam));break;}if(!IsDialogMessageW(window,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
-    if(IsWindow(window))DestroyWindow(window);EnableWindow(owner,TRUE);SetActiveWindow(owner);if(manager.font)DeleteObject(manager.font);
+    if(IsWindow(window))DestroyWindow(window);EnableWindow(owner,TRUE);SetActiveWindow(owner);
 }
 }

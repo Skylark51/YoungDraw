@@ -4,6 +4,36 @@
 
 namespace yd::editor {
 
+namespace {
+std::optional<UINT> gifRepetitions(const std::string& bytes){
+    if(bytes.size()<13||(bytes.compare(0,6,"GIF87a")&&bytes.compare(0,6,"GIF89a")))return {};
+    auto byte=[&](size_t i){return static_cast<unsigned char>(bytes[i]);};
+    auto paletteSize=[](unsigned flags){return flags&128?3u*(2u<<(flags&7)):0u;};
+    size_t pos=13+paletteSize(byte(10));
+    while(pos<bytes.size()){
+        const auto block=byte(pos++);
+        if(block==0x21&&pos<bytes.size()){
+            const auto kind=byte(pos++);
+            if(kind==0xff&&bytes.size()-pos>=16&&byte(pos)==11&&
+               (bytes.compare(pos+1,11,"NETSCAPE2.0")==0||bytes.compare(pos+1,11,"ANIMEXTS1.0")==0)&&
+               byte(pos+12)==3&&byte(pos+13)==1)
+                return UINT(byte(pos+14))|(UINT(byte(pos+15))<<8);
+        }else if(block==0x2c&&bytes.size()-pos>=9){
+            pos+=9+paletteSize(byte(pos+8));
+            if(pos>=bytes.size())return {};
+            ++pos; // Image LZW minimum code size.
+        }else return {};
+
+        while(pos<bytes.size()){
+            const auto count=byte(pos++);
+            if(count==0)break;
+            pos+=count;
+        }
+    }
+    return {};
+}
+} // namespace
+
 std::map<std::string,ImageCache> imageCache;bool animationVisible=false;UINT animationDelay=1000;
 Bitmap* decode(const std::string& hex,bool animate){
     auto it=imageCache.find(hex);
@@ -19,8 +49,11 @@ Bitmap* decode(const std::string& hex,bool animate){
             if(frames>1){
                 auto delays=property(PropertyTagFrameDelay);auto* delay=delays.empty()?nullptr:reinterpret_cast<PropertyItem*>(delays.data());ULONGLONG total=0;
                 for(UINT i=0;i<frames;i++){ULONG ticks=10;if(delay&&delay->type==PropertyTagTypeLong&&delay->length/sizeof(ULONG)>i)memcpy(&ticks,static_cast<BYTE*>(delay->value)+i*sizeof(ULONG),sizeof(ticks));total+=std::max(1UL,ticks)*10ULL;c.ends.push_back(total);}
-                auto loops=property(PropertyTagLoopCount);auto* loop=loops.empty()?nullptr:reinterpret_cast<PropertyItem*>(loops.data());
-                if(loop&&loop->type==PropertyTagTypeShort&&loop->length>=sizeof(USHORT)){USHORT repetitions;memcpy(&repetitions,loop->value,sizeof(repetitions));c.infinite=repetitions==0;c.cycles=UINT(repetitions)+1;}
+                // GDI+ can synthesize a loop property for files that contain no loop extension.
+                if(auto repetitions=gifRepetitions(bytes)){
+                    c.infinite=*repetitions==0;
+                    c.cycles=*repetitions+1;
+                }
             }
         }
         if(imageCache.size()>100)imageCache.clear();it=imageCache.emplace(hex,std::move(c)).first;

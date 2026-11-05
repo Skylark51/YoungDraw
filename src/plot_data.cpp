@@ -131,8 +131,20 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
         series[k].present=std::move(present);series[k].values=std::move(values);}
     plot.states=std::move(states);plot.series=std::move(series);
 }
-EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vector<std::string>>& cells){
-    auto data=cells;
+// Empty cells represent missing points, including in the first pathway.
+static std::optional<double> parseGridEnergy(const std::string& text){
+    if(text.empty())return 0.;
+    try{
+        size_t end=0;
+        double energy=std::stod(text,&end);
+        if(end==text.size()&&std::isfinite(energy)&&std::abs(energy)<=1e6)return energy;
+    }catch(const std::logic_error&){}
+    return {};
+}
+bool validEnergyGridValue(const std::string& text){
+    return parseGridEnergy(trim(text)).has_value();
+}
+EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vector<std::string>>& data){
     if(data.size()<2||data.size()>100)throw std::runtime_error("에너지 그래프에는 2~100개 상태가 필요합니다.");
     size_t paths=std::max(size_t(1),original.series.size());
     std::vector<EnergyRow> states;std::vector<std::vector<double>> energies(paths);std::vector<std::vector<bool>> present(paths);
@@ -141,11 +153,11 @@ EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vect
         if(data[r].size()!=paths+1)throw std::runtime_error(prefix+"상태 이름과 모든 경로의 에너지를 입력하세요.");
         auto label=trim(data[r][0]);
         for(size_t k=0;k<paths;k++){
-            auto text=trim(data[r][k+1]);double energy=0;
+            auto text=trim(data[r][k+1]);
+            auto energy=parseGridEnergy(text);
             present[k].push_back(!text.empty());
-            if(!text.empty())try{size_t end=0;energy=std::stod(text,&end);if(end!=text.size()||!std::isfinite(energy)||std::abs(energy)>1e6)throw std::runtime_error("value");}
-            catch(...){auto name=k<original.series.size()?original.series[k].name:"Path 1";throw std::runtime_error(prefix+name+": 에너지를 숫자로 입력하세요 (−1000000~1000000).");}
-            energies[k].push_back(energy);
+            if(!energy){auto name=k<original.series.size()?original.series[k].name:"Path 1";throw std::runtime_error(prefix+name+": 에너지를 숫자로 입력하세요 (−1000000~1000000).");}
+            energies[k].push_back(*energy);
         }
         states.push_back({label,energies[0].back(),-1});
     }

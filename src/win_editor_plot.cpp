@@ -24,13 +24,17 @@ void relocatePlot(const EnergyPlot& before,const EnergyPlot& after){
     }
 }
 void editPlot(int id){auto* ptr=plot(id);if(!ptr)return;Document before=doc;EnergyPlot original=*ptr;if(original.series.empty()){EnergySeries path;path.name="Path 1";for(auto& state:original.states)path.values.push_back(state.energy);original.series.push_back(path);}
-    std::vector<std::wstring> columns={L"상태 이름"};for(auto& path:original.series)columns.push_back(ui::wide(path.name));ui::Table rows;
+    std::vector<std::wstring> columns={L"단계명"};for(auto& path:original.series)columns.push_back(ui::wide(path.name));ui::Table rows;
     for(size_t i=0;i<original.states.size();i++){std::vector<std::string> row={original.states[i].label};for(auto& path:original.series)row.push_back(path.hasValue(i)?number(path.values[i]):"");rows.push_back(row);}
     auto update=[&](const ui::Table& data)->std::wstring{
         try{auto p=energyGridData(original,data);doc=before;relocatePlot(original,p);*plot(id)=std::move(p);redraw();UpdateWindow(win);return {};}
         catch(const std::exception& e){return ui::wide(e.what());}
     };
-    auto result=ui::table(win,L"에너지 그래프 — 셀 편집",columns,rows,update,true);
+    auto cellError=[](size_t column,const std::string& value)->std::wstring{
+        if(column==0||validEnergyGridValue(value))return {};
+        return L"에너지를 숫자로 입력하세요 (−1000000~1000000). 빈칸은 그래프에서 생략됩니다.";
+    };
+    auto result=ui::table(win,L"에너지 그래프 — 데이터 표",columns,rows,update,true,L"",false,0,cellError);
     if(result){
         // Apply the returned table explicitly; committing must not depend on a prior preview.
         update(*result);
