@@ -1,5 +1,34 @@
+#include "win_dialogs.h"
 // Exercise the production document switching and saving code in a hidden window.
-#include "../src/winmain.cpp"
+#include "win_editor_state.h"
+#include "win_editor_chrome.h"
+#include "win_editor_images.h"
+#include "win_editor_render.h"
+#include "win_editor_files.h"
+#include "win_editor_clipboard.h"
+#include "win_editor_templates.h"
+#include "win_editor_tabs.h"
+#include "win_editor_text.h"
+#include "win_editor_reaction.h"
+#include "win_editor_plot.h"
+#include "win_editor_structure.h"
+#include "win_editor_commands.h"
+#include "win_editor_canvas.h"
+#include "win_editor_pointer.h"
+#include "win_editor_shortcuts.h"
+#include "win_editor_window.h"
+#include "win_ui.h"
+#include "win_theme.h"
+#include "win_projects.h"
+#include "win_storage.h"
+#include "cdxml.h"
+#include "office.h"
+#include "plot_data.h"
+#include "mechanism_data.h"
+#include <commctrl.h>
+
+using namespace yd;
+using namespace yd::editor;
 #include <iostream>
 #include "mechanism_layout_fixture.h"
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}

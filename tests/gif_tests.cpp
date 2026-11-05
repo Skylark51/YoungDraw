@@ -1,4 +1,19 @@
-#include "../src/winmain.cpp"
+#include "win_editor_canvas.h"
+#include "win_editor_chrome.h"
+#include "win_editor_clipboard.h"
+#include "win_editor_files.h"
+#include "win_editor_images.h"
+#include "win_editor_render.h"
+#include "win_editor_state.h"
+#include "win_editor_structure.h"
+#include "win_editor_window.h"
+#include "cdxml.h"
+#include "office.h"
+#include "win_theme.h"
+#include <shellapi.h>
+
+using namespace yd;
+using namespace yd::editor;
 #include <shlobj.h>
 #include <iostream>
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);std::cout<<message<<std::endl;}

@@ -16,7 +16,33 @@ if(WIN32)
   target_link_libraries(youngdraw_cdxml PUBLIC youngdraw_core xmllite shlwapi ole32)
   target_compile_definitions(youngdraw_cdxml PUBLIC UNICODE _UNICODE NOMINMAX)
   target_link_libraries(youngdraw_storage PRIVATE youngdraw_cdxml)
-  add_executable(YoungDraw WIN32 src/winmain.cpp src/win_splash.cpp src/win_dialogs.cpp src/win_grid.cpp src/win_gallery.cpp src/office.cpp src/win_theme.cpp resources/youngdraw.rc)
+  add_library(youngdraw_editor STATIC
+    src/win_editor_state.cpp
+    src/win_editor_chrome.cpp
+    src/win_editor_images.cpp
+    src/win_editor_render.cpp
+    src/win_editor_files.cpp
+    src/win_editor_clipboard.cpp
+    src/win_editor_templates.cpp
+    src/win_editor_tabs.cpp
+    src/win_editor_text.cpp
+    src/win_editor_reaction.cpp
+    src/win_editor_plot.cpp
+    src/win_editor_structure.cpp
+    src/win_editor_commands.cpp
+    src/win_editor_canvas.cpp
+    src/win_editor_pointer.cpp
+    src/win_editor_shortcuts.cpp
+    src/win_editor_window.cpp
+    src/win_splash.cpp
+    src/win_dialogs.cpp
+    src/win_grid.cpp
+    src/win_gallery.cpp
+    src/office.cpp
+    src/win_theme.cpp)
+  target_link_libraries(youngdraw_editor PUBLIC youngdraw_storage youngdraw_cdxml
+    gdiplus comdlg32 shell32 comctl32 oleaut32 uuid advapi32 dwmapi)
+  add_executable(YoungDraw WIN32 src/winmain.cpp resources/youngdraw.rc)
   target_include_directories(YoungDraw PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources")
   set_property(SOURCE resources/youngdraw.rc APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/youngdraw.ico"
@@ -24,7 +50,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/themes/backrooms.jpg"
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/themes/nostalgia.jpg"
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/themes/horror.jpg")
-  target_link_libraries(YoungDraw PRIVATE youngdraw_storage youngdraw_cdxml gdiplus comdlg32 shell32 comctl32 oleaut32 uuid advapi32 dwmapi)
+  target_link_libraries(YoungDraw PRIVATE youngdraw_editor)
 endif()
 enable_testing()
 add_executable(core_tests tests/core_tests.cpp)
@@ -45,22 +71,19 @@ if(WIN32)
   add_executable(grid_tests tests/grid_tests.cpp)
   target_link_libraries(grid_tests PRIVATE youngdraw_cdxml comctl32)
   add_test(NAME grid_regression COMMAND grid_tests)
-  add_executable(document_tabs_tests tests/document_tabs_tests.cpp src/win_dialogs.cpp src/win_grid.cpp src/win_gallery.cpp src/office.cpp src/win_theme.cpp)
-  target_link_libraries(document_tabs_tests PRIVATE youngdraw_storage youngdraw_cdxml gdiplus comdlg32 shell32 comctl32 oleaut32 uuid advapi32 dwmapi)
+  add_executable(document_tabs_tests tests/document_tabs_tests.cpp)
+  target_link_libraries(document_tabs_tests PRIVATE youngdraw_editor)
   add_test(NAME document_tabs COMMAND document_tabs_tests)
   add_test(NAME graph_energy_units COMMAND document_tabs_tests --plot-units-only)
-  target_sources(document_tabs_tests PRIVATE src/win_splash.cpp)
-  add_executable(theme_tests tests/theme_tests.cpp src/win_dialogs.cpp src/win_grid.cpp src/win_gallery.cpp src/office.cpp src/win_theme.cpp resources/youngdraw.rc)
+  add_executable(theme_tests tests/theme_tests.cpp resources/youngdraw.rc)
   target_include_directories(theme_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources")
-  target_link_libraries(theme_tests PRIVATE youngdraw_storage youngdraw_cdxml gdiplus comdlg32 shell32 comctl32 oleaut32 uuid advapi32 dwmapi)
+  target_link_libraries(theme_tests PRIVATE youngdraw_editor)
   add_test(NAME appearance_themes COMMAND theme_tests)
-  target_sources(theme_tests PRIVATE src/win_splash.cpp)
-  add_executable(gif_tests tests/gif_tests.cpp src/win_dialogs.cpp src/win_grid.cpp src/win_gallery.cpp src/office.cpp src/win_theme.cpp)
-  target_link_libraries(gif_tests PRIVATE youngdraw_storage youngdraw_cdxml gdiplus comdlg32 shell32 comctl32 oleaut32 uuid advapi32 dwmapi)
+  add_executable(gif_tests tests/gif_tests.cpp)
+  target_link_libraries(gif_tests PRIVATE youngdraw_editor)
   configure_file(tests/fixtures/animated.gif animated.gif COPYONLY)
   configure_file(tests/fixtures/transparent-disposal.gif transparent-disposal.gif COPYONLY)
   add_test(NAME animated_gif COMMAND gif_tests)
-  target_sources(gif_tests PRIVATE src/win_splash.cpp)
   add_executable(mechanism_tests tests/mechanism_tests.cpp)
   target_link_libraries(mechanism_tests PRIVATE youngdraw_cdxml)
   add_test(NAME mechanism_regression COMMAND mechanism_tests)
