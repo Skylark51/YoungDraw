@@ -1,5 +1,16 @@
 // Render the real editor and exercise the appearance dialog without modifying user preferences.
-#include "../src/winmain.cpp"
+#include "win_editor_canvas.h"
+#include "win_editor_chrome.h"
+#include "win_editor_images.h"
+#include "win_editor_pointer.h"
+#include "win_editor_state.h"
+#include "win_editor_window.h"
+#include "cdxml.h"
+#include "win_theme.h"
+#include <commctrl.h>
+
+using namespace yd;
+using namespace yd::editor;
 #include <iostream>
 namespace {
 int requested=0;bool driven=false,valid=true;
