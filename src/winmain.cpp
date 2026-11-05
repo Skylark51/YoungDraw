@@ -256,7 +256,15 @@ Bitmap* decode(const std::string& hex,bool animate=false){
     return c.bitmap.get();
 }
 void render(Graphics& g,const Scene& s,bool animate=false,bool screenTheme=false){StringFormat fmt(StringFormat::GenericTypographic());for(auto& p:s.items){if(p.points.empty())continue;if(inlineEdit&&p.type==Primitive::Text&&p.owner==inlineTarget.owner&&p.textRole==inlineTarget.role&&p.textIndex==inlineTarget.index)continue;Color color=rgb(p.color);if(screenTheme)color=appearance::documentColor(color,p.type==Primitive::Box&&p.filled&&p.width==0);Pen pen(color,float(p.width));pen.SetStartCap(p.flatStart?LineCapFlat:LineCapRound);pen.SetEndCap(p.flatEnd?LineCapFlat:LineCapRound);if(p.dash){REAL w=std::max(.1f,float(p.width));REAL pattern[]={p.dash==1?4.f/w:1.f/w,p.dash==1?3.f/w:2.f/w};pen.SetDashPattern(pattern,2);}SolidBrush brush(color);std::vector<PointF> ps;for(auto v:p.points)ps.push_back({float(v.x),float(v.y)});
- if(p.type==Primitive::Line&&ps.size()>=2)g.DrawLines(&pen,ps.data(),INT(ps.size()));else if(p.type==Primitive::Bezier&&ps.size()>=4){GraphicsPath path;path.AddBeziers(ps.data(),INT(ps.size()));if(p.closed)path.CloseFigure();if(p.filled)g.FillPath(&brush,&path);if(p.width>0)g.DrawPath(&pen,&path);}else if(p.type==Primitive::Polygon&&ps.size()>=3)g.FillPolygon(&brush,ps.data(),INT(ps.size()));else if(p.type==Primitive::Text){FontFamily ff(ui::wide(p.font).c_str());Font f(&ff,float(p.fontSize),(p.face&1?FontStyleBold:0)|(p.face&2?FontStyleItalic:0)|(p.face&4?FontStyleUnderline:0),UnitPixel);auto w=ui::wide(p.text);auto saved=g.Save();g.TranslateTransform(ps[0].X,ps[0].Y);g.RotateTransform(float(p.rotation));g.DrawString(w.c_str(),-1,&f,PointF(0,0),&fmt,&brush);g.Restore(saved);}else if(ps.size()>=2){RectF box(std::min(ps[0].X,ps[1].X),std::min(ps[0].Y,ps[1].Y),std::abs(ps[1].X-ps[0].X),std::abs(ps[1].Y-ps[0].Y));if(p.type==Primitive::Ellipse){if(p.filled)g.FillEllipse(&brush,box);else g.DrawEllipse(&pen,box);}else if(p.type==Primitive::Box){if(p.filled)g.FillRectangle(&brush,box);else g.DrawRectangle(&pen,box);}else if(p.type==Primitive::Image){if(auto img=decode(p.imageHex,animate))g.DrawImage(img,box);}}}}
+ if(p.type==Primitive::Line&&ps.size()>=2)g.DrawLines(&pen,ps.data(),INT(ps.size()));else if(p.type==Primitive::Bezier&&ps.size()>=4){GraphicsPath path;path.AddBeziers(ps.data(),INT(ps.size()));if(p.closed)path.CloseFigure();if(p.filled)g.FillPath(&brush,&path);if(p.width>0)g.DrawPath(&pen,&path);}else if(p.type==Primitive::Polygon&&ps.size()>=3)g.FillPolygon(&brush,ps.data(),INT(ps.size()));else if(p.type==Primitive::Text){FontFamily ff(ui::wide(p.font).c_str());Font f(&ff,float(p.fontSize),(p.face&1?FontStyleBold:0)|(p.face&2?FontStyleItalic:0)|(p.face&4?FontStyleUnderline:0),UnitPixel);auto w=ui::wide(p.text);auto saved=g.Save();g.TranslateTransform(ps[0].X,ps[0].Y);g.RotateTransform(float(p.rotation));// Regular graph type must scale from outlines rather than hinted glyph bitmaps.
+ // This also keeps rotated energy-axis captions smooth and EMF output vector-based.
+ if(!(p.face&1)){
+     GraphicsPath glyphs;
+     if(glyphs.AddString(w.c_str(),-1,&ff,f.GetStyle(),float(p.fontSize),PointF(0,0),&fmt)==Ok){
+         g.SetSmoothingMode(SmoothingModeHighQuality);g.SetPixelOffsetMode(PixelOffsetModeHighQuality);g.FillPath(&brush,&glyphs);
+     }else g.DrawString(w.c_str(),-1,&f,PointF(0,0),&fmt,&brush);
+ }else g.DrawString(w.c_str(),-1,&f,PointF(0,0),&fmt,&brush);
+ g.Restore(saved);}else if(ps.size()>=2){RectF box(std::min(ps[0].X,ps[1].X),std::min(ps[0].Y,ps[1].Y),std::abs(ps[1].X-ps[0].X),std::abs(ps[1].Y-ps[0].Y));if(p.type==Primitive::Ellipse){if(p.filled)g.FillEllipse(&brush,box);else g.DrawEllipse(&pen,box);}else if(p.type==Primitive::Box){if(p.filled)g.FillRectangle(&brush,box);else g.DrawRectangle(&pen,box);}else if(p.type==Primitive::Image){if(auto img=decode(p.imageHex,animate))g.DrawImage(img,box);}}}}
 HENHMETAFILE officePicture(const Document& d){
     auto sc=makeScene(d,measure);auto b=sc.bounds;HDC dc=GetDC(nullptr);
     RectF frame(0,0,float(b.w+12),float(b.h+12));
@@ -275,7 +283,7 @@ void writePreview(const std::wstring& path,const Document& d){
 }
 std::string readFile(const std::wstring& path){std::ifstream f(fs::path(path),std::ios::binary|std::ios::ate);if(!f)throw std::runtime_error("파일을 열 수 없습니다.");auto n=f.tellg();if(n<0||n>64*1024*1024)throw std::runtime_error("파일은 64 MB까지 지원합니다.");std::string s(size_t(n),0);f.seekg(0);if(!f.read(s.data(),n))throw std::runtime_error("파일을 읽을 수 없습니다.");return s;}
 void writeFile(const std::wstring& path,const std::string& data){storage::writeAtomic(path,data);}
-std::optional<std::wstring> fileDialog(bool save,int type=0,std::wstring initial=L""){wchar_t path[32768]={};if(save)wcscpy_s(path,type==1?L"structure.svg":type==2?L"structure.cdxml":L"drawing.ydraw");OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=win;f.lpstrFile=path;f.nMaxFile=32768;f.lpstrFilter=type==1?L"SVG vector graphic\0*.svg\0\0":type==2?L"ChemDraw XML\0*.cdxml\0\0":type==4?L"Structures / Images\0*.ydraw;*.cdxml;*.gif;*.png;*.jpg;*.jpeg\0\0":type==3?L"Images (GIF, PNG, JPEG)\0*.gif;*.png;*.jpg;*.jpeg\0\0":L"YoungDraw / ChemDraw XML\0*.ydraw;*.cdxml\0YoungDraw project\0*.ydraw\0ChemDraw XML\0*.cdxml\0\0";f.lpstrDefExt=type==1?L"svg":type==2?L"cdxml":L"ydraw";f.lpstrInitialDir=initial.empty()?nullptr:initial.c_str();f.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(save?OFN_OVERWRITEPROMPT:OFN_FILEMUSTEXIST);if(save?GetSaveFileNameW(&f):GetOpenFileNameW(&f))return std::wstring(path);return {};}
+std::optional<std::wstring> fileDialog(bool save,int type=0,std::wstring initial=L""){wchar_t path[32768]={};if(save)wcscpy_s(path,type==1?L"structure.svg":type==2?L"structure.cdxml":L"drawing.cdxml");OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=win;f.lpstrFile=path;f.nMaxFile=32768;f.lpstrFilter=type==1?L"SVG vector graphic\0*.svg\0\0":(type==2||save)?L"ChemDraw / YoungDraw CDXML\0*.cdxml\0\0":type==4?L"Structures / Images\0*.ydraw;*.cdxml;*.gif;*.png;*.jpg;*.jpeg\0\0":type==3?L"Images (GIF, PNG, JPEG)\0*.gif;*.png;*.jpg;*.jpeg\0\0":L"YoungDraw / ChemDraw XML\0*.ydraw;*.cdxml\0YoungDraw project\0*.ydraw\0ChemDraw XML\0*.cdxml\0\0";f.lpstrDefExt=type==1?L"svg":L"cdxml";f.lpstrInitialDir=initial.empty()?nullptr:initial.c_str();f.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(save?OFN_OVERWRITEPROMPT:OFN_FILEMUSTEXIST);if(save?GetSaveFileNameW(&f):GetOpenFileNameW(&f))return std::wstring(path);return {};}
 std::vector<std::wstring> openDocumentFiles(){
     std::vector<wchar_t> buffer(65536);OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=win;
     f.lpstrFile=buffer.data();f.nMaxFile=DWORD(buffer.size());f.lpstrFilter=L"YoungDraw / ChemDraw XML\0*.ydraw;*.cdxml\0\0";
@@ -354,7 +362,7 @@ std::optional<Document> clipboardDocument(){
     if(!binaryError.empty())throw std::runtime_error("ChemDraw 구조를 읽지 못했습니다: "+binaryError);
     return {};
 }
-void insert(const Document& source,Vec at){Document fragment=source;upgradeBondGeometry(fragment);auto b=makeScene(fragment).bounds;int first=doc.nextId;history.checkpoint(doc);doc.append(fragment,at-Vec{b.x+b.w/2,b.y+b.h/2});selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);changed();}
+void insert(const Document& source,Vec at){Document fragment=source;upgradeBondGeometry(fragment);fragment.rebaseStructureStyle(doc.style);auto b=makeScene(fragment).bounds;int first=doc.nextId;history.checkpoint(doc);doc.append(fragment,at-Vec{b.x+b.w/2,b.y+b.h/2});selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);changed();}
 fs::path templateDir(){wchar_t path[32768];DWORD n=GetEnvironmentVariableW(L"LOCALAPPDATA",path,32768);if(!n||n>=32768)throw std::runtime_error("LOCALAPPDATA unavailable");fs::path p=fs::path(path)/L"YoungDraw"/L"Templates";fs::create_directories(p);return p;}
 
 fs::path favoritesPath(){return templateDir().parent_path()/L"template-favorites.txt";}
@@ -381,7 +389,7 @@ bool validTemplatePart(const std::wstring& part){
     if(stem.size()==4&&(stem.substr(0,3)==L"COM"||stem.substr(0,3)==L"LPT")&&stem[3]>=L'1'&&stem[3]<=L'9')return false;
     return true;
 }
-fs::path templateLocation(const std::wstring& name,const std::wstring& group,const std::wstring& ext=L".ydraw"){
+fs::path templateLocation(const std::wstring& name,const std::wstring& group,const std::wstring& ext=L".cdxml"){
     if(!validTemplatePart(name)||!validTemplatePart(group))throw std::runtime_error("템플릿 이름·분류에 사용할 수 없는 문자가 있습니다.");
     return templateDir()/group/(name+ext);
 }
@@ -442,12 +450,18 @@ void saveCurrentTemplate(){
     auto path=templateLocation(ui::wide((*result)[0]),ui::wide((*result)[1]));
     if(fs::exists(path)&&MessageBoxW(win,L"같은 이름의 템플릿을 덮어쓰시겠습니까?",L"템플릿 저장",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
     fs::create_directories(path.parent_path());
-    writeFile(path.wstring(),toNative(fragment));
+    writeFile(path.wstring(),toCdxml(fragment));
     status=L"사용자 템플릿을 저장했습니다. · 삽입 > 템플릿에서 관리할 수 있습니다.";
     redraw();
 }
 
-bool save(bool as=false){if(officeDocument&&office::editing()&&!as){if(FAILED(office::update()))throw std::runtime_error("Office 문서에 변경 내용을 반영하지 못했습니다.");dirty=false;title();status=L"Office 문서에 변경 내용을 반영했습니다.";redraw();return true;}auto path=filePath;if(path.empty()||as){auto p=fileDialog(true);if(!p)return false;path=*p;}auto ext=fs::path(path).extension().wstring();writeFile(path,_wcsicmp(ext.c_str(),L".cdxml")==0?toCdxml(doc):toNative(doc));filePath=path;dirty=false;title();status=L"문서를 저장했습니다.";redraw();return true;}
+bool save(bool as=false){if(officeDocument&&office::editing()&&!as){if(FAILED(office::update()))throw std::runtime_error("Office 문서에 변경 내용을 반영하지 못했습니다.");dirty=false;title();status=L"Office 문서에 변경 내용을 반영했습니다.";redraw();return true;}auto path=filePath;
+    if(path.empty()||as||_wcsicmp(fs::path(path).extension().c_str(),L".cdxml")!=0){
+        auto p=fileDialog(true);if(!p)return false;path=*p;
+        if(_wcsicmp(fs::path(path).extension().c_str(),L".cdxml")!=0)
+            throw std::runtime_error("CDXML 확장자로 저장하세요.");
+    }
+    writeFile(path,toCdxml(doc));filePath=path;dirty=false;title();status=L"CDXML을 저장했습니다. ChemDraw와 YoungDraw에서 열 수 있습니다.";redraw();return true;}
 bool discard(){if(!dirty)return true;int answer=MessageBoxW(win,L"변경 내용을 저장하시겠습니까?",L"YoungDraw",MB_YESNOCANCEL|MB_ICONQUESTION);return answer==IDNO||(answer==IDYES&&save());}
 void storeDocumentTab(){
     if(documents.empty())documents.emplace_back();
@@ -505,37 +519,50 @@ bool closeAllDocuments(){
 void manageProjects(){
     if(!finishInline(true))return;
     projects::Callbacks callbacks;
-    callbacks.blank=toNative(Document{});
+    callbacks.blank=toCdxml(Document{});
     callbacks.current=[]()->std::optional<std::pair<std::wstring,std::string>>{
         if(!finishInline(true))return {};
         auto name=projects::displayName(filePath);if(name.empty())name=filePath.empty()?L"새 구조":fs::path(filePath).stem().wstring();
-        return std::make_pair(name,toNative(doc));
+        return std::make_pair(name,toCdxml(doc));
     };
     callbacks.open=[](const std::wstring& source){
-        bool isImage=projects::image(source);auto path=isImage?source+L".ydraw":source;
+        bool isImage=projects::image(source);auto path=isImage?projects::imageDrawing(source).wstring():source;
         for(size_t i=0;i<documents.size();i++){
             auto current=i==activeDocument?filePath:documents[i].path;
-            if(!current.empty()&&_wcsicmp(fs::absolute(current).lexically_normal().c_str(),fs::absolute(path).lexically_normal().c_str())==0){switchDocumentTab(i);return;}
+            if(!current.empty()&&_wcsicmp(fs::absolute(current).lexically_normal().c_str(),fs::absolute(isImage?source+L".cdxml":path).lexically_normal().c_str())==0){switchDocumentTab(i);return;}
         }
         auto imported=isImage&&!fs::exists(path)?imageDocument(readFile(source)):fromCdxml(readFile(path));
         newDocumentTab(std::move(imported),path);
-        if(isImage){status=L"이미지 원본은 보관됩니다. 수정 후 Ctrl+S를 누르면 프로젝트 안에 편집 문서를 저장합니다.";if(!fs::exists(path))dirty=true;}
+        if(isImage){filePath=source+L".cdxml";status=L"이미지 원본은 보관됩니다. 수정 후 Ctrl+S를 누르면 프로젝트 안에 편집 문서를 저장합니다.";if(!fs::exists(path))dirty=true;}
         else if(!doc.importWarnings.empty())MessageBoxW(win,L"일부 CDXML 객체는 표시·편집되지 않을 수 있습니다. 지원하지 않는 XML은 CDXML 저장 시 보존됩니다.",L"CDXML 열기",MB_OK|MB_ICONINFORMATION);
         title();redraw();
     };
     callbacks.close=[](const std::vector<std::wstring>& paths){
         for(size_t i=documents.size();i-->0;){auto path=i==activeDocument?filePath:documents[i].path;bool found=false;
-            for(auto& source:paths)if(_wcsicmp(path.c_str(),source.c_str())==0||(projects::image(source)&&_wcsicmp(path.c_str(),(source+L".ydraw").c_str())==0)){found=true;break;}
+            for(auto& source:paths)if(_wcsicmp(path.c_str(),source.c_str())==0||(projects::image(source)&&(_wcsicmp(path.c_str(),(source+L".cdxml").c_str())==0||_wcsicmp(path.c_str(),(source+L".ydraw").c_str())==0))){found=true;break;}
             if(found&&!closeDocumentTab(i))return false;
         }return true;
     };
     callbacks.preview=[](HDC dc,const RECT& area,const std::wstring& source){
-        auto path=projects::image(source)&&fs::exists(source+L".ydraw")?source+L".ydraw":source;
+        auto drawing=projects::imageDrawing(source);
+        auto path=projects::image(source)&&fs::exists(drawing)?drawing.wstring():source;
         auto document=projects::image(path)?imageDocument(readFile(path)):fromCdxml(readFile(path));
         normalizeChemicalLabels(document);auto sc=makeScene(document,measure);auto b=sc.bounds;
         double scale=std::min(double(area.right-area.left-24)/std::max(1.,b.w),double(area.bottom-area.top-24)/std::max(1.,b.h));
         Graphics g(dc);g.SetClip(Gdiplus::Rect(area.left,area.top,area.right-area.left,area.bottom-area.top));g.SetSmoothingMode(SmoothingModeHighQuality);g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
         g.TranslateTransform(float(area.left+(area.right-area.left-b.w*scale)/2-b.x*scale),float(area.top+(area.bottom-area.top-b.h*scale)/2-b.y*scale));g.ScaleTransform(float(scale),float(scale));render(g,sc);
+    };
+    callbacks.saveForExport=[](const fs::path& folder){
+        const auto initial=activeDocument;
+        try{
+            for(size_t i=0;i<documents.size();++i){
+                const auto path=i==activeDocument?filePath:documents[i].path;
+                if(!path.empty()&&_wcsicmp(fs::absolute(fs::path(path).parent_path()).lexically_normal().c_str(),fs::absolute(folder).lexically_normal().c_str())==0){
+                    if(!switchDocumentTab(i)||(dirty&&!save())){switchDocumentTab(initial);return false;}
+                }
+            }
+        }catch(...){switchDocumentTab(initial);throw;}
+        switchDocumentTab(initial);return true;
     };
     projects::manage(win,callbacks);title();redraw();
 }
@@ -600,7 +627,7 @@ void clean(){
         for(auto& r:affected)optimizeMechanism(candidate,{r.first},r.second);
         doc=std::move(candidate);redraw();UpdateWindow(win);return {};
     };
-    auto result=ui::form(win,L"구조 정리 · 미리보기",{{L"정리 방식","0",false,{L"원본 형태·방향 유지 / 기준 크기 맞춤",L"2D 결합·고리 재정리 / 겹침 발생 시 원본 유지"}},{L"추가 회전 (도, +: 시계방향)","0"},{L"배율 (%)","100"},{L"반전","0",false,{L"없음",L"좌우",L"상하"}}},update);
+    auto result=ui::form(win,L"구조 정리 · 미리보기",{{L"정리 방식","0",false,{L"원본 형태·방향 우선 / 필요 시 크기 맞춤",L"2D 결합·고리 정리 / 정돈된 배치 보존"}},{L"추가 회전 (도, +: 시계방향)","0"},{L"배율 (%)","100"},{L"반전","0",false,{L"없음",L"좌우",L"상하"}}},update);
     if(!result){doc=before;selection=originalSelection;redraw();return;}
     update(*result);if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();}
     status=L"구조 "+std::to_wstring(report.components)+L"개 정리 · 원본 배치 "+std::to_wstring(report.protectedComponents)+L"개 보호 · Ctrl+Z: 되돌리기";redraw();
@@ -634,7 +661,7 @@ void sizeInline(){
 }
 void previewInline(){
     if(!inlineEdit||inlineClosing)return;int n=GetWindowTextLengthW(inlineEdit);std::wstring w(n+1,0);GetWindowTextW(inlineEdit,w.data(),n+1);w.resize(n);
-    try{if(inlineTarget.role==8)numeric(ui::utf8(w));inlineValid=true;status=inlineTarget.role!=8?L"Ctrl+=: 아래첨자 · Ctrl+Shift+=: 위첨자 · 같은 키: 일반 입력 복귀 · Enter: 완료 · Esc: 취소":L"Enter: 완료 · Shift+Enter: 줄바꿈 · Tab/Shift+Tab: 다음/이전 텍스트 · Esc: 취소";}
+    try{if(inlineTarget.role==8)numeric(ui::utf8(w));inlineValid=true;status=inlineTarget.role!=8?L"Ctrl+=: 아래첨자 · Ctrl+Shift+=: 위첨자 · 같은 키: 일반 입력 복귀 · Alt+Enter: 줄바꿈 · Enter: 완료 · Esc: 취소":L"Enter: 완료 · Alt+Enter / Shift+Enter: 줄바꿈 · Tab/Shift+Tab: 다음/이전 텍스트 · Esc: 취소";}
     catch(const std::exception& e){inlineValid=false;status=ui::wide(e.what());}
     sizeInline();RECT statusRect{0,wh-bottom,ww,wh};InvalidateRect(win,&statusRect,FALSE);
 }
@@ -652,6 +679,7 @@ bool finishInline(bool commit){
 LRESULT CALLBACK inlineProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_IME_STARTCOMPOSITION)inlineComposing=true;
     if(msg==WM_IME_ENDCOMPOSITION)inlineComposing=false;
+    if(!inlineComposing&&ui::multilineShortcut(hwnd,msg,wp))return 0;
     if(!inlineComposing&&inlineTarget.role!=8&&ui::scriptShortcut(hwnd,msg,wp))return 0;
     if(msg==WM_KEYDOWN&&!inlineComposing){
         if((GetKeyState(VK_CONTROL)&0x8000)&&(wp==VK_TAB||wp=='W')){if(isolatedStructureEditing){if(wp=='W')command(187);return 0;}if(finishInline(true)){if(wp=='W')closeDocumentTab(activeDocument);else switchDocumentTab((activeDocument+documents.size()+((GetKeyState(VK_SHIFT)&0x8000)?-1:1))%documents.size());SetFocus(win);}return 0;}
@@ -675,7 +703,7 @@ void beginInline(std::optional<InlineTarget> target,Vec at){
     inlineComposing=false;inlineClosing=true;inlineEdit=CreateWindowExW(0,L"EDIT",ui::wide(value).c_str(),WS_CHILD|WS_VISIBLE|WS_BORDER|WS_TABSTOP|ES_CENTER|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|ES_NOHIDESEL,0,0,96,28,win,(HMENU)900,GetModuleHandleW(nullptr),nullptr);inlineClosing=false;
     if(!inlineEdit){doc=inlineBefore;throw std::runtime_error("Cannot create text editor");}
     inlineFont=CreateFontW(-int(std::clamp(inlineTarget.size*zoom,1.,160.)),0,0,0,inlineFace&1?FW_BOLD:FW_NORMAL,inlineFace&2?TRUE:FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::wide(inlineTypeface).c_str());SendMessageW(inlineEdit,WM_SETFONT,(WPARAM)inlineFont,TRUE);SendMessageW(inlineEdit,EM_SETLIMITTEXT,100000,0);
-    oldEditProc=(WNDPROC)SetWindowLongPtrW(inlineEdit,GWLP_WNDPROC,(LONG_PTR)inlineProc);SendMessageW(inlineEdit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(2,2));sizeInline();SetFocus(inlineEdit);SendMessageW(inlineEdit,EM_SETSEL,0,-1);status=inlineTarget.role!=8?L"Ctrl+=: 아래첨자 · Ctrl+Shift+=: 위첨자 · 같은 키: 일반 입력 복귀 · Enter: 완료 · Esc: 취소":L"Enter: 완료 · Shift+Enter: 줄바꿈 · Tab/Shift+Tab: 다음/이전 텍스트 · Esc: 취소";redraw();
+    oldEditProc=(WNDPROC)SetWindowLongPtrW(inlineEdit,GWLP_WNDPROC,(LONG_PTR)inlineProc);SendMessageW(inlineEdit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(2,2));sizeInline();SetFocus(inlineEdit);SendMessageW(inlineEdit,EM_SETSEL,0,-1);status=inlineTarget.role!=8?L"Ctrl+=: 아래첨자 · Ctrl+Shift+=: 위첨자 · 같은 키: 일반 입력 복귀 · Alt+Enter: 줄바꿈 · Enter: 완료 · Esc: 취소":L"Enter: 완료 · Alt+Enter / Shift+Enter: 줄바꿈 · Tab/Shift+Tab: 다음/이전 텍스트 · Esc: 취소";redraw();
 }
 void editBranchedReaction(int id){
     auto* ptr=reaction(id);if(!ptr)return;Document before=doc;Reaction original=*ptr;makeMechanismGraph(original);ui::Table rows;
@@ -685,7 +713,7 @@ void editBranchedReaction(int id){
         Reaction edited=mechanismGraphData(original,cells);
         doc=before;*reaction(id)=edited;optimizeMechanism(doc,{id},false);redraw();UpdateWindow(win);return {};
     };
-    auto result=ui::table(win,L"메커니즘 분기·프레임 편집",{L"구분",L"번호",L"시작 구조",L"도착 구조",L"이름 / TS 설명",L"에너지 (S=0 / 1 / 2)"},rows,update,true,L"행 추가·삭제 가능 · 새 행의 번호는 비워 두세요 · 시작 0: 공통 세로선 · 삭제한 단계의 구조는 캔버스에 유지");
+    auto result=ui::table(win,L"메커니즘 분기·프레임 편집",{L"구분",L"번호",L"시작 구조",L"도착 구조",L"이름 / TS 설명",L"에너지 (S=0 / 1 / 2)"},rows,update,true,L"행 추가·삭제 가능 · 새 행의 번호는 비워 두세요 · 시작 0: 공통 세로선 · 삭제한 단계의 구조는 캔버스에 유지",false,4);
     if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();}}else{doc=before;redraw();}
 }
 void editReaction(int id){if(auto* r=reaction(id);r&&r->explicitConnections()){editBranchedReaction(id);return;}auto* ptr=reaction(id);if(!ptr)return;Document before=doc;Reaction original=*ptr;
@@ -770,13 +798,13 @@ void publicationLayout(int id){
     status=L"출판용 비율과 자동 글자 크기를 적용했습니다. Ctrl+Z로 되돌릴 수 있습니다.";changed();fit();
 }
 void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");EnergyPlot original=*p;Document before=doc;
-    auto update=[&](const std::vector<std::string>& v)->std::wstring{try{EnergyPlot p=original;p.title=v[0];p.unit=v[1];p.xLabel=v[2];p.yLabel=v[3];p.xColor=colorValue(v[4]);p.yColor=colorValue(v[5]);auto size=values(v[6]);if(size.size()!=2||size[0]<180||size[1]<140||size[0]>4000||size[1]>4000)return L"크기는 180×140 ~ 4000×4000 pt로 입력하세요.";p.width=size[0];p.height=size[1];p.mode=std::stoi(v[7]);p.showValues=v[8]=="1";p.yTickStep=v[9].empty()?0:numeric(v[9],0);p.yMin=v[10].empty()?std::optional<double>{}:numeric(v[10]);p.yMax=v[11].empty()?std::optional<double>{}:numeric(v[11]);
- p.axisFontSize=numeric(v[12],0,72);p.tickFontSize=numeric(v[13],0,72);p.valueFontSize=numeric(v[14],0,72);p.energyLabelFontSize=numeric(v[15],0,72);
+    auto update=[&](const std::vector<std::string>& v)->std::wstring{try{EnergyPlot p=original;p.title=v[0];p.unit=v[1]==ui::utf8(L"kcal mol⁻¹")?"kcal mol^{-1}":v[1];p.xLabel=v[2];p.yLabel=v[3];p.xColor=colorValue(v[4]);p.yColor=colorValue(v[5]);auto size=values(v[6]);if(size.size()!=2||size[0]<180||size[1]<140||size[0]>4000||size[1]>4000)return L"크기는 180×140 ~ 4000×4000 pt로 입력하세요.";p.width=size[0];p.height=size[1];p.mode=std::stoi(v[7]);p.showValues=v[8]=="1";p.yTickStep=v[9].empty()?0:numeric(v[9],0);p.yMin=v[10].empty()?std::optional<double>{}:numeric(v[10]);p.yMax=v[11].empty()?std::optional<double>{}:numeric(v[11]);
+ p.axisFontSize=numeric(v[12],0,72);p.tickFontSize=numeric(v[13],0,72);p.valueFontSize=numeric(v[14],0,72);p.energyLabelFontSize=numeric(v[15],0,72);p.thinLines=v[16]=="1";p.boldLevels=v[17]=="1";
  for(double font:{p.axisFontSize,p.tickFontSize,p.valueFontSize,p.energyLabelFontSize})if(font>0&&font<4)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
  energyAxis(p);if(p.yTickStep>0&&(p.yTickStep<1e-9||energyAxis(p).step>p.yTickStep*1.001))return L"y축 눈금이 너무 촘촘합니다. 더 큰 간격을 입력하세요.";doc=before;relocatePlot(original,p);*plot(id)=p;redraw();UpdateWindow(win);return {};}catch(const std::exception& e){return ui::wide(e.what());}};
-    auto r=ui::form(win,L"그래프·축 설정",{{L"제목",p->title,false,{},false,4,true},{L"에너지 단위",p->unit,false,{},false,4,true},{L"x축 (위·아래첨자 버튼)",p->xLabel,false,{},false,4,true},{L"y축 (위·아래첨자 버튼)",p->yLabel,false,{},false,4,true},{L"x축 글자색",p->xColor,false,{},true},{L"y축 글자색",p->yColor,false,{},true},{L"너비 / 높이 (pt)",number(p->width)+" "+number(p->height)},{L"그래프 형태",std::to_string(p->mode),false,{L"부드러운 곡선",L"직선",L"에너지 준위 (점선 연결)",L"평평한 준위와 직선"}},{L"에너지 값 표시",p->showValues?"1":"0",false,{L"아니요",L"예"}},{L"y축 눈금 간격 (0: 자동)",number(p->yTickStep)},
+    auto r=ui::form(win,L"그래프·축 설정",{{L"제목",p->title,false,{},false,4,true},{L"에너지 단위 (선택 / 직접 입력)",p->unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):p->unit,false,{L"kcal/mol",L"kcal mol⁻¹"},false,4,true,true},{L"x축 (위·아래첨자 버튼)",p->xLabel,false,{},false,4,true},{L"y축 (위·아래첨자 버튼)",p->yLabel,false,{},false,4,true},{L"x축 글자색",p->xColor,false,{},true},{L"y축 글자색",p->yColor,false,{},true},{L"너비 / 높이 (pt)",number(p->width)+" "+number(p->height)},{L"그래프 형태",std::to_string(p->mode),false,{L"부드러운 곡선",L"직선",L"에너지 준위 (점선 연결)",L"평평한 준위와 직선"}},{L"에너지 값 표시",p->showValues?"1":"0",false,{L"아니요",L"예"}},{L"y축 눈금 간격 (0: 자동)",number(p->yTickStep)},
  {L"y축 최솟값 (빈칸: 자동)",p->yMin?number(*p->yMin):""},{L"y축 최댓값 (빈칸: 자동)",p->yMax?number(*p->yMax):""},
- {L"x축·그래프 제목 (pt, 0: 자동)",number(p->axisFontSize)},{L"눈금·상태 이름 (pt, 0: 자동)",number(p->tickFontSize)},{L"데이터 값 크기 (pt, 0: 자동)",number(p->valueFontSize)},{L"에너지 축 제목 (pt, 0: 자동)",number(p->energyLabelFontSize)}},update);if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
+ {L"x축·그래프 제목 (pt, 0: 자동)",number(p->axisFontSize)},{L"눈금·상태 이름 (pt, 0: 자동)",number(p->tickFontSize)},{L"데이터 값 크기 (pt, 0: 자동)",number(p->valueFontSize)},{L"에너지 축 제목 (pt, 0: 자동)",number(p->energyLabelFontSize)},{L"그래프 두께",p->thinLines?"1":"0",false,{L"굵게 (기존)",L"얇게 (선·축·글자)"}},{L"평평한 준위선만 굵게",p->boldLevels?"1":"0",false,{L"아니요 (그래프 두께에 맞춤)",L"예 (기존 굵은 두께 유지)"}}},update);if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
 }
 void editPlotStages(int id){
     auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");Document before=doc;
@@ -1503,6 +1531,24 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIA
  if(argc==2&&std::wstring(argv[1])==L"--test-office"){office::start({nullptr,[](const Document&){},[](){return coordinateDemo();},officePicture},false,false);auto result=office::selfTest();LocalFree(argv);imageCache.clear();GdiplusShutdown(token);OleUninitialize();return FAILED(result)?int(result):0;}
  if(argc==3&&std::wstring(argv[1])==L"--export-lab-templates"){try{fs::create_directories(argv[2]);size_t i=0;for(auto& entry:labTemplates){auto d=fromNative(entry.data);auto path=fs::path(argv[2])/std::to_wstring(i++);writePreview(path.wstring()+L".png",d);writeFile(path.wstring()+L".svg",toSvg(makeScene(d)));writeFile(path.wstring()+L".cdxml",toCdxml(d));}writePreview((fs::path(argv[2])/L"chair.png").wstring(),chairTemplate());writeFile((fs::path(argv[2])/L"chair.svg").wstring(),toSvg(makeScene(chairTemplate())));LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(...){LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
  if(argc==3&&std::wstring(argv[1])==L"--export-demo"){try{writeFile(std::wstring(argv[2])+L".cdxml",toCdxml(doc));writeFile(std::wstring(argv[2])+L".svg",toSvg(makeScene(doc)));writeFile(std::wstring(argv[2])+L"-mechanism.ydraw",toNative(mechanismDemo()));writeFile(std::wstring(argv[2])+L"-mechanism.cdxml",toCdxml(mechanismDemo()));writeFile(std::wstring(argv[2])+L"-mechanism.svg",toSvg(makeScene(mechanismDemo())));writeFile(std::wstring(argv[2])+L"-coordinate.ydraw",toNative(coordinateDemo()));writeFile(std::wstring(argv[2])+L"-coordinate.cdxml",toCdxml(coordinateDemo()));writeFile(std::wstring(argv[2])+L"-coordinate.svg",toSvg(makeScene(coordinateDemo())));Document rigid=coordinateDemo();rigid.plots[0].mode=3;rigid.plots[0].series[0].dash=1;rigid.plots[0].series[0].color="#0e6d89";rigid.plots[0].states[1].marker=3;rigid.plots[0].states[3].marker=4;rigid.plots[0].series.push_back({"Path 2","#b44758",{0,26,10,19,-9.9},0,2,2,2.5});writeFile(std::wstring(argv[2])+L"-rigid.ydraw",toNative(rigid));writeFile(std::wstring(argv[2])+L"-rigid.cdxml",toCdxml(rigid));writeFile(std::wstring(argv[2])+L"-rigid.svg",toSvg(makeScene(rigid)));writePreview(std::wstring(argv[2])+L"-rigid.png",rigid);writePreview(std::wstring(argv[2])+L"-coordinate.png",coordinateDemo());writePreview(std::wstring(argv[2])+L"-mechanism.png",mechanismDemo());Document partial;int pa=partial.addAtom({30,45}),pb=partial.addAtom({56,30}),pc=partial.addAtom({82,45});partial.addBond(pa,pb);partial.addBond(pc,pb);delocalizeBonds(partial,partial.allIds());writeFile(std::wstring(argv[2])+L"-delocalized.ydraw",toNative(partial));writeFile(std::wstring(argv[2])+L"-delocalized.cdxml",toCdxml(partial));writeFile(std::wstring(argv[2])+L"-delocalized.svg",toSvg(makeScene(partial)));writePreview(std::wstring(argv[2])+L"-delocalized.png",partial);Document cyclic=mechanismDemo();optimizeMechanism(cyclic,{},true);writeFile(std::wstring(argv[2])+L"-cycle.ydraw",toNative(cyclic));writePreview(std::wstring(argv[2])+L"-cycle.png",cyclic);LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(...){LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
+ if(argc==3&&std::wstring(argv[1])==L"--migrate-ydraw"){
+     int result=1;
+     try{
+         fs::path source=argv[2],target=source,backup=source;
+         if(_wcsicmp(source.extension().c_str(),L".ydraw")!=0)throw std::runtime_error("Expected .ydraw input");
+         target.replace_extension(L".cdxml");backup+=L".bak";
+         auto original=fromCdxml(readFile(source.wstring()));
+         auto cdxml=toCdxml(original);
+         if(toNative(fromCdxml(cdxml))!=toNative(original))throw std::runtime_error("CDXML verification failed");
+         if(fs::exists(target)){
+             if(readFile(target.wstring())!=cdxml)throw std::runtime_error("CDXML destination already exists");
+         }else storage::writeAtomic(target.wstring(),cdxml,false);
+         if(!MoveFileExW(source.c_str(),backup.c_str(),MOVEFILE_WRITE_THROUGH))
+             throw std::runtime_error("Could not archive the original");
+         result=0;
+     }catch(...){}
+     LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return result;
+ }
  if(argc==4&&std::wstring(argv[1])==L"--convert"){try{doc=fromCdxml(readFile(argv[2]));writeFile(std::wstring(argv[3])+L".ydraw",toNative(doc));writeFile(std::wstring(argv[3])+L".cdxml",toCdxml(doc));writeFile(std::wstring(argv[3])+L".svg",toSvg(scene()));LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(const std::exception& e){try{writeFile(std::wstring(argv[3])+L".error.txt",e.what());}catch(...){} LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
  isolatedStructureEditing=argc==4&&std::wstring(argv[1])==L"--edit-structure";if(isolatedStructureEditing)isolatedStructureResult=argv[3];
  StartupSplash splash(instance,!embedding && !isolatedStructureEditing && show!=SW_HIDE && show!=SW_SHOWMINIMIZED && show!=SW_SHOWMINNOACTIVE && show!=SW_MINIMIZE);

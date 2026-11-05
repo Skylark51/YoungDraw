@@ -46,8 +46,8 @@ std::vector<Vec> mechanismLinkPath(const Reaction& r,size_t index,const Style& s
 }
 Vec mechanismLinkCaption(const Reaction& r,size_t index,const Style& style){auto path=mechanismLinkPath(r,index,style);return (path[path.size()-2]+path.back())*.5;}
 
-double mechanismFontSize(const Reaction& r,const Style& style){return r.captionFontSize>0?r.captionFontSize:r.cyclic?style.fontSize:std::max(style.fontSize*1.5,std::clamp(std::min(r.slotWidth,r.slotHeight)*.20,22.,48.));}
-double mechanismArrowMargin(const Reaction& r,const Style& style){return std::max(10.,mechanismFontSize(r,style)*.5);}
+double mechanismFontSize(const Reaction& r,const Style& style){return r.captionFontSize>0?r.captionFontSize:style.fontSize;}
+double mechanismArrowMargin(const Reaction& r,const Style& style){return std::max(14.,mechanismFontSize(r,style)*.8);}
 double mechanismCaptionHeight(const Reaction& r,const Style& style){
     double height=0,font=mechanismFontSize(r,style);
     for(auto& slot:r.slots){double lines=1+std::count(slot.label.begin(),slot.label.end(),'\n');if(!slot.energy.empty())lines+=1+std::count(slot.energy.begin(),slot.energy.end(),'\n');height=std::max(height,font*(.6+1.5*lines));}

@@ -2,6 +2,14 @@
 #include "win_dialogs.h"
 #include <algorithm>
 namespace ui {
+// Alt+Enter arrives as a system key; consume its translated character too.
+inline bool multilineShortcut(HWND editor,UINT message,WPARAM key){
+    if(!(GetWindowLongPtrW(editor,GWL_STYLE)&ES_MULTILINE))return false;
+    if((message==WM_SYSKEYDOWN||message==WM_KEYDOWN)&&key==VK_RETURN&&(GetKeyState(VK_MENU)&0x8000)){
+        SendMessageW(editor,EM_REPLACESEL,TRUE,(LPARAM)L"\r\n");return true;
+    }
+    return message==WM_SYSCHAR&&key==VK_RETURN;
+}
 struct ScriptChange {std::wstring text;size_t start=0,end=0;};
 // Word-style formatting for source-backed editable text: selected text toggles,
 // an empty selection starts a script run, and the same shortcut exits that run.

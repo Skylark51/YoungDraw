@@ -24,8 +24,15 @@ struct Style {
 };
 enum class BondKind { Single, Double, Triple, Wedge, Hash, Dash, Bold, Wavy, Aromatic, Dative };
 struct TextRun { std::string text,color="#000000",font="Arial"; double size=10; int face=0; };
-struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,radical=0; std::string label; bool protect=false; std::vector<TextRun> labelRuns; Vec labelOffset; std::string color="#000000"; Vec annotationOffset; bool annotationManual=false; double drawingScale=1; };
-struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; std::string customOrder,customDisplay; std::string color="#000000"; double drawingScale=1; };
+struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,radical=0; std::string label; bool protect=false; std::vector<TextRun> labelRuns; Vec labelOffset; std::string color="#000000"; Vec annotationOffset; bool annotationManual=false; double drawingScale=1;
+    std::optional<double> labelSize, labelMargin;
+    std::optional<int> labelFace;
+    void preserveStyle(const Style& from,const Style& to);
+};
+struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; std::string customOrder,customDisplay; std::string color="#000000"; double drawingScale=1;
+    std::optional<double> lineWidth, boldWidth, hashSpacing, doubleGap;
+    void preserveStyle(const Style& from,const Style& to);
+};
 enum class ObjectKind { Line, Curve, Text, Ellipse, Rectangle, Image };
 struct ArrowCross { int index=-1; bool enabled=false; double width=4,size=14; std::string color="#ff0000"; };
 struct MechanismLink { int from=0,to=1; std::vector<int> members; }; // from -1: common external vertical spine.
@@ -73,6 +80,8 @@ struct EnergyPlot {
     double yTickStep=0; // 0: automatic; positive: spacing in the plot's energy unit.
     std::vector<MechanismStage> stages; // Empty in older documents; editable independently of energy states.
     std::vector<EnergyState> states; std::vector<EnergySeries> series; int mode=3; bool showValues=true;
+    bool thinLines=false; // Display preset; stored path widths remain editable in either mode.
+    bool boldLevels=false; // Keep plateau strokes at their original weight in thin mode.
 };
 struct Group { int id=0; std::vector<int> members; };
 struct Document {
@@ -111,6 +120,7 @@ struct Document {
     void erase(const std::vector<int>& ids);
     std::vector<int> allIds() const;
     void append(const Document& other,Vec delta={});
+    void rebaseStructureStyle(const Style& target);
     Document subset(const std::vector<int>& ids) const;
     int hydrogens(int id) const;
     std::vector<std::string> validate() const;

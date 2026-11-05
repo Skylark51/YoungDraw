@@ -74,6 +74,19 @@ int main(){try{
         check(toCdxml(scaled).find("LineWidth=\"4\"")!=std::string::npos,"CDXML visible bonds carry scaled line width");
     }
     {
+        Document readable;Reaction block;block.id=readable.nextId++;block.slots={{"R",{}},{"P",{}}};block.above={"Relaxation"};block.below={"8.1 / 7.5 / -4.1"};readable.reactions.push_back(block);
+        Document molecule;int carbon=molecule.addAtom({0,0}),oxygen=molecule.addAtom({30,0},8);molecule.addBond(carbon,oxygen);
+        fillSlot(readable,molecule,block.id,0);fillSlot(readable,molecule,block.id,1);
+        auto inserted=structureInSlot(readable,block.id,0);
+        check(std::abs((inserted.atoms[0].p-inserted.atoms[1].p).length()-42*bondLengthScale(6,8,BondKind::Single))<1e-7,"default mechanism insert gives structures forty percent more space");
+        check(std::abs(inserted.atoms[1].drawingScale-1.4)<1e-7&&std::abs(inserted.bonds[0].drawingScale-1.4)<1e-7,"enlarged structures keep atom labels and bond strokes in proportion");
+        check(mechanismFontSize(readable.reactions[0],readable.style)==readable.style.fontSize,"automatic captions match normal atom typography rather than growing with frame size");
+        auto before=toNative(readable);optimizeMechanism(readable,{block.id});check(toNative(readable)==before,"repeated automatic layout does not enlarge structures again");
+        readable.reactions[0].captionFontSize=24;check(mechanismFontSize(readable.reactions[0],readable.style)==24,"explicit caption size still overrides the automatic default");
+        Document graph;EnergyPlot plot;plot.id=graph.nextId++;plot.states={{"R",0,{},{}}};graph.plots.push_back(plot);fillSlot(graph,molecule,plot.id,0,true);
+        auto graphStructure=structureInSlot(graph,plot.id,0,true);check(std::abs((graphStructure.atoms[0].p-graphStructure.atoms[1].p).length()-30*bondLengthScale(6,8,BondKind::Single))<1e-7,"energy graph inserts retain their existing size");
+    }
+    {
         Document large;Reaction r;r.id=large.nextId++;r.slots={{"A",{}},{"C",{}},{"E",{}},{"G",{}},{"H",{}}};
         r.above={"B / Ring Opening","D / C–C bond cleavage","F / C–OH bond formation","H / 1,2-hydrogen atom transfer"};
         r.below={"?.? / 12.5 / 21.3","?.? / 13.4 / 22.5","?.? / 17.7 / 22.3","?.? / 17.7 / ?.?"};large.reactions.push_back(r);

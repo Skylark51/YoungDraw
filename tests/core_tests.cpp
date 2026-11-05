@@ -286,6 +286,16 @@ int main(){try{
  Object resonance;resonance.id=91;resonance.head=3;resonance.points={{0,0},{60,0}};auto resonanceParts=arrowPrimitives(resonance);check(resonanceParts.size()==3&&resonanceParts[1].points[0].x==0&&resonanceParts[2].points[0].x==60,"resonance has full heads at both ends");check(resonanceParts[0].points[0].x>0&&resonanceParts[0].points[1].x<60,"resonance shaft stops at both arrowheads"); }
  d={};d.ring({40,40},6);int edge=d.bonds[0].id;d.attachRing(0,edge,6,true);check(d.atoms.size()==10&&d.bonds.size()==11,"fused hexagon topology");
  d={};d.ring({40,40},6,true);d.atoms[0].p.x+=3;d.atoms[2].p.y+=2;auto report=cleanStructure(d);check(report.regularRings==1,"detect planar ring");for(auto& b:d.bonds)check(std::abs((d.atom(b.a)->p-d.atom(b.b)->p).length()-d.style.bondLength*benzeneBondScale)<.01,"cleanup retains compact benzene");
+ {
+     Document mixed;mixed.ring({0,0},6,true);
+     mixed.bonds[1].kind=BondKind::Double;mixed.bonds[2].kind=BondKind::Single;
+     check(!toggleAromaticDisplay(mixed,mixed.allIds()),"three nonalternating double bonds do not make a benzene ring");
+     Document partlySaturated;partlySaturated.ring({0,0},6,true);
+     partlySaturated.attachRing(0,partlySaturated.bonds[0].id,6,false);
+     check(toggleAromaticDisplay(partlySaturated,partlySaturated.allIds()),"recognize benzene beside a saturated fused ring");
+     check(std::count_if(partlySaturated.bonds.begin(),partlySaturated.bonds.end(),[](const Bond& b){return b.kind==BondKind::Aromatic;})==6,
+           "aromaticity does not propagate into a saturated fused ring");
+ }
  d=chairTemplate();auto a=d.atoms[0].p,b=d.atoms[1].p,c=d.atoms[2].p;double sign=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);report=cleanStructure(d);a=d.atoms[0].p;b=d.atoms[1].p;c=d.atoms[2].p;check(report.protectedComponents==1&&sign*((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x))>0,"preserve perspective/chirality");
  d=demo();auto fragment=d.subset(d.component(d.atoms.front().id));size_t count=d.atoms.size();d.append(fragment,{100,0});check(d.atoms.size()==count*2,"template insertion topology");std::set<int> ids;for(int id:d.allIds())check(ids.insert(id).second,"fresh ids on insert");
  d=mechanismDemo();check(d.reactions.size()==1&&d.reactions[0].slots[0].members.size()>0,"reaction filled slots");int rid=d.reactions[0].id;int member=d.reactions[0].slots[0].members.front();Vec old=d.atom(member)->p;d.translate({rid},{20,10});check((d.atom(member)->p-old-Vec{20,10}).length()<1e-8,"block moves attached structures");

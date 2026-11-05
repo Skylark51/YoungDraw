@@ -14,7 +14,17 @@ static void CALLBACK driveTextPalette(HWND parent,UINT,UINT_PTR timer,DWORD){
 static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     HWND dialog=GetLastActivePopup(parent);wchar_t name[64]{};GetClassNameW(dialog,name,64);if(std::wstring(name)!=L"YoungDrawForm")return;
     KillTimer(parent,timer);formDriven=true;
-    if(formAction==11||formAction==12){
+    if(formAction>=20&&formAction<=24){
+        if(formAction<=22){SendDlgItemMessageW(dialog,101,CB_SETCURSEL,formAction==22?0:1,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,101));}
+        else if(formAction==23){SetDlgItemTextW(dialog,101,L"kJ/mol");SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_EDITCHANGE),(LPARAM)GetDlgItem(dialog,101));}
+        previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction==18||formAction==19){
+        SendDlgItemMessageW(dialog,117,CB_SETCURSEL,1,0);
+        SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(117,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,117));previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction>=15&&formAction<=17){
+        SendDlgItemMessageW(dialog,116,CB_SETCURSEL,formAction==17?0:1,0);
+        SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction==11||formAction==12){
         SetDlgItemTextW(dialog,100,L"4");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==13||formAction==14){
         SetDlgItemTextW(dialog,101,L"15");SetDlgItemTextW(dialog,102,L"85");previewObserved=toNative(doc)!=formBefore;
@@ -34,10 +44,34 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
         HWND edit=GetDlgItem(dialog,100);SetWindowTextW(edit,L"H2");SendMessageW(edit,EM_SETSEL,1,2);
         BYTE before[256]{};GetKeyboardState(before);BYTE keys[256];memcpy(keys,before,sizeof(keys));keys[VK_CONTROL]=0x80;keys[VK_SHIFT]=0;SetKeyboardState(keys);
         SendMessageW(edit,WM_KEYDOWN,VK_OEM_PLUS,0);SetKeyboardState(before);
+        int length=GetWindowTextLengthW(edit);SendMessageW(edit,EM_SETSEL,length,length);
+        memcpy(keys,before,sizeof(keys));keys[VK_MENU]=0x80;SetKeyboardState(keys);
+        SendMessageW(edit,WM_SYSKEYDOWN,VK_RETURN,0);SendMessageW(edit,WM_SYSCHAR,VK_RETURN,0);SetKeyboardState(before);
+        SendMessageW(edit,EM_REPLACESEL,TRUE,(LPARAM)L"Water");
     }else{
         SetDlgItemTextW(dialog,101,L"30");previewObserved=toNative(doc)!=formBefore;
     }
-    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14)?IDCANCEL:IDOK,0);
+    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20)?IDCANCEL:IDOK,0);
+}
+static void graphUnitChecks(HWND hwnd){
+    doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;int owner=selection[0];
+    auto before=toNative(doc);formBefore=before;formAction=20;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
+    check(formDriven&&previewObserved&&toNative(doc)==before,"unit selection previews immediately and Cancel restores the graph");
+    formAction=21;formDriven=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
+    check(formDriven&&doc.plots[0].unit=="kcal mol^{-1}","inverse-mole choice stores superscript formatting");
+    bool raised=false;for(const auto& text:makeScene(doc,measure).items)if(text.rotation==-90&&text.text=="-1")raised=true;
+    check(raised,"energy axis renders minus one as a separate raised text run");
+    for(auto copy:{fromNative(toNative(doc)),fromCdxml(toCdxml(doc))})check(copy.plots[0].unit=="kcal mol^{-1}","unit survives native and CDXML roundtrips");
+    check(toSvg(makeScene(doc,measure)).find("kcal mol")!=std::string::npos,"SVG contains the selected unit");
+    writePreview(L"graph-inverse-mole-unit.png",doc);
+    check(history.undo(doc)&&doc.plots[0].unit=="kcal/mol","unit choice is undoable");
+    check(history.redo(doc)&&doc.plots[0].unit=="kcal mol^{-1}","unit choice is redoable");
+    formAction=24;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(doc.plots[0].unit=="kcal mol^{-1}","reopening settings preserves selected notation");
+    formAction=22;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(doc.plots[0].unit=="kcal/mol","slash unit can be restored from the list");
+    formAction=23;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(doc.plots[0].unit=="kJ/mol","custom energy units remain editable");
+    formAction=24;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(doc.plots[0].unit=="kJ/mol","custom unit survives reopening settings");
+    doc={};history.clear();selection.clear();dirty=false;
+    std::cout<<"Graph energy unit selection, preview, cancellation, undo and export checks passed\n";
 }
 int main(int argc,char** argv){
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
@@ -99,6 +133,10 @@ int main(int argc,char** argv){
         check(RegisterClassW(&wc)!=0,"register window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
+        graphUnitChecks(hwnd);
+        if(argc>1&&std::string(argv[1])=="--plot-units-only"){
+            DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
         {
             // Hover-only paint reuse must keep geometry, while any document redraw
             // must invalidate the cached scene (including Undo and tab switches).
@@ -216,6 +254,42 @@ int main(int argc,char** argv){
         }
 
         {
+            // Exercise actual raster output at fractional zoom and rotated axes.
+            for(double scale:{.65,1.,1.25,1.75})for(double rotation:{0.,-90.}){
+                Bitmap surface(320,320,PixelFormat32bppARGB);
+                {
+                    Graphics graphics(&surface);graphics.Clear(Color::White);
+                    graphics.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+                    graphics.TranslateTransform(rotation?80.25f:20.25f,rotation?285.25f:40.25f);graphics.ScaleTransform(float(scale),float(scale));
+                    Scene lettering;Primitive text;text.type=Primitive::Text;text.points={{0,0}};text.text="37.2 -9.9 S = 1";text.fontSize=12.5;text.face=2;text.rotation=rotation;lettering.items.push_back(text);
+                    auto transform=Matrix{};graphics.GetTransform(&transform);auto smoothing=graphics.GetSmoothingMode();auto offset=graphics.GetPixelOffsetMode();
+                    render(graphics,lettering);
+                    Matrix after;graphics.GetTransform(&after);check(after.Equals(&transform)&&graphics.GetSmoothingMode()==smoothing&&graphics.GetPixelOffsetMode()==offset,"text rendering restores transforms and quality settings");
+                }
+                int ink=0,coverage=0;std::set<int> shades;
+                for(int y=0;y<320;y++)for(int x=0;x<320;x++){Color pixel;surface.GetPixel(x,y,&pixel);int level=pixel.GetRed();if(level<245)ink++;if(level>0&&level<255){coverage++;shades.insert(level);}}
+                check(ink>20&&coverage>20&&shades.size()>8,"thin italic text retains smooth grayscale edges at fractional zoom and vertical rotation");
+            }
+        }
+        {
+            doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;auto before=toNative(doc);int owner=selection[0];
+            formBefore=before;formAction=15;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
+            check(formDriven&&previewObserved&&toNative(doc)==before,"Cancel restores the graph after previewing thin mode");
+            formAction=16;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
+            check(formDriven&&doc.plots[0].thinLines,"graph settings apply the thin preset");
+            writePreview(L"graph-thin-preset.png",doc);
+            auto thinBefore=toNative(doc);formBefore=thinBefore;formAction=18;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
+            check(formDriven&&previewObserved&&toNative(doc)==thinBefore,"Cancel restores level emphasis preview");
+            formAction=19;formDriven=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
+            check(formDriven&&doc.plots[0].thinLines&&doc.plots[0].boldLevels,"graph settings emphasize levels while keeping thin mode");
+            writePreview(L"graph-thin-bold-levels.png",doc);
+            check(history.undo(doc)&&toNative(doc)==thinBefore,"level emphasis is one undo operation");
+            check(history.undo(doc)&&toNative(doc)==before,"graph thickness changes undo in one step");check(history.redo(doc)&&doc.plots[0].thinLines,"graph thickness can be redone");
+            formAction=17;formDriven=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(formDriven&&!doc.plots[0].thinLines,"graph settings can restore the existing bold preset");
+            writePreview(L"graph-bold-preset.png",doc);
+            doc={};history.clear();selection.clear();dirty=false;
+        }
+        {
             doc=coordinateDemo();history.clear();selection={doc.plots[0].id};targetContainer=selection.front();tool=Text;dirty=false;doc.graphsLocked=true;
             auto before=toNative(doc);auto chosen=selection;auto target=targetContainer;
             for(double scale:{.6,1.,3.}){
@@ -298,7 +372,7 @@ int main(int argc,char** argv){
 
         {
             doc={};Object label;label.id=doc.nextId++;label.kind=ObjectKind::Text;label.points={{30,30}};label.text="H2";doc.objects.push_back(label);
-            formAction=0;SetTimer(hwnd,901,10,driveForm);editObject(label.id);check(formDriven&&doc.objects[0].text=="H_{2}","Word subscript shortcut works in the actual text properties dialog");
+            formAction=0;SetTimer(hwnd,901,10,driveForm);editObject(label.id);check(formDriven&&doc.objects[0].text=="H_{2}\r\nWater","subscript and Alt+Enter work in the actual text properties dialog");
             doc={};int a=doc.addAtom({0,0}),b=doc.addAtom({13,3}),c=doc.addAtom({26,0});doc.addBond(a,b);doc.addBond(b,c);selection={a};history.clear();dirty=false;
             formBefore=toNative(doc);formAction=1;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);clean();
             check(formDriven&&previewObserved&&toNative(doc)==formBefore,"cleanup previews the chosen rotation and Cancel restores the exact original");
@@ -335,6 +409,18 @@ int main(int argc,char** argv){
             doc={};selection.clear();history.clear();dirty=false;
         }
         {
+            doc={};history.clear();selection.clear();tool=Text;dirty=false;
+            beginInline({},Vec{40,40});SetWindowTextW(inlineEdit,L"First");SendMessageW(inlineEdit,EM_SETSEL,5,5);
+            BYTE beforeAlt[256]{};GetKeyboardState(beforeAlt);BYTE altKeys[256];memcpy(altKeys,beforeAlt,sizeof(altKeys));altKeys[VK_MENU]=0x80;SetKeyboardState(altKeys);
+            SendMessageW(inlineEdit,WM_SYSKEYDOWN,VK_RETURN,0);SendMessageW(inlineEdit,WM_SYSCHAR,VK_RETURN,0);SetKeyboardState(beforeAlt);
+            check(inlineEdit&&GetWindowTextLengthW(inlineEdit)==7,"Alt+Enter keeps inline text editing and inserts one newline");
+            SendMessageW(inlineEdit,EM_REPLACESEL,TRUE,(LPARAM)L"Second");SendMessageW(inlineEdit,WM_KEYDOWN,VK_RETURN,0);
+            check(!inlineEdit&&doc.objects[0].text=="First\r\nSecond","Enter commits multiline inline text");
+            auto saved=toNative(doc);check(fromNative(saved).objects[0].text==doc.objects[0].text,"multiline text survives native save");
+            check(history.undo(doc)&&doc.objects.empty(),"multiline text edit undoes in one step");
+            doc={};history.clear();selection.clear();tool=Select;dirty=false;
+        }
+        {
             doc=mechanismDemo();history.clear();selection.clear();tool=Select;fit();
             int id=doc.reactions[0].id;auto count=doc.reactions[0].slots.size();auto before=toNative(doc);
             mouseDown(mechanismAddPosition(doc.reactions[0]));
@@ -360,6 +446,10 @@ int main(int argc,char** argv){
             check(history.undo(doc)&&toNative(doc)==before,"vertical plus can be undone exactly");
             writePreview(L"mechanism-vertical.png",doc);
             doc.reactions[0].vertical=false;optimizeMechanism(doc,{id});writePreview(L"mechanism-readable.png",doc);
+            doc={};Reaction readable;readable.id=doc.nextId++;readable.slots={{"C",{},"9.6 / 8.8 / 8.8"},{"D",{},"-7.6 / -1.4 / -9.7"},{"E",{},"-23.1 / -30.4 / -40.2"},{"F",{},"-41.1 / -47.0 / -49.3"},{"G",{},"?.? / ?.? / -55.3"}};
+            readable.above={"Relaxation","Rearrangement","C-H activation","Product\nRelease"};readable.below={"","8.1 / 7.5 / -4.1","-10.1 / -18.5 / -21.3","?.? / ?.? / -36.1"};doc.reactions.push_back(readable);
+            for(size_t i=0;i<readable.slots.size();i++)fillSlot(doc,demo(),readable.id,i);
+            writePreview(L"mechanism-readable-default.png",doc);
             doc={};selection.clear();history.clear();dirty=false;
         }
         {
@@ -419,6 +509,23 @@ int main(int argc,char** argv){
             std::cout<<"Live ChemDraw clipboard paste passed\n";
         }
         {
+            doc={};selection.clear();history.clear();
+            auto mixed=clipboardStructureText(R"(<CDXML LineWidth="0.67" BondLength="20.34" BondSpacing="12" LabelSize="6.75">
+                <page id="1"><fragment id="2" MarginWidth="0.80"><n id="3" p="0 0"/><n id="4" p="10.97 0" Element="8"/>
+                <b id="5" B="3" E="4" Order="2" LineWidth="1" BoldWidth="1.02" HashSpacing="1.26"/>
+                </fragment></page></CDXML>)");
+            check(mixed.has_value(),"mixed ChemDraw drawing styles decode from clipboard text");
+            pasteStructure(*mixed);
+            auto reopened=fromNative(toNative(doc));
+            check(reopened.style.lineWidth==2&&reopened.atoms[1].labelSize==6.75&&reopened.atoms[1].labelMargin==.8,
+                  "canvas paste preserves the source label style across saves");
+            check(reopened.bonds[0].boldWidth==1.02&&reopened.bonds[0].hashSpacing==1.26,
+                  "local bold width and hash spacing survive paste and save independently");
+            std::vector<Primitive> strokes;
+            for(auto& item:makeScene(reopened).items)if(item.owner==reopened.bonds[0].id)strokes.push_back(item);
+            check(strokes.size()==2&&strokes[0].width==1&&strokes[1].width==1&&
+                  std::abs(std::abs(strokes[0].points[0].y-strokes[1].points[0].y)-20.34*.12)<1e-6,
+                  "canvas paste preserves bond stroke width and double-bond gap");
             auto source=demo();auto native=clipboardStructureText(toNative(source));
             check(native&&native->atoms.size()==source.atoms.size(),"native clipboard structure is editable");
             std::string xml=R"(<CDXML><page id="1"><fragment id="2"><n id="3" p="0 0" Element="6"/><n id="4" p="30 0" Element="8"/><b id="5" B="3" E="4" Order="1"/></fragment></page></CDXML>)";
@@ -449,7 +556,7 @@ int main(int argc,char** argv){
             check(failed&&toNative(doc)==before,"invalid insertion target leaves the document unchanged");
             doc={};history.clear();selection.clear();targetContainer=0;targetSlot=0;targetAbove=false;dirty=false;
         }
-        const auto firstPath=fs::absolute(L"tab-first.ydraw").wstring(),secondPath=fs::absolute(L"tab-second.ydraw").wstring();
+        const auto firstPath=fs::absolute(L"tab-first.cdxml").wstring(),secondPath=fs::absolute(L"tab-second.cdxml").wstring();
         doc={};history.clear();doc.addAtom({10,20},6);history.checkpoint(doc);doc.addAtom({40,20},8);
         selection={doc.atoms[1].id};filePath=firstPath;dirty=true;zoom=2.75;origin={33,44};tool=Double;targetContainer=17;targetSlot=2;targetAbove=true;
         newDocumentTab();check(documents.size()==2&&doc.atoms.empty()&&!dirty,"new tab preserves an unsaved document");
@@ -462,7 +569,7 @@ int main(int argc,char** argv){
         check(save()&&!dirty,"save first tab");
         switchDocumentTab(1);check(dirty&&doc.atoms.size()==2&&doc.atoms[0].element==7&&filePath==secondPath&&zoom==1.25,"saving first tab does not overwrite or clear second tab");
         check(history.undo(doc)&&doc.atoms.size()==1&&doc.atoms[0].element==7,"second tab has independent undo history");check(save(),"save second tab");
-        check(fromNative(readFile(firstPath)).atoms[0].element==6&&fromNative(readFile(secondPath)).atoms[0].element==7,"both files save their own content");
+        check(fromCdxml(readFile(firstPath)).atoms[0].element==6&&fromCdxml(readFile(secondPath)).atoms[0].element==7,"both files save their own content");
         {
             auto saved=doc;doc=mechanismDemo();auto rows=mechanismRows(doc.reactions[0]);rows[1][1]="TS1 / Nucleophilic attack";rows[1][2]="0 / 1 / 2";rows[1][3]="0.0 / 8.7 / 13.4";rows[0][2]="0 / 2";rows[0][3]="-3.0 / 4.4";
             doc.reactions[0]=mechanismGridData(doc.reactions[0],rows);

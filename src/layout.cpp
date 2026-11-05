@@ -133,11 +133,28 @@ Document Document::subset(const std::vector<int>& selection) const {
     for(auto& g:groups)if(ids.count(g.id))out.groups.push_back(g);
     for(int id:out.allIds())out.nextId=std::max(out.nextId,id+1);for(auto& g:out.groups)out.nextId=std::max(out.nextId,g.id+1);return out;
 }
+void Atom::preserveStyle(const Style& from,const Style& to){
+    if(!labelSize&&from.fontSize!=to.fontSize)labelSize=from.fontSize;
+    if(!labelMargin&&from.margin!=to.margin)labelMargin=from.margin;
+    if(!labelFace&&from.labelFace!=to.labelFace)labelFace=from.labelFace;
+}
+void Bond::preserveStyle(const Style& from,const Style& to){
+    if(!lineWidth&&from.lineWidth!=to.lineWidth)lineWidth=from.lineWidth;
+    if(!boldWidth&&from.boldWidth!=to.boldWidth)boldWidth=from.boldWidth;
+    if(!hashSpacing&&from.hashSpacing!=to.hashSpacing)hashSpacing=from.hashSpacing;
+    if(!doubleGap&&from.bondLength*from.bondSpacing!=to.bondLength*to.bondSpacing)
+        doubleGap=from.bondLength*from.bondSpacing;
+}
+void Document::rebaseStructureStyle(const Style& target){
+    for(auto& a:atoms)a.preserveStyle(style,target);
+    for(auto& b:bonds)b.preserveStyle(style,target);
+    style=target;
+}
 void Document::append(const Document& other,Vec delta){
     std::map<int,int> mapping;for(int id:other.allIds())mapping[id]=nextId++;for(auto& g:other.groups)mapping[g.id]=nextId++;
     auto remap=[&](std::vector<int>& ids){for(int& id:ids)id=mapping.at(id);};
-    for(auto a:other.atoms){a.id=mapping[a.id];a.p=a.p+delta;atoms.push_back(a);}
-    for(auto b:other.bonds){b.id=mapping[b.id];b.a=mapping[b.a];b.b=mapping[b.b];bonds.push_back(b);}
+    for(auto a:other.atoms){a.id=mapping[a.id];a.p=a.p+delta;a.preserveStyle(other.style,style);atoms.push_back(a);}
+    for(auto b:other.bonds){b.id=mapping[b.id];b.a=mapping[b.a];b.b=mapping[b.b];b.preserveStyle(other.style,style);bonds.push_back(b);}
     for(auto o:other.objects){o.sourceAtom=mapping.count(o.sourceAtom)?mapping[o.sourceAtom]:0;o.targetAtom=mapping.count(o.targetAtom)?mapping[o.targetAtom]:0;o.sourceBond=mapping.count(o.sourceBond)?mapping[o.sourceBond]:0;o.targetBond=mapping.count(o.targetBond)?mapping[o.targetBond]:0;o.id=mapping[o.id];for(auto& p:o.points)p=p+delta;objects.push_back(o);}
     for(auto r:other.reactions){r.id=mapping[r.id];r.p=r.p+delta;for(auto& s:r.slots)remap(s.members);for(auto& l:r.links)remap(l.members);reactions.push_back(r);}
     for(auto p:other.plots){p.id=mapping[p.id];p.p=p.p+delta;for(auto& s:p.states){remap(s.above);remap(s.below);}plots.push_back(p);}
@@ -213,9 +230,7 @@ void replaceSlotStructure(Document& d,const Document& fragment,int container,siz
     candidate.groups.erase(std::remove_if(candidate.groups.begin(),candidate.groups.end(),[](const Group& g){return g.members.empty();}),candidate.groups.end());
     candidate.erase(content.second);
     Document edited=fragment;
-    for(auto& atom:edited.atoms)atom.drawingScale*=fragment.style.fontSize/candidate.style.fontSize;
-    for(auto& bond:edited.bonds)bond.drawingScale*=fragment.style.lineWidth/candidate.style.lineWidth;
-    edited.style=candidate.style;
+    edited.rebaseStructureStyle(candidate.style);
     auto bounds=makeScene(edited).bounds;Vec delta=content.first-Vec{bounds.x+bounds.w/2,bounds.y+bounds.h/2};
     int first=candidate.nextId;candidate.append(edited,delta);std::vector<int> added;for(int id:candidate.allIds())if(id>=first)added.push_back(id);
     for(auto& r:candidate.reactions)if(r.id==container)r.slots[index].members=added;
@@ -228,9 +243,19 @@ void fillSlot(Document& d,const Document& source,int container,size_t index,bool
     // Vector structures retain their editable coordinates. Images retain original bytes.
     std::vector<std::vector<int>> sourceRings;std::set<int> seen;for(auto& a:fragment.atoms)if(!seen.count(a.id)){auto ids=fragment.component(a.id);seen.insert(ids.begin(),ids.end());auto rings=cycles(fragment,ids);sourceRings.insert(sourceRings.end(),rings.begin(),rings.end());}
     auto sourceTargets=bondTargets(fragment,sourceRings);std::vector<double> lengths;for(auto& b:fragment.bonds)lengths.push_back((fragment.atom(b.a)->p-fragment.atom(b.b)->p).length()*fragment.style.bondLength/sourceTargets[b.id]);
+    // Give mechanism structures more visual weight than their captions. Graph
+    // inserts keep their separate, compact sizing policy.
+    bool mechanism=std::any_of(d.reactions.begin(),d.reactions.end(),[&](const Reaction& r){return r.id==container;});
+    double presentationScale=mechanism?1.4:1.;
     double scale=1;if(!lengths.empty()){std::sort(lengths.begin(),lengths.end());if(lengths[lengths.size()/2]>.001)scale=d.style.bondLength/lengths[lengths.size()/2];}
     else if(fragment.atoms.empty()&&fragment.reactions.empty()&&fragment.plots.empty()){auto b=makeScene(fragment).bounds;scale=std::min(1.,std::min(100./b.w,72./b.h));}
     for(auto& a:fragment.atoms){a.p=a.p*scale;a.labelOffset=a.labelOffset*scale;}for(auto& o:fragment.objects){for(auto& p:o.points)p=p*scale;if(o.kind!=ObjectKind::Image){o.fontSize*=scale;o.width*=scale;for(auto& run:o.runs)run.size*=scale;}}
+    if(mechanism){
+        for(auto& atom:fragment.atoms){atom.p=atom.p*presentationScale;atom.labelOffset=atom.labelOffset*presentationScale;atom.drawingScale*=presentationScale;if(atom.annotationManual)atom.annotationOffset=atom.annotationOffset*presentationScale;for(auto& run:atom.labelRuns)run.size*=presentationScale;}
+        for(auto& bond:fragment.bonds)bond.drawingScale*=presentationScale;
+        for(auto& object:fragment.objects){for(auto& point:object.points)point=point*presentationScale;if(object.kind!=ObjectKind::Image){object.fontSize*=presentationScale;object.width*=presentationScale;for(auto& run:object.runs)run.size*=presentationScale;}}
+    }
+    fragment.rebaseStructureStyle(d.style);
     auto fragmentBounds=makeScene(fragment).bounds;
     for(auto& r:d.reactions)if(r.id==container){Reaction old=r;r.slotWidth=std::max(r.slotWidth,fragmentBounds.w+6);r.slotHeight=std::max(r.slotHeight,fragmentBounds.h+6);r.spacing=std::max(r.spacing,r.slotWidth+90);for(size_t i=0;i<r.slots.size();i++)d.translate(r.slots[i].members,reactionSlot(r,i)-reactionSlot(old,i));}
     for(auto& p:d.plots)if(p.id==container){EnergyPlot old=p;p.width=std::max(p.width,(fragmentBounds.w+14)*std::max(size_t(1),p.states.size()-1)+114);for(size_t i=0;i<p.states.size();i++){d.translate(p.states[i].above,plotAnchor(p,i,true)-plotAnchor(old,i,true));d.translate(p.states[i].below,plotAnchor(p,i,false)-plotAnchor(old,i,false));}}
@@ -309,18 +334,103 @@ static std::vector<std::vector<int>> cycles(const Document& d,const std::vector<
     }return result;
 }
 static bool benzeneRing(const Document& d,const std::vector<int>& ring){
-    if(ring.size()!=6)return false;int doubles=0,aromatic=0;
+    if(ring.size()!=6)return false;
+    std::vector<BondKind> orders;
     for(size_t i=0;i<ring.size();i++){
-        if(d.atom(ring[i])->element!=6)return false;
-        for(auto& b:d.bonds)if((b.a==ring[i]&&b.b==ring[(i+1)%ring.size()])||(b.b==ring[i]&&b.a==ring[(i+1)%ring.size()])){doubles+=b.kind==BondKind::Double;aromatic+=b.kind==BondKind::Aromatic;}
-    }return doubles==3||aromatic==6;
+        const auto* atom=d.atom(ring[i]);
+        if(atom->element!=6||atom->charge||atom->radical)return false;
+        int next=ring[(i+1)%ring.size()];
+        auto edge=std::find_if(d.bonds.begin(),d.bonds.end(),[&](const Bond& b){
+            return (b.a==atom->id&&b.b==next)||(b.b==atom->id&&b.a==next);
+        });
+        if(edge==d.bonds.end()||!edge->customOrder.empty())return false;
+        orders.push_back(edge->kind);
+    }
+    if(std::all_of(orders.begin(),orders.end(),[](BondKind k){return k==BondKind::Aromatic;}))return true;
+    for(size_t i=0;i<orders.size();i++){
+        if(orders[i]!=BondKind::Single&&orders[i]!=BondKind::Double)return false;
+        if(orders[i]==orders[(i+1)%orders.size()])return false;
+    }
+    return true;
+}
+// Preserve a drafted multi-ring scaffold, including its shorter terminal bonds.
+// A ring must have the shape of a regular hexagon at its existing size.
+static bool draftedArylScaffold(const Document& d,const std::vector<int>& comp,
+                               const std::vector<std::vector<int>>& rings){
+    if(rings.size()<2)return false;
+    std::set<int> ringAtoms;
+    double reference=0;
+    for(const auto& ring:rings){
+        if(!benzeneRing(d,ring))return false;
+        Vec center;
+        for(int id:ring){
+            if(!ringAtoms.insert(id).second)return false;
+            center=center+d.atom(id)->p;
+        }
+        center=center*(1./ring.size());
+        double radius=0;
+        for(int id:ring)radius+=(d.atom(id)->p-center).length()/ring.size();
+        if(radius<.001)return false;
+        if(!reference)reference=radius;
+        if(std::abs(radius/reference-1)>.12)return false;
+        for(size_t i=0;i<ring.size();i++){
+            Vec a=d.atom(ring[i])->p,b=d.atom(ring[(i+1)%ring.size()])->p;
+            if(std::abs((a-center).length()/radius-1)>.08||
+               std::abs((a-b).length()/radius-1)>.08)return false;
+        }
+    }
+    for(const auto& b:d.bonds)if(has(comp,b.a)){
+        Vec v=d.atom(b.b)->p-d.atom(b.a)->p;
+        double ratio=v.length()/reference;
+        if(ratio<.65||ratio>1.4)return false;
+        // A short explicit H can deliberately deviate from the main zigzag.
+        if(d.atom(b.a)->element==1||d.atom(b.b)->element==1)continue;
+        if(std::abs(std::remainder(std::atan2(v.y,v.x),pi/6))>pi/15)return false;
+    }
+    return true;
+}
+static std::set<int> arylEdges(const Document& d,const std::vector<std::vector<int>>& rings){
+    std::set<int> result;
+    bool changed=true;
+    while(changed){
+        const size_t before=result.size();
+        for(const auto& ring:rings){
+            std::vector<const Bond*> edges;
+            bool shared=false,conjugated=ring.size()==6;
+            for(size_t i=0;i<ring.size();i++){
+                int a=ring[i],b=ring[(i+1)%ring.size()];
+                const auto* atom=d.atom(a);
+                auto edge=std::find_if(d.bonds.begin(),d.bonds.end(),[&](const Bond& e){
+                    return (e.a==a&&e.b==b)||(e.a==b&&e.b==a);
+                });
+                if(edge==d.bonds.end()){conjugated=false;break;}
+                edges.push_back(&*edge);
+                shared=shared||result.count(edge->id);
+                conjugated=conjugated&&atom->element==6&&!atom->charge&&!atom->radical&&
+                    edge->customOrder.empty()&&(edge->kind==BondKind::Single||
+                    edge->kind==BondKind::Double||edge->kind==BondKind::Aromatic);
+            }
+            if(!benzeneRing(d,ring)){
+                if(!shared||!conjugated)continue;
+                // Each vertex must participate in the shared pi system.
+                for(int id:ring)if(std::none_of(edges.begin(),edges.end(),[&](const Bond* e){
+                    return (e->a==id||e->b==id)&&(result.count(e->id)||
+                        e->kind==BondKind::Double||e->kind==BondKind::Aromatic);
+                }))conjugated=false;
+                if(!conjugated)continue;
+            }
+            for(auto* edge:edges)result.insert(edge->id);
+        }
+        changed=result.size()!=before;
+    }
+    return result;
 }
 static std::map<int,double> bondTargets(const Document& d,const std::vector<std::vector<int>>& rings){
-    std::set<int> aromaticAtoms,aromaticEdges,ringEdges;
+    std::set<int> aromaticAtoms,ringEdges;
+    auto aromaticEdges=arylEdges(d,rings);
+    for(int id:aromaticEdges){auto* b=d.bond(id);aromaticAtoms.insert(b->a);aromaticAtoms.insert(b->b);}
     for(auto& ring:rings)for(size_t i=0;i<ring.size();i++)for(auto& b:d.bonds)
         if((b.a==ring[i]&&b.b==ring[(i+1)%ring.size()])||(b.b==ring[i]&&b.a==ring[(i+1)%ring.size()]))ringEdges.insert(b.id);
-    for(auto& ring:rings)if(benzeneRing(d,ring)){aromaticAtoms.insert(ring.begin(),ring.end());for(auto& b:d.bonds)if(has(ring,b.a)&&has(ring,b.b))aromaticEdges.insert(b.id);}
-    bool extended=true;while(extended){size_t old=aromaticAtoms.size();for(auto& ring:rings)if(ring.size()==6){int shared=0;bool carbon=true;for(int id:ring){shared+=aromaticAtoms.count(id)>0;carbon=carbon&&d.atom(id)->element==6;}if(carbon&&shared>=2){aromaticAtoms.insert(ring.begin(),ring.end());for(auto& b:d.bonds)if(has(ring,b.a)&&has(ring,b.b))aromaticEdges.insert(b.id);}}extended=old!=aromaticAtoms.size();}
     std::map<int,double> result;
     for(auto& b:d.bonds){double scale=aromaticEdges.count(b.id)?benzeneBondScale:ringEdges.count(b.id)?1.:bondLengthScale(d.atom(b.a)->element,d.atom(b.b)->element,b.kind);
         if(b.kind==BondKind::Single&&(aromaticAtoms.count(b.a)!=aromaticAtoms.count(b.b))&&d.atom(b.a)->element==6&&d.atom(b.b)->element==6){
@@ -333,10 +443,8 @@ bool toggleAromaticDisplay(Document& d,const std::vector<int>& selection){
     auto selected=editableExpansion(d,selection);std::set<int> visited;bool changed=false;
     for(auto& atom:d.atoms){auto comp=d.component(atom.id);if(visited.count(atom.id))continue;visited.insert(comp.begin(),comp.end());
         if(!std::any_of(comp.begin(),comp.end(),[&](int id){return selected.count(id)>0;})&&!std::any_of(d.bonds.begin(),d.bonds.end(),[&](const Bond& b){return selected.count(b.id)&&has(comp,b.a);}))continue;
-        auto rings=cycles(d,comp);std::set<int> atoms,edges;
-        for(auto& ring:rings)if(benzeneRing(d,ring))atoms.insert(ring.begin(),ring.end());
-        bool more=true;while(more){size_t n=atoms.size();for(auto& ring:rings)if(ring.size()==6&&std::all_of(ring.begin(),ring.end(),[&](int id){return d.atom(id)->element==6;})&&std::count_if(ring.begin(),ring.end(),[&](int id){return atoms.count(id)>0;})>=2)atoms.insert(ring.begin(),ring.end());more=n!=atoms.size();}
-        for(auto& b:d.bonds)if(atoms.count(b.a)&&atoms.count(b.b)&&std::any_of(rings.begin(),rings.end(),[&](const auto& ring){return has(ring,b.a)&&has(ring,b.b);}))edges.insert(b.id);
+        auto edges=arylEdges(d,cycles(d,comp));std::set<int> atoms;
+        for(int id:edges){auto* b=d.bond(id);atoms.insert(b->a);atoms.insert(b->b);}
         if(edges.empty())continue;
         bool aromatic=std::all_of(edges.begin(),edges.end(),[&](int id){return d.bond(id)->kind==BondKind::Aromatic;});std::set<int> doubles;
         if(aromatic){std::set<int> remaining=atoms;std::function<bool()> match=[&](){if(remaining.empty())return true;int a=*remaining.begin();remaining.erase(a);
@@ -512,6 +620,7 @@ static CleanupReport cleanStructureCandidate(Document& d,const std::vector<int>&
         Vec center;for(int id:comp)center=center+d.atom(id)->p;center=center*(1./comp.size());bool protect=false,explicitProtect=false,stereo=false;std::vector<double> lengths;auto rings=cycles(d,comp);auto targets=bondTargets(d,rings);
         for(auto& b:d.bonds)if(has(comp,b.a)){lengths.push_back((d.atom(b.a)->p-d.atom(b.b)->p).length()*d.style.bondLength/targets[b.id]);if(b.kind==BondKind::Wedge||b.kind==BondKind::Hash)protect=stereo=true;}
         for(int id:comp){auto* a=d.atom(id);if(a->protect)explicitProtect=true;if(a->protect||(a->element>=21&&a->element<=30)||(a->element>=39&&a->element<=48)||(a->element>=57&&a->element<=80)||a->element>=89)protect=true;}for(auto& b:d.bonds)if(has(comp,b.a)&&(b.kind==BondKind::Dative||b.color!="#000000"))protect=true;
+        if(draftedArylScaffold(d,comp,rings)){report.protectedComponents++;continue;}
         if(preserveProjection){
             if(!lengths.empty()){std::sort(lengths.begin(),lengths.end());double median=lengths[lengths.size()/2];if(median>.001){double scale=d.style.bondLength/median;for(int id:comp){auto* atom=d.atom(id);atom->p=center+(atom->p-center)*scale;atom->labelOffset=atom->labelOffset*scale;}}}
             if(!explicitProtect)readableRings(d,comp,cycles(d,comp));
@@ -528,8 +637,14 @@ static CleanupReport cleanStructureCandidate(Document& d,const std::vector<int>&
             for(size_t i=0;i<ring.size();i++){Vec p=c+Vec{std::cos(angle+turn*i),std::sin(angle+turn*i)}*radius;ringTargets[ring[i]]=ringTargets[ring[i]]+p;count[ring[i]]++;}report.regularRings++;
         }
         for(auto& entry:ringTargets)entry.second=entry.second*(1./count[entry.first]);
-        // Rings are anchors; branches relax toward normal bond lengths and 30-degree directions.
-        for(int iteration=0;iteration<220;iteration++){std::map<int,Vec> force;for(auto& b:d.bonds)if(has(comp,b.a)){Vec a=d.atom(b.a)->p,z=d.atom(b.b)->p,v=z-a;double len=v.length();if(len<.001)v={1,0},len=1;double angle=std::atan2(v.y,v.x),target=std::round(angle/(pi/6))*(pi/6);Vec ideal=Vec{std::cos(target),std::sin(target)}*targets[b.id];Vec f=(v-v*(targets[b.id]/len))*.17;
+        // Keep the original directions between independent rings and their branches.
+        // Snapping these bonds independently can reshape an already oriented scaffold.
+        std::map<int,double> directions;
+        for(const auto& b:d.bonds)if(has(comp,b.a)){
+            Vec v=d.atom(b.b)->p-d.atom(b.a)->p;
+            directions[b.id]=std::atan2(v.y,v.x);
+        }
+        for(int iteration=0;iteration<220;iteration++){std::map<int,Vec> force;for(auto& b:d.bonds)if(has(comp,b.a)){Vec a=d.atom(b.a)->p,z=d.atom(b.b)->p,v=z-a;double len=v.length();if(len<.001)v={1,0},len=1;double target=directions[b.id];Vec ideal=Vec{std::cos(target),std::sin(target)}*targets[b.id];Vec f=(v-v*(targets[b.id]/len))*.17;
                 if(!count[b.a]||!count[b.b])f=f+(v-ideal)*.025;force[b.a]=force[b.a]+f;force[b.b]=force[b.b]-f;}
             for(size_t i=0;i<comp.size();i++)for(size_t j=i+1;j<comp.size();j++){Vec v=d.atom(comp[i])->p-d.atom(comp[j])->p;double len=v.length();if(len<d.style.bondLength*.7){if(len<.001)v={.1,.1},len=v.length();Vec f=v*((d.style.bondLength*.7-len)*.07/len);force[comp[i]]=force[comp[i]]+f;force[comp[j]]=force[comp[j]]-f;}}
             for(int id:comp){if(count[id])d.atom(id)->p=d.atom(id)->p+(ringTargets[id]-d.atom(id)->p)*.5;else d.atom(id)->p=d.atom(id)->p+force[id];}}

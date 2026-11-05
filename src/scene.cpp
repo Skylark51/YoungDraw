@@ -38,7 +38,10 @@ Scene makeScene(const Document& d,const Measure& measure){
     Scene s;std::map<int,Rect> boxes;std::vector<Primitive> labels;
     int owner=0;std::string strokeColor="#000000"; auto line=[&](Vec a,Vec b,double w,int dash=0){Primitive p;p.points={a,b};p.width=w;p.dash=dash;p.owner=owner;p.color=strokeColor;s.items.push_back(p);};
     for(auto& a:d.atoms){
-        Style atomStyle=d.style;atomStyle.fontSize*=a.drawingScale;atomStyle.margin*=a.drawingScale;
+        Style atomStyle=d.style;
+        atomStyle.fontSize=a.labelSize.value_or(d.style.fontSize)*a.drawingScale;
+        atomStyle.margin=a.labelMargin.value_or(d.style.margin)*a.drawingScale;
+        atomStyle.labelFace=a.labelFace.value_or(d.style.labelFace);
         owner=a.id; bool isolated=true;Vec neighbors;for(auto& b:d.bonds)if(b.a==a.id||b.b==a.id){isolated=false;neighbors=neighbors+d.atom(b.a==a.id?b.b:b.a)->p-a.p;}
         if(!a.labelRuns.empty()&&!a.label.empty()){
             Vec cursor=a.p+a.labelOffset;double base=atomStyle.fontSize*.91;double l=cursor.x,t=cursor.y,r=cursor.x,b=cursor.y;
@@ -67,8 +70,8 @@ Scene makeScene(const Document& d,const Measure& measure){
     }
     // Place charges and radical dots independently of custom or imported atom labels.
     for(const auto& a:d.atoms)if((a.charge&&!atomLabelHasCharge(a))||a.radical){
-        double fs=d.style.fontSize*a.drawingScale;auto box=boxes.at(a.id);
-        Primitive mark;mark.type=Primitive::Text;mark.owner=a.id;mark.textRole=13;mark.fontSize=fs*.7;mark.face=d.style.labelFace;mark.color=a.color;
+        double fs=a.labelSize.value_or(d.style.fontSize)*a.drawingScale;auto box=boxes.at(a.id);
+        Primitive mark;mark.type=Primitive::Text;mark.owner=a.id;mark.textRole=13;mark.fontSize=fs*.7;mark.face=a.labelFace.value_or(d.style.labelFace);mark.color=a.color;
         int charge=atomLabelHasCharge(a)?0:a.charge;
         mark.text=(std::abs(charge)>1?std::to_string(std::abs(charge)):"")+(charge>0?"+":charge<0?"\xe2\x88\x92":"")+(a.radical==1?"\xe2\x80\xa2\xe2\x80\xa2":a.radical==3?"\xe2\x80\xa2\xe2\x80\xa2":a.radical?"\xe2\x80\xa2":"");
         double width=textWidth(measure,mark.text,mark.fontSize,"Arial",mark.face),height=mark.fontSize;
@@ -89,7 +92,7 @@ Scene makeScene(const Document& d,const Measure& measure){
     }
     // Clip against ink spans, not the empty space underneath oxidation superscripts.
     std::map<int,std::vector<Rect>> inkBoxes;
-    for(auto& t:labels)if(t.type==Primitive::Text&&!t.points.empty()&&t.textRole!=13){double m=d.style.margin;inkBoxes[t.owner].push_back({t.points[0].x-m,t.points[0].y-m,textWidth(measure,t.text,t.fontSize,t.font,t.face)+2*m,t.fontSize+2*m});}
+    for(auto& t:labels)if(t.type==Primitive::Text&&!t.points.empty()&&t.textRole!=13){const auto& atom=*d.atom(t.owner);double m=atom.labelMargin.value_or(d.style.margin)*atom.drawingScale;inkBoxes[t.owner].push_back({t.points[0].x-m,t.points[0].y-m,textWidth(measure,t.text,t.fontSize,t.font,t.face)+2*m,t.fontSize+2*m});}
     auto clip=[&](int id,Vec from,Vec to){
         Vec v=to-from;double end=0;
         for(auto& r:inkBoxes[id]){
@@ -100,10 +103,13 @@ Scene makeScene(const Document& d,const Measure& measure){
     };
     std::vector<const Bond*> orderedBonds;for(auto& b:d.bonds)orderedBonds.push_back(&b);std::stable_sort(orderedBonds.begin(),orderedBonds.end(),[](const Bond* a,const Bond* b){return (a->color!="#000000")>(b->color!="#000000");});
     for(const auto* bond:orderedBonds){const auto& b=*bond;
-        Style bondStyle=d.style;bondStyle.lineWidth*=b.drawingScale;bondStyle.boldWidth*=b.drawingScale;bondStyle.bondLength*=b.drawingScale;bondStyle.hashSpacing*=b.drawingScale;
+        Style bondStyle=d.style;
+        bondStyle.lineWidth=b.lineWidth.value_or(d.style.lineWidth)*b.drawingScale;
+        bondStyle.boldWidth=b.boldWidth.value_or(d.style.boldWidth)*b.drawingScale;
+        bondStyle.hashSpacing=b.hashSpacing.value_or(d.style.hashSpacing)*b.drawingScale;
         owner=b.id;strokeColor=b.color;double bondWidth=b.customDisplay=="Bold"?bondStyle.boldWidth:bondStyle.lineWidth; Vec origA=d.atom(b.a)->p,origB=d.atom(b.b)->p,a=clip(b.a,origA,origB),z=clip(b.b,origB,origA),v=z-a;double len=v.length();
         if(len<.2 || (a-origA).length()+(z-origB).length()>=(origB-origA).length())continue;
-        Vec u=v*(1/len),n={-u.y,u.x};double gap=bondStyle.bondLength*bondStyle.bondSpacing;
+        Vec u=v*(1/len),n={-u.y,u.x};double gap=b.doubleGap.value_or(d.style.bondLength*d.style.bondSpacing)*b.drawingScale;
         // BoldWidth is the full width, also at the broad end of a wedge.
         // Keep short, label-clipped coordination bonds from becoming squat triangles.
         double wedgeWidth=std::min(bondStyle.boldWidth,len*.35);
@@ -237,23 +243,35 @@ Scene makeScene(const Document& d,const Measure& measure){
             addText("("+r.unit+")",{right+font,top-font*2},10*factor,"#000000",false);
         }
     }
-    // Axis captions accept x^{2}, H_{2} and Unicode scripts. Each run stays vector text.
-    auto axisText=[&](const std::string& value,Vec anchor,double size,const std::string& color,bool vertical,int role=0,int index=-1){
-        struct Run{std::string text;int script;};std::vector<Run> runs;std::string normal;
-        for(size_t i=0;i<value.size();){if((value[i]=='^'||value[i]=='_')&&i+1<value.size()&&value[i+1]=='{'){if(!normal.empty()){runs.push_back({normal,0});normal.clear();}int script=value[i]=='^'?1:-1;size_t end=value.find('}',i+2);if(end==std::string::npos){normal+=value.substr(i);break;}runs.push_back({value.substr(i+2,end-i-2),script});i=end+1;}else normal+=value[i++];}if(!normal.empty())runs.push_back({normal,0});
-        double total=0;for(auto& r:runs)total+=textWidth(measure,r.text,size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),"Arial",d.style.labelFace);double cursor=-total/2;
-        for(auto& r:runs){double fs=size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),offset=r.script==1?-size*.4:r.script==-1?size*.35:0;Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=r.text;for(unsigned char c:r.text)if(c>=0xe3)t.font="Malgun Gothic";t.fontSize=fs;t.face=d.style.labelFace;t.color=color;t.rotation=vertical?-90:0;t.points={vertical?anchor+Vec{offset,-cursor}:anchor+Vec{cursor,offset}};s.items.push_back(t);cursor+=textWidth(measure,r.text,fs,"Arial",t.face);}
-    };
-    auto scriptWidth=[&](const std::string& text,double size){
-        double width=0;for(size_t i=0;i<text.size();){
-            if((text[i]=='^'||text[i]=='_')&&i+1<text.size()&&text[i+1]=='{'){
-                size_t end=text.find('}',i+2);if(end!=std::string::npos){width+=textWidth(measure,text.substr(i+2,end-i-2),size*(text[i]=='^'?chemicalScriptScale(text.substr(i+2,end-i-2)):.7),"Arial",d.style.labelFace);i=end+1;continue;}
-            }
-            size_t end=i+1;while(end<text.size()&&!(end+1<text.size()&&(text[end]=='^'||text[end]=='_')&&text[end+1]=='{'))end++;
-            width+=textWidth(measure,text.substr(i,end-i),size,"Arial",d.style.labelFace);i=end;
-        }return width;
-    };
     for(auto& plot:d.plots){
+        size_t firstPlotItem=s.items.size();
+        int plotFace=plot.thinLines?(d.style.labelFace&~1):d.style.labelFace;
+        auto faceFor=[&](const std::string& value){
+            int face=plotFace;
+            for(size_t i=0;i<value.size();i++)if(value[i]=='S'&&(i==0||value[i-1]==' '||value[i-1]=='('||value[i-1]=='\n')){
+                size_t at=value.find_first_not_of(" \t",i+1);
+                if(at!=std::string::npos&&value[at]=='='){
+                    at=value.find_first_not_of(" \t",at+1);
+                    if(at!=std::string::npos&&((value[at]>='0'&&value[at]<='9')||value[at]=='X'||value[at]=='x'||value[at]=='?'))face|=2;
+                }
+            }return face;
+        };
+        // Axis captions accept x^{2}, H_{2} and Unicode scripts. Each run stays vector text.
+        auto axisText=[&](const std::string& value,Vec anchor,double size,const std::string& color,bool vertical,int role=0,int index=-1){
+            struct Run{std::string text;int script;};std::vector<Run> runs;std::string normal;
+            for(size_t i=0;i<value.size();){if((value[i]=='^'||value[i]=='_')&&i+1<value.size()&&value[i+1]=='{'){if(!normal.empty()){runs.push_back({normal,0});normal.clear();}int script=value[i]=='^'?1:-1;size_t end=value.find('}',i+2);if(end==std::string::npos){normal+=value.substr(i);break;}runs.push_back({value.substr(i+2,end-i-2),script});i=end+1;}else normal+=value[i++];}if(!normal.empty())runs.push_back({normal,0});
+            double total=0;for(auto& r:runs)total+=textWidth(measure,r.text,size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),"Arial",faceFor(value));double cursor=-total/2;
+            for(auto& r:runs){double fs=size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),offset=r.script==1?-size*.4:r.script==-1?size*.35:0;Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=r.text;for(unsigned char c:r.text)if(c>=0xe3)t.font="Malgun Gothic";t.fontSize=fs;t.face=faceFor(value);t.color=color;t.rotation=vertical?-90:0;t.points={vertical?anchor+Vec{offset,-cursor}:anchor+Vec{cursor,offset}};s.items.push_back(t);cursor+=textWidth(measure,r.text,fs,"Arial",t.face);}
+        };
+        auto scriptWidth=[&](const std::string& text,double size){
+            double width=0;for(size_t i=0;i<text.size();){
+                if((text[i]=='^'||text[i]=='_')&&i+1<text.size()&&text[i+1]=='{'){
+                    size_t end=text.find('}',i+2);if(end!=std::string::npos){width+=textWidth(measure,text.substr(i+2,end-i-2),size*(text[i]=='^'?chemicalScriptScale(text.substr(i+2,end-i-2)):.7),"Arial",faceFor(text));i=end+1;continue;}
+                }
+                size_t end=i+1;while(end<text.size()&&!(end+1<text.size()&&(text[end]=='^'||text[end]=='_')&&text[end+1]=='{'))end++;
+                width+=textWidth(measure,text.substr(i,end-i),size,"Arial",faceFor(text));i=end;
+            }return width;
+        };
         owner=plot.id;auto axis=energyAxis(plot);double low=axis.low,high=axis.high;
         double scale=std::clamp(std::sqrt(plot.width*plot.height/(460.*240.)),.8,2.);
         double tickFont=plot.tickFontSize>0?plot.tickFontSize:11.5*scale*std::pow(plot.axisScale,.2);
@@ -261,8 +279,8 @@ Scene makeScene(const Document& d,const Measure& measure){
         double axisFont=plot.axisFontSize>0?plot.axisFontSize:tickFont;
         double energyFont=plot.energyLabelFontSize>0?plot.energyLabelFontSize:tickFont;
         double valueFont=plot.valueFontSize>0?plot.valueFontSize:12.5*scale;
-        auto widthOf=[&](const std::string& text,double size){return textWidth(measure,text,size,"Arial",d.style.labelFace);};
-        std::string yCaption=plot.yLabel+(plot.unit.empty()?"":" ("+plot.unit+")");
+        auto widthOf=[&](const std::string& text,double size){return textWidth(measure,text,size,"Arial",faceFor(text));};
+        std::string yCaption=plot.yLabel+(plot.unit.empty()?"":" ( "+plot.unit+" )");
         // Requested sizes are upper bounds: shrink only when the physical graph cannot fit them.
         axisFont=std::min(axisFont,std::max(4.,(plot.width-114)/std::max(1.,widthOf(plot.xLabel,1))));
         tickFont=std::min(tickFont,std::max(4.,plot.height*.14));
@@ -318,7 +336,9 @@ Scene makeScene(const Document& d,const Measure& measure){
         double topY=plot.p.y+std::max(25.,valueFont*1.3+12),h=std::max(25.,y0-topY);topY=y0-h;
         energyFont=std::min(energyFont,std::max(4.,h*.95/std::max(1.,widthOf(yCaption,1))));
         auto plotText=[&](const std::string& text,Vec at,double size,const std::string& color="#000000",bool centered=false,int role=0,int index=-1){
-            addText(text,at,size*10/d.style.fontSize,color,centered,role,index);
+            Primitive item;item.type=Primitive::Text;item.owner=owner;item.textRole=role;item.textIndex=index;item.text=text;item.fontSize=size;item.face=faceFor(text);item.color=color;
+            for(unsigned char c:text)if(c>=0xe3)item.font="Malgun Gothic";
+            emitText(s.items,item,at,centered,measure);
         };
         auto overlaps=[](Rect a,Rect b,double pad=4.){return a.x<b.x+b.w+pad&&a.x+a.w+pad>b.x&&a.y<b.y+b.h+pad&&a.y+a.h+pad>b.y;};
         std::vector<Rect> external;
@@ -404,11 +424,11 @@ Scene makeScene(const Document& d,const Measure& measure){
         auto visible=[&](const EnergySeries& path,size_t i){return path.hasValue(i)&&path.values[i]>=low-1e-9&&path.values[i]<=high+1e-9;};
         std::vector<Vec> obstacles,levelObstacles;
         auto remember=[&](Vec a,Vec b){int samples=std::clamp(int(std::ceil((b-a).length()/3)),2,60);for(int j=0;j<=samples;j++){Vec pt=a+(b-a)*(double(j)/samples);if(pt.y>=topY&&pt.y<=y0)obstacles.push_back(pt);}};
-        auto segment=[&](Vec a,Vec b,const EnergySeries& path,int dash){
+        auto segment=[&](Vec a,Vec b,const EnergySeries& path,int dash,bool level=false){
             remember(a,b);double dy=b.y-a.y,t0=0,t1=1;
             if(std::abs(dy)<1e-12){if(a.y<topY||a.y>y0)return;}
             else{double u=(topY-a.y)/dy,v=(y0-a.y)/dy;if(u>v)std::swap(u,v);t0=std::max(0.,u);t1=std::min(1.,v);if(t0>t1)return;}
-            Primitive part;part.owner=owner;part.width=path.width;part.color=path.color;part.dash=dash;part.points={a+(b-a)*t0,a+(b-a)*t1};s.items.push_back(part);
+            Primitive part;part.owner=owner;part.width=path.width*(level&&plot.boldLevels&&plot.thinLines?2.:1.);part.color=path.color;part.dash=dash;part.points={a+(b-a)*t0,a+(b-a)*t1};s.items.push_back(part);
         };
         for(size_t pathIndex=0;pathIndex<paths.size();pathIndex++){const auto& basePath=paths[pathIndex];if(basePath.values.size()!=plot.states.size())continue;auto path=basePath;
             for(size_t i=0;i<path.values.size();i++){
@@ -419,7 +439,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                     Vec pt=a+Vec{edge*half,0};s.plotSnapPoints[owner].push_back({pt,100*(pt.x-x0)/w,int(i),int(pathIndex),edge});
                 }
                 if((plot.mode==2||plot.mode==3)&&visible(path,i)){
-                    segment(a-Vec{leftSpan[i],0},a+Vec{rightSpan[i],0},path,0);
+                    segment(a-Vec{leftSpan[i],0},a+Vec{rightSpan[i],0},path,0,true);
                     for(int j=0;j<=30;j++)levelObstacles.push_back(a+Vec{-half+2*half*j/30.,0});
                 }
                 if(i+1<path.values.size()&&path.hasValue(i+1)){
@@ -565,6 +585,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(caption.backing){Primitive backing;backing.type=Primitive::Box;backing.owner=owner;backing.color="#ffffff";backing.filled=true;backing.width=0;backing.points={{caption.box.x-1,caption.box.y-1},{caption.box.x+caption.box.w+1,caption.box.y+caption.box.h+1}};s.items.push_back(backing);}
             plotText(caption.text,{caption.box.x,caption.box.y},valueFont,caption.color,false,caption.path==0?8:0,int(caption.index));
         }
+        if(plot.thinLines)for(size_t i=firstPlotItem;i<s.items.size();i++)if(s.items[i].type!=Primitive::Text)s.items[i].width*=.5;
     }
     for(auto& reaction:d.reactions)for(auto& item:s.items)if(item.owner==reaction.id&&item.type==Primitive::Text){
         if(!reaction.textColor.empty())item.color=reaction.textColor;

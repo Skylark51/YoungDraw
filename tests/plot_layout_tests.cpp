@@ -16,6 +16,66 @@ static bool overlaps(Rect a,Rect b){return a.x<b.x+b.w-0.01&&a.x+a.w>b.x+0.01&&a
 static EnergyPlot sample(){EnergyPlot p;p.id=1;p.p={30,90};p.width=760;p.height=400;p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#167d9a",{0,37.2,17.7,27.3,-9.9},0,2},{"Path 2","#b44758",{0,37.2,17.7,27.3,-9.9},1,2}};return p;}
 int main(){try{
     {
+        auto p=sample();p.series.resize(1);p.series[0].values={0,0,10,5,5};p.series[0].dash=1;p.thinLines=true;
+        Document d;d.plots={p};
+        for(int mode:{0,1,2,3}){
+            d.plots[0].mode=mode;d.plots[0].boldLevels=false;auto normal=makeScene(d,measure);
+            d.plots[0].boldLevels=true;auto emphasis=makeScene(d,measure);
+            check(normal.items.size()==emphasis.items.size(),"level emphasis preserves graph elements and layout");
+            int changed=0;
+            for(size_t i=0;i<normal.items.size();i++){
+                auto& a=normal.items[i];auto& b=emphasis.items[i];
+                check(a.face==b.face&&a.text==b.text&&a.dash==b.dash&&a.color==b.color&&a.points.size()==b.points.size(),"level emphasis preserves text weight, dashes and colors");
+                for(size_t j=0;j<a.points.size();j++)check((a.points[j]-b.points[j]).length()<1e-9,"level emphasis never moves a line or label");
+                if(a.width!=b.width){
+                    check(b.type==Primitive::Line&&b.dash==0&&b.points.size()==2&&std::abs(b.points[0].y-b.points[1].y)<1e-9&&std::abs(b.width-p.series[0].width)<1e-9,"only plateau strokes regain the original bold width");changed++;
+                }
+            }
+            check(changed==(mode>=2?5:0),"only level graph modes emphasize plateaus; equal-energy connecting segments stay thin");
+        }
+        check(fromNative(toNative(d)).plots[0].boldLevels,"level emphasis survives native save");
+#ifdef TEST_CDXML
+        check(fromCdxml(toCdxml(d)).plots[0].boldLevels,"level emphasis survives CDXML save");
+#endif
+        check(publicationPlot(d.plots[0]).boldLevels,"publication fitting keeps level emphasis");
+        d.plots[0].thinLines=false;auto bold=makeScene(d,measure);d.plots[0].boldLevels=false;auto standard=makeScene(d,measure);
+        for(size_t i=0;i<bold.items.size();i++)check(bold.items[i].width==standard.items[i].width,"level emphasis never doubles an already bold graph");
+    }
+
+    {
+        auto p=sample();p.series[0].name="S = 0";p.series[1].name="S=1";p.stages={{"Reaction",0,100}};
+        Document d;d.plots={p};auto original=toNative(d);
+        for(int mode:{0,1,2,3}){
+            d.plots[0].mode=mode;d.plots[0].thinLines=false;auto bold=makeScene(d,measure);
+            d.plots[0].thinLines=true;auto thin=makeScene(d,measure);
+            int axes=0,profiles=0,values=0,spins=0;
+            for(auto& item:thin.items)if(item.owner==p.id){
+                if(item.type==Primitive::Text){
+                    check(!(item.face&1),"thin plot makes axes, titles, legends, states and data labels regular weight");
+                    if(item.textRole==8)values++;
+                    if(item.text=="S = 0"||item.text=="S=1"){check(item.face&2,"thin multiplicity legends are italic");spins++;}
+                }else if(item.type==Primitive::Line||item.type==Primitive::Bezier){
+                    bool matched=false;
+                    for(auto& other:bold.items)if(other.type==item.type&&other.color==item.color&&other.textRole==item.textRole&&other.dash==item.dash&&std::abs(other.width-2*item.width)<1e-9){matched=true;break;}
+                    check(matched,"thin axes, ticks, legend samples, plateaus and connectors use half the original stroke");
+                    if(item.color=="#000000")axes++;else profiles++;
+                }
+            }
+            check(axes&&profiles&&values&&spins==2,"all plot elements participate in the thickness preset");
+            for(auto& item:bold.items)if(item.type==Primitive::Text){check(item.face&1,"existing bold plot typography is preserved");if(item.text=="S = 0"||item.text=="S=1")check(item.face&2,"bold multiplicity legends are italic too");}
+        }
+        auto thinData=toNative(d);check(fromNative(thinData).plots[0].thinLines,"thin preset survives native save");
+#ifdef TEST_CDXML
+        check(fromCdxml(toCdxml(d)).plots[0].thinLines,"thin preset survives CDXML save");
+#endif
+        check(publicationPlot(d.plots[0]).thinLines,"publication layout retains the chosen thickness");
+        d.plots[0].thinLines=false;d.plots[0].mode=p.mode;check(toNative(d)==original,"switching back restores saved path widths and all original data");
+        auto legacy=original;auto flag=legacy.find(" thinLines=\"0\"");check(flag!=std::string::npos,"serialized graph includes thickness selection");legacy.erase(flag,14);
+        check(!fromNative(legacy).plots[0].thinLines,"older files default to the existing bold preset");
+        d.plots[0].thinLines=true;auto svg=toSvg(makeScene(d,measure));check(svg.find("font-style=\"italic\"")!=std::string::npos&&svg.find("font-weight=\"bold\"")==std::string::npos,"SVG exports regular weight and italic multiplicity");
+    }
+
+    {
         auto p=sample();p.series.resize(1);auto& path=p.series[0];
         path.levelColors={"","#ff0000","#ff0000"};path.segmentColors={"","#008800"};
         Document d;d.plots={p};auto sc=makeScene(d,measure);
@@ -217,7 +277,7 @@ int main(){try{
         for(auto& item:scene.items)if(item.type==Primitive::Text){
             if(item.textRole==6)stateSize=item.fontSize;
             if(item.text==fitted.xLabel)xCaptionSize=item.fontSize;
-            if(item.text==fitted.yLabel+" ("+fitted.unit+")")yCaptionSize=item.fontSize;
+            if(item.text==fitted.yLabel+" ( "+fitted.unit+" )")yCaptionSize=item.fontSize;
             if(item.text=="0")tickSize=item.fontSize;
         }
         check(stateSize>0&&std::abs(xCaptionSize-stateSize)<1e-6&&std::abs(yCaptionSize-stateSize)<1e-6&&std::abs(tickSize-stateSize)<1e-6,"automatic axis captions match tick and state-name sizes");
