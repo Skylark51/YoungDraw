@@ -497,7 +497,7 @@ int main(int argc,char** argv){
             doc={};selection.clear();history.clear();dirty=false;
         }
         {
-            doc=mechanismDemo();history.clear();tool=Select;selection={doc.reactions[0].id};fit();
+            doc=mechanismDemo();history.clear();tool=Text;selection={doc.reactions[0].id};fit();
             auto original=toNative(doc);int id=selection[0];
             beginInline(InlineTarget{id,1,0,reactionSlot(doc.reactions[0],0),14},reactionSlot(doc.reactions[0],0));
             Bitmap toolbar(ww,wh,PixelFormat32bppARGB);{Graphics graphics(&toolbar);HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);}
@@ -681,10 +681,12 @@ int main(int argc,char** argv){
             auto saved=doc;doc=mechanismDemo();auto rows=mechanismRows(doc.reactions[0]);rows[1][1]="TS1 / Nucleophilic attack";rows[1][2]="0 / 1 / 2";rows[1][3]="0.0 / 8.7 / 13.4";rows[0][2]="0 / 2";rows[0][3]="-3.0 / 4.4";
             doc.reactions[0]=mechanismGridData(doc.reactions[0],rows);
             int reactionId=doc.reactions[0].id;
+            auto previousTool=tool;tool=Text;
             auto oldName=doc.reactions[0].slots[0].label;beginInline(InlineTarget{reactionId,1,0,reactionSlot(doc.reactions[0],0),14},{});
             SetWindowTextW(inlineEdit,L"H2");SendMessageW(inlineEdit,EM_SETSEL,1,2);
             BYTE previousKeys[256]{};GetKeyboardState(previousKeys);BYTE scriptKeys[256];memcpy(scriptKeys,previousKeys,sizeof(scriptKeys));scriptKeys[VK_CONTROL]=0x80;scriptKeys[VK_SHIFT]=0;SetKeyboardState(scriptKeys);
             SendMessageW(inlineEdit,WM_KEYDOWN,VK_OEM_PLUS,0);SetKeyboardState(previousKeys);check(finishInline(true)&&doc.reactions[0].slots[0].label=="H_{2}","Word subscript shortcut applies to inline mechanism text");doc.reactions[0].slots[0].label=oldName;
+            tool=previousTool;
             check(inlineValue({reactionId,11,0})=="TS1"&&inlineValue({reactionId,2,0})=="Nucleophilic attack","inline editing reads the name and description independently");
             setInlineValue({reactionId,11,0},"TS1 edited");check(transitionCaption(doc.reactions[0].above[0]).description=="Nucleophilic attack","editing TS name preserves arrow description");
             setInlineValue({reactionId,2,0},"Attack");check(transitionCaption(doc.reactions[0].above[0]).name=="TS1 edited","editing arrow description preserves TS name");
