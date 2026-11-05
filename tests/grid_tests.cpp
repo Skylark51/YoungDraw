@@ -36,6 +36,20 @@ int main(){try{
         ui::selectCell(grid,0,1);ui::editCell(grid);SetWindowTextW(grid.edit,L"I2");SendMessageW(grid.edit,EM_SETSEL,1,2);
         SendMessageW(hwnd,WM_COMMAND,25,0);check(ui::value(grid.edit)==L"I_{2}","name subscript button formats selected characters");
         SendMessageW(hwnd,WM_COMMAND,26,0);check(ui::value(grid.edit)==L"I^{2}","name superscript button switches selected script");
+        SetWindowTextW(grid.edit,L"Fe^{III}");SendMessageW(grid.edit,EM_SETSEL,8,8);
+        BYTE beforeAlt[256]{};GetKeyboardState(beforeAlt);BYTE altKeys[256];memcpy(altKeys,beforeAlt,sizeof(altKeys));altKeys[VK_MENU]=0x80;SetKeyboardState(altKeys);
+        SendMessageW(grid.edit,WM_SYSKEYDOWN,VK_RETURN,0);SendMessageW(grid.edit,WM_SYSCHAR,VK_RETURN,0);SetKeyboardState(beforeAlt);
+        SendMessageW(grid.edit,EM_REPLACESEL,TRUE,(LPARAM)L"Catalyst");
+        check(grid.edit&&grid.row==0&&ui::value(grid.edit)==L"Fe^{III}\r\nCatalyst","Alt+Enter inserts exactly one newline without leaving the stage name");
+        ui::commit(grid);check(applied.slots[0].label=="Fe^{III}\r\nCatalyst","multiline scripted stage name applies");
+        auto originalName=grid.rows[2][1];ui::copy(grid);ui::selectCell(grid,2,1);ui::paste(grid);
+        check(grid.rows[2][1]==grid.rows[0][1]&&grid.rows.size()==5,"copy and paste keeps a multiline name in one cell");
+        ui::editCell(grid);SetWindowTextW(grid.edit,ui::wide(originalName).c_str());ui::commit(grid);
+        ui::selectCell(grid,0,1);
+        ui::editCell(grid);check(SendMessageW(grid.edit,EM_GETLINECOUNT,0,0)==2,"stage name reopens with both lines");
+        RECT rowRect{};ListView_GetSubItemRect(grid.list,0,2,LVIR_BOUNDS,&rowRect);check(rowRect.bottom-rowRect.top>=40,"table rows show multiline names");
+        auto multilineDoc=mechanismDemo();multilineDoc.reactions[0]=applied;
+        for(auto restored:{fromNative(toNative(multilineDoc)),fromCdxml(toCdxml(multilineDoc))})check(restored.reactions[0].slots[0].label==applied.slots[0].label,"scripted multiline names survive save and reopen");
         SetWindowTextW(grid.edit,L"Reactant");ui::commit(grid);
         ui::selectCell(grid,1,2);ui::editCell(grid);SetWindowTextW(grid.edit,L"0 / 1 / 2");ui::moveCell(grid,VK_TAB,false);
         ui::editCell(grid);SetWindowTextW(grid.edit,L"0.0 / 8.7 / 13.4");ui::commit(grid);
@@ -96,6 +110,17 @@ int main(){try{
             check(bool(table)==accept&&IsWindowEnabled(parent),"modal result and owner input are restored");
         }
         DestroyWindow(parent);
+    }
+    {
+        ui::Grid grid;grid.scripts=true;grid.scriptColumn=4;
+        grid.columns={L"Type",L"Number",L"From",L"To",L"Name",L"Energy"};grid.rows={{"Structure","1","","","FeIII","0"}};
+        auto hwnd=CreateWindowExW(0,L"YoungDrawGridRegression",L"Branch",WS_OVERLAPPED,0,0,990,640,nullptr,nullptr,GetModuleHandleW(nullptr),&grid);
+        ui::selectCell(grid,0,4);ui::editCell(grid);SendMessageW(grid.edit,EM_SETSEL,2,5);
+        SendMessageW(grid.edit,WM_KEYDOWN,VK_F10,0);check(ui::value(grid.edit)==L"Fe^{III}","branched mechanism shortcut formats the name column");
+        ui::selectCell(grid,0,0);SendMessageW(hwnd,WM_COMMAND,25,0);
+        check(grid.col==4&&grid.edit,"branch script button targets the name instead of row type");
+        ui::commit(grid);check(grid.rows[0][0]=="Structure","branch formatting preserves row type");
+        DestroyWindow(hwnd);DeleteObject(grid.font);
     }
     EnergyPlot original;original.id=1;original.states={{"R",0,{},{}},{"TS",20,{},{}},{"P",-10,{},{}}};
     original.series={{"Path 1","#167d9a",{0,20,-10},0,2},{"Path 2","#b44758",{0,22,-12},1,2}};

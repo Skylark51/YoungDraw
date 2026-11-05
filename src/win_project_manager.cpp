@@ -4,6 +4,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <windowsx.h>
 #include <algorithm>
 #include <memory>
@@ -28,7 +29,8 @@ struct Manager {
         RECT r;GetClientRect(window,&r);int w=r.right,h=r.bottom,side=std::max(280,w-750);
         MoveWindow(GetDlgItem(window,1),16,12,210,24,TRUE);
         MoveWindow(GetDlgItem(window,10),16,44,64,30,TRUE);MoveWindow(GetDlgItem(window,11),84,44,68,30,TRUE);MoveWindow(GetDlgItem(window,12),156,44,70,30,TRUE);
-        MoveWindow(projects,16,84,210,h-132,TRUE);
+        MoveWindow(GetDlgItem(window,13),16,80,76,30,TRUE);MoveWindow(GetDlgItem(window,14),96,80,76,30,TRUE);MoveWindow(GetDlgItem(window,15),176,80,50,30,TRUE);
+        MoveWindow(projects,16,120,210,h-168,TRUE);
         int x=242;MoveWindow(heading,x,12,w-x-16,24,TRUE);
         for(int i=0;i<4;i++)MoveWindow(GetDlgItem(window,20+i),x+i*112,44,106,30,TRUE);
         for(int i=0;i<4;i++)MoveWindow(GetDlgItem(window,24+i),x+i*112,80,106,30,TRUE);
@@ -56,6 +58,7 @@ struct Manager {
         SetWindowTextW(heading,p?p->name.c_str():L"프로젝트를 만들거나 선택하세요");
         if(p)for(size_t i=0;i<p->items.size();i++){auto& entry=p->items[i];LVITEMW row{};row.mask=LVIF_TEXT;row.iItem=int(i);row.pszText=entry.name.data();ListView_InsertItem(items,&row);auto ext=fs::path(entry.file).extension().wstring();ListView_SetItemText(items,int(i),1,ext.data());}
         for(int id=20;id<=27;id++)EnableWindow(GetDlgItem(window,id),p!=nullptr);
+        EnableWindow(GetDlgItem(window,14),p!=nullptr);
         item=-1;noteDirty=false;refreshing=false;selectItem(index);
         if(p&&index>=0&&index<int(p->items.size())){ListView_SetItemState(items,index,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);ListView_EnsureVisible(items,index,FALSE);}
     }
@@ -90,7 +93,23 @@ struct Manager {
     void action(int id){
         saveNote();auto p=project();
         if(id==10){auto value=edit(L"새 프로젝트",L"새 프로젝트");if(!value)return;auto created=Project::create(root(),ui::wide((*value)[0]));created.note=ui::wide((*value)[1]);created.save();all.push_back(created);refreshProjects(int(all.size()-1));return;}
+        if(id==13){
+            wchar_t path[32768]{};OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=window;f.lpstrFile=path;f.nMaxFile=32768;
+            f.lpstrTitle=L"이전 프로젝트 폴더 안의 project.ydproject를 선택하세요";
+            f.lpstrFilter=L"YoungDraw 프로젝트 정보\0*.ydproject\0\0";f.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+            if(!GetOpenFileNameW(&f)){if(CommDlgExtendedError())throw std::runtime_error("프로젝트 선택 창을 열 수 없습니다.");return;}
+            auto imported=Project::importFrom(path,root());all.push_back(std::move(imported));refreshProjects(int(all.size()-1));
+            SetWindowTextW(hint,L"이전 프로젝트를 이 PC에 복사했습니다. 항목을 선택하고 열기 / 편집을 누르세요.");return;
+        }
+        if(id==15){fs::create_directories(root());auto folder=p?p->folder:root();if(INT_PTR(ShellExecuteW(window,L"open",folder.c_str(),nullptr,nullptr,SW_SHOWNORMAL))<=32)throw std::runtime_error("저장 폴더를 열 수 없습니다.");return;}
         if(!p)return;
+        if(id==14){
+            BROWSEINFOW info{};info.hwndOwner=window;info.lpszTitle=L"프로젝트를 복사할 폴더를 선택하세요 (USB 또는 공유 폴더)";info.ulFlags=BIF_RETURNONLYFSDIRS|BIF_NEWDIALOGSTYLE;
+            auto chosen=SHBrowseForFolderW(&info);if(!chosen)return;wchar_t path[MAX_PATH]{};BOOL ok=SHGetPathFromIDListW(chosen,path);CoTaskMemFree(chosen);if(!ok)throw std::runtime_error("파일 시스템 폴더를 선택하세요.");
+            if(callbacks.saveForExport&&!callbacks.saveForExport(p->folder))return;
+            auto exported=p->copyTo(path);
+            MessageBoxW(window,(L"프로젝트를 복사했습니다.\n\n"+exported.folder.wstring()+L"\n\n이 폴더 전체를 다른 PC로 옮긴 뒤, 내 프로젝트 → 불러오기에서 project.ydproject를 선택하세요.").c_str(),L"프로젝트 내보내기",MB_OK|MB_ICONINFORMATION);return;
+        }
         if(id==11){auto value=edit(L"프로젝트 이름·노트",p->name,p->note);if(!value)return;auto before=*p;p->name=ui::wide((*value)[0]);p->note=ui::wide((*value)[1]);try{p->save();}catch(...){*p=before;throw;}refreshProjects(selected);return;}
         if(id==12){if(MessageBoxW(window,L"이 프로젝트를 삭제하시겠습니까?\n파일은 프로젝트 휴지통에 보관됩니다.",L"프로젝트 삭제",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
             std::vector<std::wstring> paths;for(auto& entry:p->items)paths.push_back((p->folder/entry.file).wstring());if(!callbacks.close(paths))return;
@@ -134,13 +153,14 @@ struct Manager {
                 self->control(L"STATIC",L"내 프로젝트",1,0);self->control(L"STATIC",L"파일 노트 (항목 전환·닫을 때 자동 저장)",2,0);
                 self->heading=self->control(L"STATIC",L"",3,SS_ENDELLIPSIS);
                 const wchar_t* labels[]={L"새로",L"정보",L"삭제"};for(int i=0;i<3;i++)self->control(L"BUTTON",labels[i],10+i,WS_TABSTOP);
+                self->control(L"BUTTON",L"불러오기",13,WS_TABSTOP);self->control(L"BUTTON",L"내보내기",14,WS_TABSTOP);self->control(L"BUTTON",L"폴더",15,WS_TABSTOP);
                 const wchar_t* actions[]={L"새 구조",L"파일 추가",L"현재 문서 추가",L"열기 / 편집",L"이름·노트",L"항목 삭제",L"위로 ↑",L"아래로 ↓",L"노트 저장"};for(int i=0;i<9;i++)self->control(L"BUTTON",actions[i],20+i,WS_TABSTOP);
                 self->projects=self->control(L"LISTBOX",L"",40,WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_TABSTOP);
                 self->items=self->control(WC_LISTVIEWW,L"",41,WS_BORDER|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS|WS_TABSTOP);
                 ListView_SetExtendedListViewStyle(self->items,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_INFOTIP);
                 LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=260;col.pszText=const_cast<wchar_t*>(L"이름 · 드래그로 순서 변경");ListView_InsertColumn(self->items,0,&col);col.cx=90;col.pszText=const_cast<wchar_t*>(L"형식");ListView_InsertColumn(self->items,1,&col);
                 self->note=self->control(L"EDIT",L"",42,WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_TABSTOP);SendMessageW(self->note,EM_SETLIMITTEXT,1024*1024,0);
-                self->hint=self->control(L"STATIC",L"더블클릭: 열기 · 드래그: 순서 변경 · 탐색기에서 파일을 끌어 넣어 추가",43,SS_ENDELLIPSIS);
+                self->hint=self->control(L"STATIC",L"다른 PC의 프로젝트: 폴더 전체를 옮긴 뒤 불러오기에서 project.ydproject 선택",43,SS_ENDELLIPSIS);
                 DragAcceptFiles(h,TRUE);self->layout();self->load();return 0;}
             case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={1100,700};return 0;
             case WM_SIZE:self->layout();return 0;

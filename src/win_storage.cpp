@@ -4,7 +4,7 @@
 #include <stdexcept>
 
 namespace yd::storage {
-void writeAtomic(const std::wstring& path,const std::string& data) {
+void writeAtomic(const std::wstring& path,const std::string& data,bool replace) {
     if(data.size()>64u*1024u*1024u)
         throw std::runtime_error("프로젝트의 64 MB 제한을 초과했습니다. 삽입 이미지 크기를 줄이세요.");
 
@@ -39,7 +39,7 @@ void writeAtomic(const std::wstring& path,const std::string& data) {
         DeleteFileW(temp.c_str());
         throw std::runtime_error("파일을 저장할 수 없습니다.");
     }
-    if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){
+    if(!MoveFileExW(temp.c_str(),path.c_str(),(replace?MOVEFILE_REPLACE_EXISTING:0)|MOVEFILE_WRITE_THROUGH)){
         DeleteFileW(temp.c_str());
         throw std::runtime_error("저장 파일을 교체할 수 없습니다. 기존 문서는 보존되었습니다.");
     }
