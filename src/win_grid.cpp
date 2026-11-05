@@ -1,5 +1,6 @@
 #include "win_dialogs.h"
 #include "win_ui.h"
+#include "win_dialog_style.h"
 #include "win_scripts.h"
 #include <commctrl.h>
 #include <algorithm>
@@ -8,7 +9,10 @@ namespace ui {
 namespace {
 constexpr UINT CommitFocus=WM_APP+41;
 struct Grid {
+    DialogColors colors;
     Table rows,original; std::vector<std::wstring> columns; TablePreview preview;std::wstring hint;
+    TableCellError cellError;
+    std::set<std::pair<int,int>> invalidCells;
     HWND win=nullptr,list=nullptr,edit=nullptr,error=nullptr,apply=nullptr; HFONT font=nullptr;
     int row=0,col=0,anchorRow=0,anchorCol=0,scriptColumn=-1;
     HIMAGELIST rowHeight=nullptr;
@@ -27,7 +31,19 @@ Table populatedRows(const Grid& g){
     return rows;
 }
 bool validate(Grid& g){
-    std::wstring error;try{if(g.preview)error=g.preview(g.stages?populatedRows(g):g.rows);}catch(const std::exception& e){error=wide(e.what());}
+    std::wstring error;
+    g.invalidCells.clear();
+    if(g.cellError){
+        for(int r=0;r<int(g.rows.size());r++)for(int c=0;c<int(g.columns.size());c++){
+            auto message=g.cellError(c,g.rows[r][c]);
+            if(message.empty())continue;
+            g.invalidCells.emplace(r,c);
+            if(error.empty())error=std::to_wstring(r+1)+L"행 · "+g.columns[c]+L": "+message;
+        }
+        if(g.invalidCells.size()>1)error+=L" ("+std::to_wstring(g.invalidCells.size())+L"개 셀)";
+        InvalidateRect(g.list,nullptr,FALSE);
+    }
+    if(error.empty())try{if(g.preview)error=g.preview(g.stages?populatedRows(g):g.rows);}catch(const std::exception& e){error=wide(e.what());}
     if(error.empty()&&!g.hint.empty()){SetWindowTextW(g.error,(g.hint+L"\nAlt+Enter: 셀 안 줄바꿈 · Enter: 다음 행 · Tab: 다음 셀 · Ctrl+C/V: 복사/붙여넣기 · Ctrl+D: 행 복제 · 적용: 현재 입력까지 저장").c_str());return true;}
     SetWindowTextW(g.error,error.empty()?L"입력: 바로 타이핑 / F2 / 더블클릭 · Shift+방향키: 범위 선택 · Ctrl+C/V: 복사/붙여넣기\nAlt+Enter: 셀 안 줄바꿈 · Tab: 다음 셀 · Enter: 아래 셀 · Esc: 입력 취소 · Ctrl+D: 행 복제":error.c_str());
     // Never disable Apply from stale validation: the active editor may fix the error.
@@ -65,7 +81,7 @@ void commit(Grid& g){
     }
 }
 void selectCell(Grid& g,int row,int col,bool extend=false){
-    if(g.rows.empty())return;
+    if(g.rows.empty()){g.row=g.col=g.anchorRow=g.anchorCol=0;return;}
     commit(g);g.row=std::clamp(row,0,int(g.rows.size())-1);g.col=std::clamp(col,0,int(g.columns.size())-1);
     if(!extend){g.anchorRow=g.row;g.anchorCol=g.col;}
     ListView_SetItemState(g.list,g.row,LVIS_FOCUSED,LVIS_FOCUSED);ListView_EnsureVisible(g.list,g.row,FALSE);
@@ -81,15 +97,15 @@ std::wstring clipboard(Grid& g){
 void copy(Grid& g){
     if(g.rows.empty())return;commit(g);std::wstring data;
     for(int r=std::min(g.row,g.anchorRow);r<=std::max(g.row,g.anchorRow);r++){
-        if(!data.empty())data+=L"\r\n";
+        if(r>std::min(g.row,g.anchorRow))data+=L"\r\n";
         for(int c=std::min(g.col,g.anchorCol);c<=std::max(g.col,g.anchorCol);c++){if(c>std::min(g.col,g.anchorCol))data+=L'\t';auto cell=wide(g.rows[r][c]);
             if(cell.find_first_of(L"\t\r\n\"")!=std::wstring::npos){data+=L'"';for(auto ch:cell){data+=ch;if(ch==L'"')data+=ch;}data+=L'"';}else data+=cell;}
     }
     if(!OpenClipboard(g.win))return;HGLOBAL h=GlobalAlloc(GMEM_MOVEABLE,(data.size()+1)*sizeof(wchar_t));
     if(h){auto p=GlobalLock(h);if(p){memcpy(p,data.c_str(),(data.size()+1)*sizeof(wchar_t));GlobalUnlock(h);EmptyClipboard();if(!SetClipboardData(CF_UNICODETEXT,h))GlobalFree(h);}else GlobalFree(h);}CloseClipboard();
 }
-void paste(Grid& g){
-    auto data=clipboard(g);if(data.empty())return;commit(g);
+void paste(Grid& g,const std::wstring& data){
+    if(data.empty())return;
     int startRow=g.row,startCol=g.col,r=startRow,lastCol=startCol;
     // Excel quotes cells containing line breaks and doubles embedded quotes.
     std::vector<std::vector<std::wstring>> rows;std::vector<std::wstring> row;std::wstring cell;bool quoted=false,atStart=true;
@@ -102,14 +118,23 @@ void paste(Grid& g){
             if(ch!=L'\t'){rows.push_back(row);row.clear();if(ch==L'\r'&&pos+1<data.size()&&data[pos+1]==L'\n')pos++;}
         }else{cell+=ch;atStart=false;}
     }
-    if(!cell.empty()||!row.empty()||data.back()==L'\t'){row.push_back(cell);rows.push_back(row);}
+    if(!atStart||!row.empty()){row.push_back(cell);rows.push_back(row);}
+    if(quoted){SetWindowTextW(g.error,L"붙여넣을 범위에 닫히지 않은 따옴표가 있습니다.");return;}
+    if(rows.size()>size_t(100-startRow)||std::any_of(rows.begin(),rows.end(),[&](const auto& cells){
+        return cells.size()>g.columns.size()-startCol;
+    })){
+        SetWindowTextW(g.error,L"붙여넣을 범위가 표를 벗어납니다. 시작 셀과 열 개수를 확인하세요. (최대 100행)");
+        return;
+    }
+    commit(g);
     for(auto& cells:rows){
-        if(r>=100)break;if(size_t(r)>=g.rows.size())g.rows.resize(r+1,std::vector<std::string>(g.columns.size()));
-        int c=startCol;for(auto& text:cells){if(size_t(c)>=g.columns.size())break;g.rows[r][c++]=utf8(text);}
+        if(size_t(r)>=g.rows.size())g.rows.resize(r+1,std::vector<std::string>(g.columns.size()));
+        int c=startCol;for(auto& text:cells)g.rows[r][c++]=utf8(text);
         lastCol=std::max(lastCol,c-1);r++;
     }
     refresh(g);validate(g);selectCell(g,r-1,lastCol);g.anchorRow=startRow;g.anchorCol=startCol;InvalidateRect(g.list,nullptr,FALSE);
 }
+void paste(Grid& g){paste(g,clipboard(g));}
 void insertStage(Grid& g,bool copy){
     commit(g);if(g.rows.empty()||g.rows.size()>57)return;
     int begin=g.row/2*2;bool hasTs=begin+1<int(g.rows.size());
@@ -135,7 +160,11 @@ void duplicate(Grid& g){
 void editCell(Grid& g,bool replace=false);
 void moveCell(Grid& g,WPARAM key,bool shift){
     int r=g.row,c=g.col;commit(g);
-    if(key==VK_TAB){c+=shift?-1:1;if(c<0){c=int(g.columns.size())-1;r--;}if(c==int(g.columns.size())){c=0;r++;}}
+    if(key==VK_TAB){
+        c+=shift?-1:1;
+        if(c<0){if(r==0)return;c=int(g.columns.size())-1;r--;}
+        if(c==int(g.columns.size())){if(r+1>=100)return;c=0;r++;}
+    }
     else if(key==VK_RETURN)r+=shift?-1:1;
     else if(key==VK_UP)r--;else if(key==VK_DOWN)r++;else if(key==VK_LEFT)c--;else if(key==VK_RIGHT)c++;
     if(g.stages&&r==int(g.rows.size())&&(key==VK_RETURN||key==VK_TAB)){
@@ -157,7 +186,7 @@ LRESULT CALLBACK editProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_
     if(msg==WM_KEYDOWN&&!g.composing&&wp!=VK_PROCESSKEY){
         bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0,shift=(GetKeyState(VK_SHIFT)&0x8000)!=0;
         if(ctrl&&wp=='A'){SendMessageW(hwnd,EM_SETSEL,0,-1);return 0;}
-        if(ctrl&&wp=='V'){auto data=clipboard(g);if(data.find_first_of(L"\t\r\n")!=std::wstring::npos){paste(g);return 0;}}
+        if(ctrl&&wp=='V'){auto data=clipboard(g);if(data.find_first_of(L"\t\r\n")!=std::wstring::npos){paste(g,data);return 0;}}
         if((wp==VK_UP||wp==VK_DOWN)&&SendMessageW(hwnd,EM_GETLINECOUNT,0,0)>1)return DefSubclassProc(hwnd,msg,wp,lp);
         if(wp==VK_TAB||wp==VK_RETURN||wp==VK_UP||wp==VK_DOWN){moveCell(g,wp,shift);return 0;}
         if(wp==VK_ESCAPE){auto editor=g.edit;g.edit=nullptr;DestroyWindow(editor);SetFocus(g.list);return 0;}
@@ -174,6 +203,27 @@ void editCell(Grid& g,bool replace){
 }
 LRESULT CALLBACK listProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR ref){
     auto& g=*reinterpret_cast<Grid*>(ref);bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0,shift=(GetKeyState(VK_SHIFT)&0x8000)!=0;
+    if(msg==WM_NOTIFY){
+        const auto& header=*reinterpret_cast<NMHDR*>(lp);
+        if(header.hwndFrom==ListView_GetHeader(hwnd)&&header.code==NM_CUSTOMDRAW){
+            auto& draw=*reinterpret_cast<NMCUSTOMDRAW*>(lp);
+            if(draw.dwDrawStage==CDDS_PREPAINT)return CDRF_NOTIFYITEMDRAW;
+            if(draw.dwDrawStage==CDDS_ITEMPREPAINT){
+                wchar_t title[512]{};
+                HDITEMW column{};column.mask=HDI_TEXT;column.pszText=title;column.cchTextMax=512;
+                SendMessageW(header.hwndFrom,HDM_GETITEMW,draw.dwItemSpec,reinterpret_cast<LPARAM>(&column));
+                RECT cell=draw.rc;
+                FillRect(draw.hdc,&cell,g.colors.panel);
+                SetDCBrushColor(draw.hdc,colorRef(g.colors.palette.edge));
+                FrameRect(draw.hdc,&cell,(HBRUSH)GetStockObject(DC_BRUSH));
+                cell.left+=6;cell.right-=6;
+                SetTextColor(draw.hdc,colorRef(g.colors.palette.text));SetBkMode(draw.hdc,TRANSPARENT);
+                DrawTextW(draw.hdc,title,-1,&cell,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);
+                return CDRF_SKIPDEFAULT;
+            }
+        }
+    }
+    if(msg==WM_CTLCOLOREDIT)return g.colors.control(msg,(HDC)wp);
     if(msg==WM_GETDLGCODE)return DLGC_WANTALLKEYS;
     if(msg==WM_COMMAND&&HIWORD(wp)==EN_CHANGE&&(HWND)lp==g.edit){sizeEditor(g);return 0;}
     if((msg==WM_SYSKEYDOWN||msg==WM_KEYDOWN)&&wp==VK_RETURN&&(GetKeyState(VK_MENU)&0x8000)){editCell(g);if(g.edit)multilineShortcut(g.edit,msg,wp);return 0;}
@@ -205,13 +255,19 @@ LRESULT CALLBACK listProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_
 }
 bool apply(Grid& g){
     commit(g);
-    if(!validate(g))return false;
+    if(!validate(g)){
+        if(!g.invalidCells.empty()){
+            auto [row,col]=*g.invalidCells.begin();
+            selectCell(g,row,col);
+        }
+        return false;
+    }
     if(g.stages)g.rows=populatedRows(g);
     finish(g,true);return true;
 }
 void requestClose(Grid& g){
     commit(g);
-    if(populatedRows(g)==g.original){finish(g,false);return;}
+    if((g.stages?populatedRows(g):g.rows)==g.original){finish(g,false);return;}
     int choice=MessageBoxW(g.win,L"표에 적용하지 않은 입력이 있습니다. 적용하고 닫을까요?\n\n예: 적용 후 닫기\n아니요: 입력 버리기\n취소: 표로 돌아가기",L"입력 내용 보관",MB_YESNOCANCEL|MB_ICONQUESTION|MB_DEFBUTTON3);
     if(choice==IDYES)apply(g);else if(choice==IDNO)finish(g,false);
 }
@@ -222,15 +278,21 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         g->font=CreateFontW(-16,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
         g->list=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,16,16,940,450,hwnd,(HMENU)10,nullptr,nullptr);
         SendMessageW(g->list,WM_SETFONT,(WPARAM)g->font,TRUE);ListView_SetExtendedListViewStyle(g->list,LVS_EX_GRIDLINES|LVS_EX_DOUBLEBUFFER);
+        ListView_SetBkColor(g->list,colorRef(g->colors.palette.raised));
+        ListView_SetTextBkColor(g->list,colorRef(g->colors.palette.raised));
+        ListView_SetTextColor(g->list,colorRef(g->colors.palette.text));
         SetWindowSubclass(g->list,listProc,1,(DWORD_PTR)g);
         for(size_t c=0;c<=g->columns.size();c++){LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=c?std::max(120,870/int(g->columns.size())):45;auto name=c?g->columns[c-1]:L"행";col.pszText=name.data();ListView_InsertColumn(g->list,int(c),&col);}
         g->error=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,16,480,940,48,hwnd,nullptr,nullptr,nullptr);SendMessageW(g->error,WM_SETFONT,(WPARAM)g->font,TRUE);
         const wchar_t* labels[]={g->stages?L"단계 추가":L"행 추가",g->stages?L"단계 삭제":L"행 삭제",L"적용",L"취소",g->stages?L"단계 복제":L"행 복제"};const int positions[]={16,356,526,696,186};
-        for(int i=0;i<5;i++){HWND b=CreateWindowW(L"BUTTON",labels[i],WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_PUSHBUTTON,positions[i],540,155,34,hwnd,(HMENU)(INT_PTR)(20+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);if(i==2)g->apply=b;}
-        if(g->scripts)for(int i=0;i<2;i++){HWND b=CreateWindowW(L"BUTTON",i?L"x²":L"x₂",WS_CHILD|WS_VISIBLE|WS_TABSTOP,860+i*50,540,46,34,hwnd,(HMENU)(INT_PTR)(25+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}
+        for(int i=0;i<5;i++){HWND b=CreateWindowW(L"BUTTON",labels[i],WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,positions[i],540,155,34,hwnd,(HMENU)(INT_PTR)(20+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);if(i==2)g->apply=b;}
+        if(g->scripts)for(int i=0;i<2;i++){HWND b=CreateWindowW(L"BUTTON",i?L"x²":L"x₂",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,860+i*50,540,46,34,hwnd,(HMENU)(INT_PTR)(25+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}
         refresh(*g);validate(*g);return 0;
     }
     if(!g)return DefWindowProcW(hwnd,msg,wp,lp);
+    if(msg==WM_ERASEBKGND){RECT r;GetClientRect(hwnd,&r);FillRect((HDC)wp,&r,g->colors.panel);return 1;}
+    if(msg==WM_CTLCOLORSTATIC)return g->colors.control(msg,(HDC)wp);
+    if(msg==WM_DRAWITEM){const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);g->colors.draw(item,item.CtlID==22);return TRUE;}
     if(msg==CommitFocus){int focus=GetDlgCtrlID(GetFocus());if(g->edit&&GetFocus()!=g->edit&&focus!=25&&focus!=26)commit(*g);return 0;}
     if(msg==WM_NOTIFY){
         auto* h=(NMHDR*)lp;
@@ -244,15 +306,19 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             if(draw->nmcd.dwDrawStage==(CDDS_ITEMPREPAINT|CDDS_SUBITEM)){
                 int r=int(draw->nmcd.dwItemSpec),c=draw->iSubItem-1;
                 bool selected=c>=0&&r>=std::min(g->row,g->anchorRow)&&r<=std::max(g->row,g->anchorRow)&&c>=std::min(g->col,g->anchorCol)&&c<=std::max(g->col,g->anchorCol);
+                bool invalid=g->invalidCells.count({r,c})!=0;
+                const auto& palette=g->colors.palette;
+                COLORREF background=invalid?(selected?RGB(249,183,184):RGB(255,222,222)):colorRef(selected?palette.accent:c<0?palette.panel:palette.raised);
+                COLORREF foreground=invalid?RGB(130,19,24):colorRef(selected?palette.onAccent:palette.text);
                 if(c>=0&&g->rows[r][c].find('\n')!=std::string::npos){
                     RECT cell{};ListView_GetSubItemRect(g->list,r,c+1,LVIR_BOUNDS,&cell);
-                    auto brush=CreateSolidBrush(selected?RGB(218,238,250):RGB(255,255,255));FillRect(draw->nmcd.hdc,&cell,brush);DeleteObject(brush);
-                    cell.left+=4;cell.top+=3;SetBkMode(draw->nmcd.hdc,TRANSPARENT);SetTextColor(draw->nmcd.hdc,RGB(0,0,0));
+                    auto brush=CreateSolidBrush(background);FillRect(draw->nmcd.hdc,&cell,brush);DeleteObject(brush);
+                    cell.left+=4;cell.top+=3;SetBkMode(draw->nmcd.hdc,TRANSPARENT);SetTextColor(draw->nmcd.hdc,foreground);
                     auto old=SelectObject(draw->nmcd.hdc,g->font);auto text=wide(g->rows[r][c]);
                     DrawTextW(draw->nmcd.hdc,text.c_str(),int(text.size()),&cell,DT_LEFT|DT_TOP|DT_NOPREFIX);SelectObject(draw->nmcd.hdc,old);
                     return CDRF_SKIPDEFAULT;
                 }
-                draw->clrTextBk=selected?RGB(218,238,250):RGB(255,255,255);draw->clrText=RGB(0,0,0);
+                draw->clrTextBk=background;draw->clrText=foreground;
                 return CDRF_NEWFONT;
             }
         }
@@ -271,12 +337,13 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_CLOSE){requestClose(*g);return 0;}return DefWindowProcW(hwnd,msg,wp,lp);
 }
 }
-std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,bool scripts,const std::wstring& hint,bool stages,int scriptColumn){
+std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,bool scripts,const std::wstring& hint,bool stages,int scriptColumn,const TableCellError& cellError){
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&controls);static bool registered=false;
     if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=gridProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawGrid";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);registered=true;}
-    Grid g;g.columns=columns;g.rows=rows;g.original=rows;g.preview=preview;g.scripts=scripts;g.hint=hint;g.stages=stages;g.scriptColumn=scriptColumn<0?(stages?1:0):scriptColumn;if(g.rows.empty())g.rows.push_back(std::vector<std::string>(columns.size()));RECT r;GetWindowRect(parent,&r);
-    HWND hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawGrid",title.c_str(),WS_CAPTION|WS_SYSMENU|WS_POPUP,std::max(0L,(r.left+r.right-990)/2),std::max(0L,(r.top+r.bottom-640)/2),990,640,parent,nullptr,GetModuleHandleW(nullptr),&g);
-    EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);selectCell(g,0,0);
+    Grid g;g.columns=columns;g.rows=rows;g.original=rows;g.preview=preview;g.cellError=cellError;g.scripts=scripts;g.hint=hint;g.stages=stages;g.scriptColumn=scriptColumn<0?(stages?1:0):scriptColumn;if(g.rows.empty())g.rows.push_back(std::vector<std::string>(columns.size()));const RECT r=ownedWindowRect(parent,990,640);
+    HWND hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawGrid",title.c_str(),WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,990,640,parent,nullptr,GetModuleHandleW(nullptr),&g);
+    if(!hwnd)return {};
+    appearance::titlebar(hwnd);EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);selectCell(g,0,0);
     MSG msg;while(!g.done&&GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
     EnableWindow(parent,TRUE);DestroyWindow(hwnd);DeleteObject(g.font);SetActiveWindow(parent);if(g.ok)return g.rows;return {};
 }

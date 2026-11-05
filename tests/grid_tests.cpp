@@ -14,6 +14,9 @@ struct Fixture {
     ui::Grid grid;EnergyPlot applied;
     Fixture(const EnergyPlot& original,const ui::Table& rows):applied(original){
         grid.rows=rows;grid.original=rows;grid.columns={L"상태 이름",L"Path 1",L"Path 2"};
+        grid.cellError=[](size_t column,const std::string& value)->std::wstring{
+            return column!=0&&!validEnergyGridValue(value)?L"Invalid energy":L"";
+        };
         grid.preview=[&,original](const ui::Table& data){try{auto candidate=energyGridData(original,data);applied=std::move(candidate);return std::wstring{};}catch(const std::exception& e){return ui::wide(e.what());}};
         auto hwnd=CreateWindowExW(0,L"YoungDrawGridRegression",L"Grid test",WS_OVERLAPPED,0,0,990,640,nullptr,nullptr,GetModuleHandleW(nullptr),&grid);
         check(hwnd!=nullptr,"create grid");
@@ -156,6 +159,22 @@ int main(){try{
         check(ui::value(f.grid.error).find(L"3행 · Path 2")!=std::wstring::npos,"error identifies row and pathway");
         f.edit(2,2,L"-30.25");f.apply();
         check(f.grid.done&&f.applied.series[1].values[2]==-30.25,"one click applies correction still in editor");
+    }
+    {
+        Fixture f(original,rows);
+        ui::selectCell(f.grid,1,0);
+        ui::paste(f.grid,L"\"TS\r\n2\"\tbad\t42.5\r\nP\t\tinf\r\nNew\t5\t-6\r\n");
+        check(f.grid.rows.size()==4&&f.grid.rows[1][0]=="TS\r\n2"&&f.grid.rows[2][1].empty(),"Excel range preserves quoted lines and blanks and grows the table");
+        check(f.grid.invalidCells==std::set<std::pair<int,int>>{{1,1},{2,2}},"all invalid energies are marked");
+        f.apply();
+        check(!f.grid.done&&f.grid.row==1&&f.grid.col==1,"invalid Apply selects the first bad cell");
+        auto pasted=f.grid.rows;
+        ui::paste(f.grid,L"1\t2\t3");
+        check(f.grid.rows==pasted,"out-of-bounds paste leaves the table intact");
+        f.edit(1,1,L"24");ui::commit(f.grid);
+        check(f.grid.invalidCells==std::set<std::pair<int,int>>{{2,2}},"correcting one cell clears its mark only");
+        f.edit(2,2,L"-12");f.apply();
+        check(f.grid.ok&&f.applied.series[1].values[3]==-6&&!f.applied.series[0].hasValue(2),"corrected paste applies with missing energies intact");
     }
     {
         auto withBlank=rows;withBlank.push_back({"","",""});Fixture f(original,withBlank);f.apply();

@@ -14,6 +14,7 @@ std::string energyTickLabel(double value,double step);
 std::vector<EnergyRow> parseEnergyTable(const std::string& csv);
 std::string energyTable(const EnergyPlot& plot);
 void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool preserveMarkers=false);
+bool validEnergyGridValue(const std::string& text);
 // Build a candidate before changing the document. Blank labels/energies and empty rows are valid; missing energies stay absent. Columns: state, one per path.
 EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vector<std::string>>& cells);
 }

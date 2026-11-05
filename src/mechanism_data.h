@@ -21,6 +21,8 @@ TransitionCaption transitionCaption(const std::string& value);
 std::string transitionCaptionText(const TransitionCaption& caption);
 std::vector<SpinEnergy> reactionEnergies(const std::string& value);
 std::string reactionEnergyList(std::vector<SpinEnergy> values);
+std::string importedEnergy(std::string text);
+bool attachMechanismEnergy(Document& doc,int source,int role,int index,int owner,size_t slot);
 using MechanismRows=std::vector<std::vector<std::string>>;
 // Each row is one intermediate or transition state: kind, name, S values, energies.
 MechanismRows mechanismRows(const Reaction& reaction);

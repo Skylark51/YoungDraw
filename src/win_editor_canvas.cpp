@@ -1,7 +1,9 @@
 #include "win_editor_canvas.h"
 #include "win_editor_chrome.h"
+#include "win_editor_commands.h"
 #include "win_editor_images.h"
 #include "win_editor_plot.h"
+#include "win_editor_pointer.h"
 #include "win_editor_reaction.h"
 #include "win_editor_render.h"
 #include "win_editor_state.h"
@@ -54,7 +56,18 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  };
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
  if(!isolatedStructureEditing)group({185,100,101,102});else group({102});separator();group({104,105});separator();group({107,125,155,156});separator();
- group({170,171,172,173,174});separator();group({160,161,162,163,164});if(isolatedStructureEditing){button(g,186,L"적용 · Ctrl+S",{float(ww-300),23,140,34});button(g,187,L"취소",{float(ww-152),23,136,34});}else button(g,184,L"배경 · 테마  ◇",{float(ww-168),23,152,34});text(g,L"YOUNGDRAW  /  SCIENTIFIC ATELIER",16,70,9,muted,true);
+ group({170,171,172,173,174});separator();group({160,161,162,163,164});
+ if(isolatedStructureEditing){
+     button(g,186,L"적용 · Ctrl+S",{float(ww-300),23,140,34});
+     button(g,187,L"취소",{float(ww-152),23,136,34});
+ }else{
+     rule(g,toolbarX+2,51,toolbarX+10,29,muted);
+     toolbarX+=16;
+     group({bondAnimationCommand});
+     const bool compact=ww-168<toolbarX;
+     button(g,184,L"배경 · 테마  ◇",{float(ww-168),compact?63.f:23.f,152,compact?22.f:34.f});
+ }
+ text(g,L"YOUNGDRAW  /  SCIENTIFIC ATELIER",16,70,9,muted,true);
  if(isolatedStructureEditing)text(g,L"이 창에서는 선택한 단계의 구조만 편집합니다. 적용하면 원래 메커니즘에 반영됩니다.",left+12,96,12,ink,true);
  text(g,L"그리기",16,101,11,muted,true);
  const std::vector<int> drawingTools={200,201,202,217,203,204,205,206,207,208,209,210,211,212,213,214,215,216,218,219};
@@ -65,7 +78,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  text(g,toolNames[size_t(shown)],12,728,10,muted);
  button(g,150,L"Arial 굵게 / 2 pt",{12,750,156,29});
 
- auto cb=canvasBox();appearance::background(g,cb);auto state=g.Save();g.SetClip(cb);g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));const Scene& sc=sceneForPaint(reuseScene);animationVisible=false;animationDelay=1000;render(g,sc,true,true);if(animationVisible)SetTimer(win,912,animationDelay,nullptr);else KillTimer(win,912);g.Restore(state);
+ auto cb=canvasBox();appearance::background(g,cb);auto state=g.Save();g.SetClip(cb);g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));const Scene& sc=sceneForPaint(reuseScene);animationVisible=false;animationDelay=1000;render(g,sc,true,true);auto draggedEnergy=energyDragPreview(sc);if(!draggedEnergy.items.empty())render(g,draggedEnergy,false,true);if(animationVisible)SetTimer(win,912,animationDelay,nullptr);else KillTimer(win,912);g.Restore(state);
  state=g.Save();g.SetClip(cb);auto guide=[&](Vec c,double w,double h,std::wstring label,int owner,size_t index,bool above){Vec p=screen(c);RectF r(float(p.x-w*zoom/2),float(p.y-h*zoom/2),float(w*zoom),float(h*zoom));bool active=targetContainer==owner&&targetSlot==index&&targetAbove==above;Pen pen(active?accent:Color(255,201,215,223),active?1.6f:1);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,r);text(g,label,r.X+3,r.Y+3,10,appearance::palette().canvasInk);};
  if(snapPlot){
     auto hovered=nearestPlotSnap(sc,mouse);auto found=sc.plotSnapPoints.find(snapPlot);
@@ -104,25 +117,46 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  }else if(isolatedStructureEditing){
     button(g,110,L"구조 정리  Ctrl+Shift+K",{rx+12,124,236,30});button(g,111,L"템플릿",{rx+12,164,236,30});button(g,113,L"구조·이미지 파일 삽입",{rx+12,204,236,30});button(g,165,L"크기 조정  Ctrl+K",{rx+12,244,236,30});
     text(g,L"이 단계의 구조만 편집합니다.",rx+16,304,13,ink,true);text(g,L"상단 적용 또는 Ctrl+S: 반영",rx+16,342,12,muted);text(g,L"취소 / 창 닫기: 변경 버리기",rx+16,372,12,muted);
- }else{button(g,110,L"구조 정리  Ctrl+Shift+K",{rx+12,124,236,30});button(g,111,L"템플릿",{rx+12,160,114,30});button(g,112,L"보관",{rx+132,160,116,30});
- rule(g,rx+12,204,rx+248,204,border);
- button(g,182,L"메커니즘",{rx+12,218,114,32},sidebarPage==0);button(g,183,L"그래프",{rx+132,218,116,32},sidebarPage==1);
- auto heading=[&](const wchar_t* label,float y){text(g,label,rx+16,y,11,muted,true);};
- auto full=[&](int id,const wchar_t* label,float y,bool active=false){button(g,id,label,{rx+12,y,236,30},active);};
- auto pair=[&](int a,const wchar_t* first,int b,const wchar_t* second,float y){button(g,a,first,{rx+12,y,114,30});button(g,b,second,{rx+132,y,116,30});};
- if(sidebarPage==0){
-    heading(L"반응 편집",270);pair(120,L"반응 추가",121,L"단계 표 편집",292);pair(122,L"단계 추가",127,L"메커니즘 설정",328);
-    heading(L"배치",378);full(125,L"크기·간격 자동 정렬",400);full(126,L"촉매 순환 배치",436);
-    heading(L"구조 삽입",486);pair(123,L"붙여넣기",124,L"파일에서 삽입",508);full(186,L"구조 고치기 · 독립 창",544);full(134,L"구조 삽입 영역 표시",580,guides);
-    heading(L"단계·연결",630);pair(143,L"단계 삽입",144,L"단계 제거",652);pair(145,L"드래그 연결",146,L"단계 합치기",688);pair(148,L"연결 표 편집",149,L"화살표 길이",724);
  }else{
-    heading(L"데이터·경로",270);pair(130,L"그래프 추가",131,L"데이터 표 편집",292);pair(132,L"경로 추가",133,L"경로 스타일",328);
-    pair(135,L"양쪽 분기 추가",138,L"출판용 정돈",364);
-    heading(L"그래프 편집",410);pair(139,L"이름·화살표 표",136,L"화살표 자석",432);pair(137,L"그래프·축 설정",142,L"구간별 색상",468);
-    heading(L"구조 삽입",522);pair(123,L"붙여넣기",124,L"파일에서 삽입",544);full(186,L"구조 고치기 · 독립 창",580);full(134,L"구조 삽입 영역 표시",616,guides);
-    heading(L"시작하기",666);full(141,L"에너지 그래프 예제",688);
- }
- rule(g,rx+12,768,rx+248,768,border);full(113,L"구조 파일 열어 삽입",782);
+    auto tile=[&](int id,const wchar_t* label,RectF box,bool active=false){
+        hits.push_back({id,box});
+        const bool hovered=box.Contains(float(mouse.x),float(mouse.y));
+        const auto fg=active?palette.onAccent:palette.text;
+        appearance::rounded(g,box,7,active?palette.accent:hovered?palette.hover:palette.raised);
+        const float iconSize=box.Height>=50?26.f:22.f;
+        icon(g,id,{box.X+(box.Width-iconSize)*.5f,box.Y+4,iconSize,iconSize},fg);
+        ui::drawLabel(g,label,{box.X+2,box.GetBottom()-20,box.Width-4,18},
+                      box.Width>100?13.f:12.f,fg,active,true);
+    };
+    struct SidebarTool {int id;const wchar_t* label;bool active=false;};
+    auto row=[&](float y,std::initializer_list<SidebarTool> tools){
+        float x=rx+12;
+        for(auto item:tools){
+            tile(item.id,item.label,{x,y,75,47},item.active);
+            x+=81;
+        }
+    };
+    auto heading=[&](const wchar_t* label,float y){text(g,label,rx+16,y,11,muted,true);};
+    row(124,{{110,L"구조 정리"},{111,L"템플릿"},{112,L"템플릿 보관"}});
+    tile(182,L"메커니즘",{rx+12,180,114,46},sidebarPage==0);
+    tile(183,L"그래프",{rx+132,180,116,46},sidebarPage==1);
+    tile(recognizeMechanismCommand,L"현재 파일 → 메커니즘 편집",{rx+12,235,237,55},true);
+    heading(sidebarPage==0?L"메커니즘 도구":L"그래프 도구",303);
+    if(sidebarPage==0){
+        row(323,{{120,L"새 메커니즘"},{140,L"예제 열기"},{121,L"단계 편집표"}});
+        row(376,{{143,L"단계 추가"},{144,L"단계 삭제"},{146,L"단계 합치기"}});
+        row(429,{{145,L"단계 연결",mechanismConnecting},{147,L"연결 삭제"},{149,L"화살표 길이"}});
+        row(482,{{127,L"배치·단위"},{125,L"크기·간격"}});
+    }else{
+        row(323,{{130,L"새 그래프"},{141,L"예제 열기"},{131,L"에너지 표"}});
+        row(376,{{132,L"경로 추가"},{135,L"왼쪽 분기"},{133,L"경로 스타일"}});
+        row(429,{{142,L"구간 색"},{139,L"이름·범위"},{136,L"화살표 배치",snapPlot!=0}});
+        row(482,{{137,L"제목·축"}});
+    }
+    heading(L"구조 넣기 · 선택한 삽입 칸",546);
+    row(567,{{134,L"삽입 칸 표시",guides},{123,L"붙여넣기"},{124,L"파일로 채움"}});
+    if(sidebarPage==0)row(620,{{186,L"구조 편집"},{113,L"파일 삽입"}});
+    else row(620,{{186,L"구조 편집"},{113,L"파일 삽입"},{138,L"출판용 정돈"}});
  }
  fill(g,{0,float(wh-bottom),float(ww),float(bottom)},palette.chrome);rule(g,0,float(wh-bottom),float(ww),float(wh-bottom),border);text(g,status,14,float(wh-bottom+9),11,muted);Graphics out(dc);presentBuffer(out,*paintBuffer);}
 

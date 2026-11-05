@@ -34,6 +34,51 @@ using namespace yd::editor;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 static int formAction=0;static bool formDriven=false,previewObserved=false;static std::string formBefore;
 static bool paletteDriven=false;
+static int mechanismGridAction=0;
+static bool mechanismDraftHidden=false;
+static void CALLBACK driveNewMechanism(HWND parent,UINT,UINT_PTR timer,DWORD){
+    HWND dialog=GetLastActivePopup(parent);
+    wchar_t name[64]{};
+    GetClassNameW(dialog,name,64);
+    if(std::wstring(name)!=L"YoungDrawGrid")return;
+    KillTimer(parent,timer);
+    mechanismDraftHidden=toNative(doc)==formBefore;
+    if(mechanismGridAction)PostMessageW(dialog,WM_COMMAND,22,0);
+    else PostMessageW(dialog,WM_CLOSE,0,0);
+}
+static void checkNewMechanism(HWND hwnd){
+    int atom=doc.addAtom({10,20});
+    selection={atom};
+    dirty=false;
+    tool=Text;
+    sidebarPage=1;
+    history.clear();
+    formBefore=toNative(doc);
+    mechanismGridAction=0;
+    SetTimer(hwnd,901,10,driveNewMechanism);
+    command(120);
+    check(mechanismDraftHidden&&toNative(doc)==formBefore&&!dirty&&!history.undo(doc)&&
+          selection==std::vector<int>{atom}&&tool==Text&&sidebarPage==1,
+          "discarding the new mechanism leaves canvas, selection, tool, sidebar and history intact");
+    mechanismGridAction=1;
+    SetTimer(hwnd,901,10,driveNewMechanism);
+    command(120);
+    check(doc.reactions.size()==1&&dirty&&sidebarPage==0&&history.undo(doc)&&toNative(doc)==formBefore&&
+          !history.undo(doc),"applying a new mechanism creates exactly one undo step");
+    doc={};selection.clear();history.clear();dirty=false;tool=Select;
+}
+static bool recognizedTableOpened=false;
+static void CALLBACK driveSidebarRecognition(HWND parent,UINT,UINT_PTR timer,DWORD){
+    auto table=FindWindowW(L"YoungDrawGrid",L"메커니즘 분기·프레임 편집");
+    if(table&&GetWindow(table,GW_OWNER)==parent){
+        KillTimer(parent,timer);
+        recognizedTableOpened=true;
+        PostMessageW(table,WM_CLOSE,0,0);
+        return;
+    }
+    auto form=FindWindowW(L"YoungDrawForm",L"화살표 사이 구조 묶음 정리 · 미리보기");
+    if(form&&GetWindow(form,GW_OWNER)==parent)PostMessageW(form,WM_COMMAND,IDOK,0);
+}
 static void CALLBACK driveTextPalette(HWND parent,UINT,UINT_PTR timer,DWORD){
     HWND dialog=GetLastActivePopup(parent);wchar_t name[64]{};GetClassNameW(dialog,name,64);if(std::wstring(name)!=L"#32770")return;
     KillTimer(parent,timer);paletteDriven=true;
@@ -53,6 +98,8 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else if(formAction>=15&&formAction<=17){
         SendDlgItemMessageW(dialog,116,CB_SETCURSEL,formAction==17?0:1,0);
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction==25){
+        SetDlgItemTextW(dialog,100,L"4");
     }else if(formAction==11||formAction==12){
         SetDlgItemTextW(dialog,100,L"4");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==13||formAction==14){
@@ -65,7 +112,15 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
         SendDlgItemMessageW(dialog,100,CB_SETCURSEL,2,0);SendDlgItemMessageW(dialog,101,CB_SETCURSEL,1,0);
         SetDlgItemTextW(dialog,102,L"40");SetDlgItemTextW(dialog,103,L"45");
     }else if(formAction==5||formAction==6){
-        SetDlgItemTextW(dialog,100,L"50");previewObserved=toNative(doc)!=formBefore;
+        HWND edit=GetDlgItem(dialog,100);
+        SetWindowTextW(edit,L"45");
+        auto before=toNative(doc);
+        SendMessageW(edit,WM_CHAR,L'+',0);
+        auto after=toNative(doc);
+        SendMessageW(edit,WM_CHAR,L'-',0);
+        previewObserved=before!=after&&toNative(doc)==before;
+        SendMessageW(edit,WM_CHAR,L'+',0);
+        previewObserved=previewObserved&&toNative(doc)==after;
     }else if(formAction==3||formAction==4){
         SendDlgItemMessageW(dialog,101,CB_SETCURSEL,2,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,101));
         SetDlgItemTextW(dialog,103,L"2");SetDlgItemTextW(dialog,104,L"180");previewObserved=toNative(doc)!=formBefore;
@@ -166,6 +221,7 @@ int main(int argc,char** argv){
         if(argc>1&&std::string(argv[1])=="--plot-units-only"){
             DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }
+        checkNewMechanism(hwnd);
         {
             // Hover-only paint reuse must keep geometry, while any document redraw
             // must invalidate the cached scene (including Undo and tab switches).
@@ -212,16 +268,21 @@ int main(int argc,char** argv){
             auto hit=[&](int id)->RectF{for(auto& h:hits)if(h.id==id)return h.box;return {};};
             auto present=[&](int id){return hit(id).Width>0;};
             sidebarPage=0;showLayers=false;repaint();
-            check(present(127)&&present(126)&&present(143)&&present(144)&&present(145)&&present(146)&&present(148)&&present(149)&&!present(137)&&!present(141),"mechanism tab groups settings, arrangement and stage/connection controls");
+            check(present(140)&&present(143)&&present(144)&&present(145)&&present(146)&&present(147)&&present(149)&&!present(122)&&!present(126)&&!present(148)&&!present(141),"mechanism sidebar consolidates stage addition, table editing and layout controls");
+            check(hit(recognizeMechanismCommand).Y<hit(120).Y&&hit(120).Y==hit(121).Y&&hit(121).Y<hit(143).Y&&hit(145).Y<hit(127).Y&&hit(127).Y<hit(134).Y,"mechanism sidebar follows creation, editing, layout and structure insertion");
+            const auto structureRow=hit(134).Y;
             for(int id:{100,101,102,104,105,107,125,155,156,170,171,172,173,174,160,161,162,163,164}){
                 check(present(id)&&hit(id).Y==hit(100).Y&&hit(id).Width==44&&hit(id).GetBottom()<89,"icon toolbar fits one row above document tabs");
                 check(!helpText(id).empty(),"each toolbar icon has Korean help");
             }
             check(hit(156).X==hit(155).X+48,"text palette is immediately right of atom palette");
+            check(hit(bondAnimationCommand).X==hit(164).X+64&&hit(bondAnimationCommand).Width==hit(164).Width&&
+                  hit(bondAnimationCommand).Height==hit(164).Height,"GIF icon matches the rotation controls after its separator");
             check(hit(164).GetRight()<1200,"all toolbar groups fit minimum window width");
             check(present(218)&&present(219)&&hit(150).GetBottom()<=wh-bottom,"orbital tools and style button fit the client height");
             auto before=toNative(doc);command(183);repaint();
             check(present(137)&&present(139)&&present(138)&&present(141)&&!present(127)&&!present(126),"graph tab groups graph-only actions");
+            check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow,"graph sidebar puts publication formatting last and shares the structure insertion position");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;
             command(218);orbitalKind=OrbitalKind::P;orbitalPhase=2;
@@ -379,12 +440,21 @@ int main(int argc,char** argv){
 
         {
             doc={};selection.clear();history.clear();formBefore=toNative(doc);formAction=12;formDriven=previewObserved=false;
-            SetTimer(hwnd,901,10,driveForm);command(220);
+            SetTimer(hwnd,901,10,driveForm);SendMessageW(hwnd,WM_COMMAND,insertBranchArrowsCommand,0);KillTimer(hwnd,901);
             check(formDriven&&previewObserved&&toNative(doc)==formBefore,"branch arrow preview cancels without changes");
-            formAction=11;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(220);
+            formAction=11;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(hwnd,WM_COMMAND,insertBranchArrowsCommand,0);KillTimer(hwnd,901);
             check(formDriven&&doc.objects.size()==5&&doc.groups.size()==1,"branch insert dialog creates four arrows on one spine");
             writePreview(L"shared-spine-arrows.png",doc);
             check(history.undo(doc)&&toNative(doc)==formBefore,"branch insertion undoes as one action");
+            auto insertMenu=GetSubMenu(GetMenu(hwnd),2);
+            check(GetMenuState(insertMenu,insertBranchArrowsCommand,MF_BYCOMMAND)==MF_ENABLED
+                &&GetMenuState(insertMenu,externalMechanismCommand,MF_BYCOMMAND)==MF_ENABLED,
+                "both branching commands are available in the Insert menu");
+            formAction=25;formDriven=false;SetTimer(hwnd,901,10,driveForm);
+            SendMessageW(hwnd,WM_COMMAND,externalMechanismCommand,0);KillTimer(hwnd,901);
+            check(formDriven&&doc.reactions.size()==1&&doc.reactions.front().links.size()==4,
+                "external branching menu command creates a four-branch mechanism");
+            check(history.undo(doc)&&toNative(doc)==formBefore,"external branching insertion can be undone");
             doc={};selection.clear();history.clear();targetContainer=0;
             for(Vec p:std::vector<Vec>{{0,0},{240,0},{240,160}}){int a=doc.addAtom(p,27),b=doc.addAtom(p+Vec{22,14},8);doc.atom(a)->label="CoIII";doc.addBond(a,b);}
             Object stem;stem.id=doc.nextId++;stem.points={{60,0},{60,160}};doc.objects.push_back(stem);
@@ -396,6 +466,14 @@ int main(int argc,char** argv){
             check(doc.atoms[0].label=="Co^{III}","import dialog normalizes oxidation state");
             writePreview(L"shared-spine-arranged.png",doc);
             check(history.undo(doc)&&toNative(doc)==formBefore,"import geometry, labels and topology undo together");
+            selection={doc.atoms.front().id};
+            sidebarPage=1;
+            recognizedTableOpened=false;
+            SetTimer(hwnd,901,10,driveSidebarRecognition);
+            SendMessageW(hwnd,WM_COMMAND,recognizeMechanismCommand,0);
+            check(recognizedTableOpened&&sidebarPage==0&&doc.reactions.size()==1&&doc.reactions[0].links.size()==2,
+                  "current-file recognition works from the graph sidebar and opens the editable mechanism table");
+            check(history.undo(doc)&&toNative(doc)==formBefore,"sidebar recognition can be undone in one step");
             selection.clear();targetContainer=0;doc={};history.clear();
         }
 

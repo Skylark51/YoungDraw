@@ -9,7 +9,7 @@
 
 namespace yd::editor {
 
-void render(Graphics& g,const Scene& s,bool animate,bool screenTheme){StringFormat fmt(StringFormat::GenericTypographic());for(auto& p:s.items){if(p.points.empty())continue;if(inlineEdit&&p.type==Primitive::Text&&p.owner==inlineTarget.owner&&p.textRole==inlineTarget.role&&p.textIndex==inlineTarget.index)continue;Color color=rgb(p.color);if(screenTheme)color=appearance::documentColor(color,p.type==Primitive::Box&&p.filled&&p.width==0);Pen pen(color,float(p.width));pen.SetStartCap(p.flatStart?LineCapFlat:LineCapRound);pen.SetEndCap(p.flatEnd?LineCapFlat:LineCapRound);if(p.dash){REAL w=std::max(.1f,float(p.width));REAL pattern[]={p.dash==1?4.f/w:1.f/w,p.dash==1?3.f/w:2.f/w};pen.SetDashPattern(pattern,2);}SolidBrush brush(color);std::vector<PointF> ps;for(auto v:p.points)ps.push_back({float(v.x),float(v.y)});
+void render(Graphics& g,const Scene& s,bool animate,bool screenTheme){StringFormat fmt(StringFormat::GenericTypographic());for(auto& p:s.items){if(p.points.empty())continue;if(animate&&screenTheme&&inlineEdit&&p.type==Primitive::Text&&p.owner==inlineTarget.owner&&p.textRole==inlineTarget.role&&p.textIndex==inlineTarget.index)continue;Color color=rgb(p.color);if(screenTheme)color=appearance::documentColor(color,p.type==Primitive::Box&&p.filled&&p.width==0);if(p.opacity!=255)color=Color(p.opacity,color.GetR(),color.GetG(),color.GetB());Pen pen(color,float(p.width));pen.SetStartCap(p.flatStart?LineCapFlat:LineCapRound);pen.SetEndCap(p.flatEnd?LineCapFlat:LineCapRound);if(p.dash){REAL w=std::max(.1f,float(p.width));REAL pattern[]={p.dash==1?4.f/w:1.f/w,p.dash==1?3.f/w:2.f/w};pen.SetDashPattern(pattern,2);}SolidBrush brush(color);std::vector<PointF> ps;for(auto v:p.points)ps.push_back({float(v.x),float(v.y)});
  if(p.type==Primitive::Line&&ps.size()>=2)g.DrawLines(&pen,ps.data(),INT(ps.size()));else if(p.type==Primitive::Bezier&&ps.size()>=4){GraphicsPath path;path.AddBeziers(ps.data(),INT(ps.size()));if(p.closed)path.CloseFigure();if(p.filled)g.FillPath(&brush,&path);if(p.width>0)g.DrawPath(&pen,&path);}else if(p.type==Primitive::Polygon&&ps.size()>=3)g.FillPolygon(&brush,ps.data(),INT(ps.size()));else if(p.type==Primitive::Text){FontFamily ff(ui::wide(p.font).c_str());Font f(&ff,float(p.fontSize),(p.face&1?FontStyleBold:0)|(p.face&2?FontStyleItalic:0)|(p.face&4?FontStyleUnderline:0),UnitPixel);auto w=ui::wide(p.text);auto saved=g.Save();g.TranslateTransform(ps[0].X,ps[0].Y);g.RotateTransform(float(p.rotation));// Regular graph type must scale from outlines rather than hinted glyph bitmaps.
  // This also keeps rotated energy-axis captions smooth and EMF output vector-based.
  if(!(p.face&1)){
@@ -30,9 +30,13 @@ HENHMETAFILE officePicture(const Document& d){
     g.ScaleTransform(dx/72.f,dy/72.f);g.TranslateTransform(float(6-b.x),float(6-b.y));render(g,sc);}
     ReleaseDC(nullptr,dc);return metafile.GetHENHMETAFILE();
 }
-void writePreview(const std::wstring& path,const Document& d){
+void writePreview(const std::wstring& path,const Document& d,bool transparent){
     auto sc=makeScene(d,measure);auto b=sc.bounds;double scale=std::min(2.5,2000./std::max(b.w,b.h));
-    Bitmap image(int(std::ceil(b.w*scale)),int(std::ceil(b.h*scale)),PixelFormat32bppARGB);Graphics g(&image);g.Clear(white);g.SetSmoothingMode(SmoothingModeHighQuality);g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);g.TranslateTransform(float(-b.x*scale),float(-b.y*scale));g.ScaleTransform(float(scale),float(scale));render(g,sc);
+    Bitmap image(std::max(1,int(std::ceil(b.w*scale))),std::max(1,int(std::ceil(b.h*scale))),PixelFormat32bppARGB);
+    {
+        Graphics g(&image);g.Clear(transparent?Color(0,0,0,0):white);g.SetSmoothingMode(SmoothingModeHighQuality);g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+        g.TranslateTransform(float(-b.x*scale),float(-b.y*scale));g.ScaleTransform(float(scale),float(scale));render(g,sc);
+    }
     UINT n=0,bytes=0;GetImageEncodersSize(&n,&bytes);std::vector<BYTE> memory(bytes);auto* encoders=(ImageCodecInfo*)memory.data();GetImageEncoders(n,bytes,encoders);for(UINT i=0;i<n;i++)if(wcscmp(encoders[i].MimeType,L"image/png")==0){if(image.Save(path.c_str(),&encoders[i].Clsid,nullptr)!=Ok)throw std::runtime_error("Could not save preview");return;}throw std::runtime_error("PNG encoder unavailable");
 }
 

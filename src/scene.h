@@ -14,6 +14,7 @@ struct Primitive {
     // Canvas-editable text: 1..3 reaction captions; 4..8 plot fields;
     // 9 structure energy; 10 cycle center caption; 11 transition-state name; 12 plot mechanism stage; 13 atom charge/radical annotation.
     int textRole=0,textIndex=-1;
+    unsigned char opacity=255;
     int reactionArrow=-1; // Individually selectable cycle connector.
     bool closed=false,filled=false,flatEnd=false,flatStart=false;
 };

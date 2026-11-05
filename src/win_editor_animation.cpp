@@ -1,0 +1,920 @@
+#include "win_editor_animation.h"
+#include "cdxml.h"
+#include "mechanism_data.h"
+#include "win_dialogs.h"
+#include "win_dialog_style.h"
+#include "win_editor_clipboard.h"
+#include "win_editor_files.h"
+#include "win_editor_render.h"
+#include "win_editor_state.h"
+#include "win_editor_structure.h"
+#include "win_ui.h"
+#include <commdlg.h>
+#include <array>
+#include <deque>
+#include <tuple>
+#include <sstream>
+
+namespace yd::editor {
+namespace {
+
+constexpr int transitionSteps=36;
+constexpr int maxStages=40;
+constexpr int frameDelay=4, stageDelay=38;
+constexpr int maxAtoms=300;
+
+void keepStructure(Document& structure){
+    if(structure.atoms.empty()||structure.atoms.size()>maxAtoms||structure.bonds.size()>maxAtoms*4)
+        throw std::runtime_error("원자가 1~300개인 구조를 선택하세요.");
+    structure.objects.clear();
+    structure.reactions.clear();
+    structure.plots.clear();
+    structure.groups.clear();
+    structure.sourceXml.clear();
+    structure.sourceOwned.clear();
+    structure.sourceGroups.clear();
+    structure.importWarnings.clear();
+    std::set<int> ids;
+    Vec center;
+    for(const auto& atom:structure.atoms){
+        if(!std::isfinite(atom.p.x)||!std::isfinite(atom.p.y)||!ids.insert(atom.id).second)
+            throw std::runtime_error("구조에 잘못된 원자 좌표 또는 번호가 있습니다.");
+        center=center+atom.p;
+    }
+    std::set<int> bondIds;
+    for(const auto& bond:structure.bonds)
+        if(bond.a==bond.b||!ids.count(bond.a)||!ids.count(bond.b)||ids.count(bond.id)||!bondIds.insert(bond.id).second)
+            throw std::runtime_error("구조에 잘못된 결합이 있습니다.");
+    center=center*(1./structure.atoms.size());
+    for(auto& atom:structure.atoms)atom.p=atom.p-center;
+}
+
+using AtomKey=std::tuple<int,int,std::string>;
+AtomKey atomKey(const Atom& atom){return {atom.element,atom.isotope,atom.label};}
+
+std::map<int,int> matchAtoms(const Document& start,const Document& end){
+    std::map<AtomKey,std::deque<int>> remaining;
+    for(const auto& atom:start.atoms)remaining[atomKey(atom)].push_back(atom.id);
+    std::map<int,int> matched;
+    for(const auto& atom:end.atoms){
+        auto& candidates=remaining[atomKey(atom)];
+        if(candidates.empty())continue;
+        matched.emplace(atom.id,candidates.front());
+        candidates.pop_front();
+    }
+    return matched;
+}
+
+using BondKey=std::tuple<int,int,BondKind,int,std::string,std::string>;
+BondKey bondKey(const Bond& bond,int a,int b){
+    int side=bond.doubleSide;
+    const bool directional=bond.kind==BondKind::Wedge||bond.kind==BondKind::Hash||bond.kind==BondKind::Dative||
+                           !bond.customDisplay.empty();
+    if(!directional&&a>b){std::swap(a,b);side=-side;}
+    return {a,b,bond.kind,side,bond.customOrder,bond.customDisplay};
+}
+
+// A primitive can be shared only if its rendered appearance and geometry agree.
+bool sameDrawing(const Primitive& a,const Primitive& b){
+    return std::tie(a.type,a.width,a.fontSize,a.rotation,a.text,a.color,a.font,a.dash,a.face,a.closed,a.filled,a.flatEnd,a.flatStart)==
+           std::tie(b.type,b.width,b.fontSize,b.rotation,b.text,b.color,b.font,b.dash,b.face,b.closed,b.filled,b.flatEnd,b.flatStart)&&
+           a.points.size()==b.points.size()&&std::equal(a.points.begin(),a.points.end(),b.points.begin(),
+               [](Vec x,Vec y){return (x-y).length()<1e-7;});
+}
+
+class Transition {
+    Document start_,end_;
+    std::vector<Vec> origins_,destinations_;
+    std::map<int,int> owners_;
+    std::map<int,size_t> matchedPositions_;
+public:
+    Transition(const Document& start,const Document& end):start_(start),end_(end){
+        owners_=matchAtoms(start_,end_);
+        if(owners_.empty())throw std::runtime_error("인접한 두 단계에 대응할 원자가 하나 이상 있어야 합니다.");
+        std::map<int,size_t> indices;
+        for(const auto& atom:start_.atoms){
+            indices.emplace(atom.id,origins_.size());
+            origins_.push_back(atom.p);
+        }
+        destinations_=origins_;
+        for(const auto& atom:end_.atoms){
+            auto found=owners_.find(atom.id);
+            if(found==owners_.end())continue;
+            auto index=indices.at(found->second);
+            destinations_[index]=atom.p;
+            matchedPositions_.emplace(atom.id,index);
+        }
+        std::map<BondKey,int> bonds;
+        for(const auto& b:start_.bonds)bonds.emplace(bondKey(b,b.a,b.b),b.id);
+        for(const auto& b:end_.bonds){
+            auto a=owners_.find(b.a), z=owners_.find(b.b);
+            if(a==owners_.end()||z==owners_.end())continue;
+            auto found=bonds.find(bondKey(b,a->second,z->second));
+            if(found!=bonds.end())owners_.emplace(b.id,found->second);
+        }
+    }
+
+    Scene sceneAt(double t){
+        for(size_t i=0;i<start_.atoms.size();++i)start_.atoms[i].p=origins_[i]*(1-t)+destinations_[i]*t;
+        for(auto& atom:end_.atoms){
+            auto it=matchedPositions_.find(atom.id);
+            if(it!=matchedPositions_.end())atom.p=start_.atoms[it->second].p;
+        }
+        auto before=makeScene(start_,measure), after=makeScene(end_,measure);
+        if(t==0)return before;
+        if(t==1)return after;
+
+        std::map<int,std::vector<size_t>> byOwner;
+        for(size_t i=0;i<before.items.size();++i)byOwner[before.items[i].owner].push_back(i);
+        std::vector<bool> shared(before.items.size(),false);
+        std::vector<bool> duplicate(after.items.size(),false);
+        for(size_t i=0;i<after.items.size();++i){
+            const auto& p=after.items[i];
+            auto match=owners_.find(p.owner);
+            if(match==owners_.end())continue;
+            for(size_t j:byOwner[match->second]){
+                if(shared[j]||!sameDrawing(before.items[j],p))continue;
+                shared[j]=duplicate[i]=true;
+                break;
+            }
+        }
+
+        Scene frame;
+        auto append=[&](Scene& scene,const std::vector<bool>& common,bool first,bool labels,double opacity){
+            for(size_t i=0;i<scene.items.size();++i){
+                auto& p=scene.items[i];
+                if((p.type==Primitive::Text)!=labels||(!first&&common[i]))continue;
+                if(!common[i])p.opacity=static_cast<unsigned char>(std::lround(opacity*255));
+                frame.items.push_back(std::move(p));
+            }
+        };
+        for(bool labels:{false,true}){
+            append(before,shared,true,labels,1-t);
+            append(after,duplicate,false,labels,t);
+        }
+        const auto& a=before.bounds;
+        const auto& b=after.bounds;
+        const double x=std::min(a.x,b.x),y=std::min(a.y,b.y);
+        frame.bounds={x,y,std::max(a.x+a.w,b.x+b.w)-x,std::max(a.y+a.h,b.y+b.h)-y};
+        return frame;
+    }
+};
+
+void word(std::string& bytes,int value){
+    bytes+=char(value&255);
+    bytes+=char((value>>8)&255);
+}
+
+// GIF LZW with a bounded dictionary keeps all codes at nine bits.
+std::string compressedPixels(const BitmapData& pixels,int width,int height,bool transparent){
+    constexpr unsigned clear=256,end=257,first=258,limit=510;
+    std::array<unsigned short,limit*256> dictionary{};
+    std::string packed;
+    unsigned bits=0, used=0, next=first;
+    auto emit=[&](unsigned code){
+        bits|=code<<used;
+        used+=9;
+        while(used>=8){packed+=char(bits&255);bits>>=8;used-=8;}
+    };
+    emit(clear);
+    int prefix=-1;
+    for(int y=0;y<height;++y){
+        const auto* row=static_cast<const BYTE*>(pixels.Scan0)+ptrdiff_t(y)*pixels.Stride;
+        for(int x=0;x<width;++x){
+            const auto* pixel=row+4*x;
+            // 3 red bits, 3 green bits, 2 blue bits.
+            unsigned index=(pixel[2]&224)|((pixel[1]&224)>>3)|(pixel[0]>>6);
+            if(transparent){
+                // Ordered alpha dithering preserves gradual bond fades in GIF's one-bit alpha.
+                static constexpr unsigned bayer[4][4]={{0,8,2,10},{12,4,14,6},{3,11,1,9},{15,7,13,5}};
+                if(pixel[3]<=bayer[y%4][x%4]*16+8)index=0;
+                else if(index==0)index=254;
+                else if(index==254)index=255;
+            }
+            if(prefix<0){prefix=int(index);continue;}
+            auto& entry=dictionary[unsigned(prefix)*256+index];
+            if(entry){prefix=entry;continue;}
+            emit(unsigned(prefix));
+            if(next==limit){emit(clear);dictionary.fill(0);next=first;}
+            else entry=static_cast<unsigned short>(next++);
+            prefix=int(index);
+        }
+    }
+    emit(unsigned(prefix));
+    emit(end);
+    if(used)packed+=char(bits&255);
+    return packed;
+}
+
+void gifFrame(std::string& bytes,Bitmap& bitmap,int width,int height,int delay,bool transparent){
+    bytes.append("\x21\xf9\x04",3);
+    bytes+=char(transparent?9:4);
+    word(bytes,delay);
+    bytes+=char(0);
+    bytes.append("\0\x2c\0\0\0\0",6);
+    word(bytes,width);word(bytes,height);
+    bytes.append("\0\x08",2);
+    Gdiplus::Rect area(0,0,width,height);
+    BitmapData pixels{};
+    if(bitmap.LockBits(&area,ImageLockModeRead,PixelFormat32bppARGB,&pixels)!=Ok)
+        throw std::runtime_error("GIF 프레임을 읽을 수 없습니다.");
+    std::string packed;
+    try{packed=compressedPixels(pixels,width,height,transparent);}
+    catch(...){bitmap.UnlockBits(&pixels);throw;}
+    bitmap.UnlockBits(&pixels);
+    for(size_t i=0;i<packed.size();i+=255){
+        size_t count=std::min<size_t>(255,packed.size()-i);
+        bytes+=char(count);
+        bytes.append(packed,i,count);
+    }
+    bytes+='\0';
+}
+
+std::optional<std::wstring> animationFile(const wchar_t* title,bool save=false,HWND owner=nullptr){
+    wchar_t path[32768]={};
+    if(save)wcscpy_s(path,L"bond-animation.gif");
+    OPENFILENAMEW picker{};
+    picker.lStructSize=sizeof(picker);
+    picker.hwndOwner=owner?owner:win;
+    picker.lpstrTitle=title;
+    picker.lpstrFile=path;
+    picker.nMaxFile=DWORD(std::size(path));
+    picker.lpstrFilter=save?L"Animated GIF\0*.gif\0\0":L"ChemDraw / YoungDraw\0*.cdx;*.cdxml;*.ydraw\0\0";
+    picker.lpstrDefExt=save?L"gif":nullptr;
+    picker.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(save?OFN_OVERWRITEPROMPT:OFN_FILEMUSTEXIST);
+    if(save?GetSaveFileNameW(&picker):GetOpenFileNameW(&picker))return std::wstring(path);
+    return {};
+}
+
+Document readStructure(const std::wstring& path){
+    auto bytes=readFile(path);
+    return _wcsicmp(fs::path(path).extension().c_str(),L".cdx")==0?fromCdx(bytes):fromCdxml(bytes);
+}
+
+std::string multiplicityEnergies(const std::string& energy,const std::string& unit){
+    std::string text;
+    for(const auto& entry:reactionEnergies(energy)){
+        if(entry.value.empty())continue;
+        if(!text.empty())text+=" / ";
+        text+="M="+std::to_string(std::lround(2*entry.spin+1))+": "+entry.value;
+    }
+    if(!text.empty()&&!unit.empty())text+=" "+unit;
+    return text;
+}
+
+std::vector<size_t> defaultRoute(const Reaction& mechanism){
+    if(!mechanism.explicitConnections()){
+        std::vector<size_t> route(mechanism.slots.size());
+        for(size_t i=0;i<route.size();++i)route[i]=i;
+        return route;
+    }
+    auto valid=[&](const MechanismLink& link){
+        return link.from>=0&&link.to>=0&&size_t(link.from)<mechanism.slots.size()&&size_t(link.to)<mechanism.slots.size();
+    };
+    auto first=std::find_if(mechanism.links.begin(),mechanism.links.end(),[&](const MechanismLink& link){
+        return valid(link)&&std::none_of(mechanism.links.begin(),mechanism.links.end(),
+            [&](const MechanismLink& other){return valid(other)&&other.to==link.from;});
+    });
+    if(first==mechanism.links.end())first=std::find_if(mechanism.links.begin(),mechanism.links.end(),valid);
+    if(first==mechanism.links.end())return {};
+    std::vector<size_t> route={size_t(first->from),size_t(first->to)};
+    for(;;){
+        auto next=std::find_if(mechanism.links.begin(),mechanism.links.end(),[&](const MechanismLink& link){
+            return valid(link)&&size_t(link.from)==route.back()&&
+                   std::find(route.begin(),route.end(),size_t(link.to))==route.end();
+        });
+        if(next==mechanism.links.end())return route;
+        route.push_back(size_t(next->to));
+    }
+}
+
+void drawCaption(Graphics& g,const std::string& first,const std::string& second,double t,
+                 int width,int y,int height,int size,bool bold,Color color){
+    if(first.empty()&&second.empty())return;
+    const bool same=first==second;
+    const auto& value=same||t<.5?first:second;
+    double opacity=same?1.:std::abs(2*t-1);
+    if(value.empty()||opacity<.01)return;
+    auto text=ui::wide(value);
+    for(auto& ch:text)if(ch==L'\r'||ch==L'\n')ch=L' ';
+    FontFamily family(ui::interfaceFont());
+    Font font(&family,float(size),bold?FontStyleBold:FontStyleRegular,UnitPixel);
+    SolidBrush brush(Color(BYTE(std::lround(opacity*255)),color.GetR(),color.GetG(),color.GetB()));
+    StringFormat format;
+    format.SetAlignment(StringAlignmentCenter);
+    format.SetLineAlignment(StringAlignmentCenter);
+    format.SetFormatFlags(StringFormatFlagsNoWrap);
+    format.SetTrimming(StringTrimmingEllipsisCharacter);
+    g.DrawString(text.c_str(),-1,&font,RectF(12,float(y),float(width-24),float(height)),&format,&brush);
+}
+
+} // namespace
+
+std::vector<AnimationStage> animationMechanismStages(const Document& source,const Reaction& mechanism,
+                                                    const std::vector<size_t>& requestedRoute){
+    auto route=requestedRoute.empty()?defaultRoute(mechanism):requestedRoute;
+    std::vector<AnimationStage> stages;
+    for(size_t i=0;i<route.size();++i){
+        auto slotIndex=route[i];
+        const auto& slot=mechanism.slots.at(slotIndex);
+        size_t arrow=i?route[i-1]:size_t(-1);
+        if(i&&mechanism.explicitConnections()){
+            auto link=std::find_if(mechanism.links.begin(),mechanism.links.end(),[&](const MechanismLink& e){
+                return e.from==int(route[i-1])&&e.to==int(slotIndex);
+            });
+            if(link==mechanism.links.end())throw std::runtime_error("화살표로 직접 연결된 순서대로 단계를 입력하세요.");
+            arrow=size_t(link-mechanism.links.begin());
+        }
+        auto structure=structureInSlot(source,mechanism.id,slotIndex);
+        if(structure.atoms.empty())continue;
+        std::string name="단계 "+std::to_string(slotIndex+1);
+        if(arrow<mechanism.above.size()){
+            auto caption=transitionCaption(mechanism.above[arrow]);
+            if(!caption.name.empty())name=caption.name;
+            else if(!caption.description.empty())name=caption.description;
+        }
+        auto incoming=arrow<mechanism.below.size()?multiplicityEnergies(mechanism.below[arrow],mechanism.unit):"";
+        stages.push_back({std::move(structure),slot.label,std::move(name),
+                          multiplicityEnergies(slot.energy,mechanism.unit),std::move(incoming)});
+    }
+    if(stages.size()<2)throw std::runtime_error("선택한 메커니즘 경로에 편집 가능한 원자 구조가 두 개 이상 필요합니다.");
+    return stages;
+}
+
+namespace {
+struct Playback {
+    double speed=1.;
+    int hold=stageDelay; // Centiseconds, like GIF frame delays.
+    bool repeat=true;
+    AnimationBackground background=AnimationBackground::Theme;
+};
+class AnimationTimeline {
+    static constexpr int padding=20;
+    std::vector<Transition> transitions;
+    bool titles=false,names=false,energies=false,transitionEnergies=false;
+    double xMin=0,yMin=0,scale=1;
+    int header=0,structureWidth=0,structureHeight=0;
+public:
+    std::vector<AnimationStage> stages;
+    int width=0,height=0;
+    explicit AnimationTimeline(std::vector<AnimationStage> input):stages(std::move(input)){
+        if(stages.size()<2||stages.size()>maxStages)throw std::runtime_error("GIF에 넣을 구조는 2~40개로 지정하세요.");
+        for(auto& stage:stages)keepStructure(stage.structure);
+
+
+        double xMax=0,yMax=0;
+        for(size_t i=1;i<stages.size();++i){
+            transitions.emplace_back(stages[i-1].structure,stages[i].structure);
+            // Sample the moving label and bond extents for a single viewport across all stages.
+            for(double t:{0.,.25,.5,.75,1.}){
+                const auto b=transitions.back().sceneAt(t).bounds;
+                if(!std::isfinite(b.x+b.w)||!std::isfinite(b.y+b.h))throw std::runtime_error("구조의 그림 범위가 너무 큽니다.");
+                xMin=std::min(xMin,b.x);yMin=std::min(yMin,b.y);
+                xMax=std::max(xMax,b.x+b.w);yMax=std::max(yMax,b.y+b.h);
+            }
+        }
+
+        titles=std::any_of(stages.begin(),stages.end(),[](const auto& s){return !s.structureName.empty();});
+        names=std::any_of(stages.begin(),stages.end(),[](const auto& s){return !s.stageName.empty();});
+        energies=std::any_of(stages.begin(),stages.end(),[](const auto& s){return !s.energies.empty();});
+        transitionEnergies=std::any_of(stages.begin(),stages.end(),[](const auto& s){return !s.transitionEnergies.empty();});
+        header=titles?37:0;
+        const int footer=(names?27:0)+(energies?25:0)+(transitionEnergies?25:0);
+        scale=std::min(4.,580./std::max({1.,xMax-xMin,yMax-yMin}));
+        structureWidth=int(std::ceil((xMax-xMin)*scale))+2*padding;
+        structureHeight=int(std::ceil((yMax-yMin)*scale))+2*padding;
+        width=std::max(structureWidth,(energies||transitionEnergies)?480:(titles||names)?320:0);
+        height=header+structureHeight+footer;
+    }
+    int lastFrame() const {return int(transitions.size())*transitionSteps;}
+    int frameCount() const {return 2*lastFrame();}
+    int delay(int frame,const Playback& playback) const {
+        return std::max(2,int(std::lround((frame%transitionSteps==0?playback.hold:frameDelay)/playback.speed)));
+    }
+    int forwardFrame(int frame) const {return std::min(frame,frameCount()-frame);}
+    void draw(Graphics& g,int frame,bool themed){
+        const size_t segment=std::min(size_t(frame/transitionSteps),transitions.size()-1);
+        double t=double(frame-int(segment)*transitionSteps)/transitionSteps;
+        t=t*t*(3-2*t);
+        auto scene=transitions[segment].sceneAt(t);
+        const auto& from=stages[segment];
+        const auto& to=stages[segment+1];
+        const auto textColor=themed?appearance::palette().canvasInk:Color(27,39,51);
+        auto saved=g.Save();
+        g.TranslateTransform(float((width-structureWidth)*.5+padding-xMin*scale),float(header+padding-yMin*scale));
+        g.ScaleTransform(float(scale),float(scale));
+        render(g,scene,false,themed);
+        g.Restore(saved);
+        if(titles)drawCaption(g,from.structureName,to.structureName,t,width,4,header-4,23,true,textColor);
+        const int baseline=header+structureHeight;
+        if(names)drawCaption(g,from.stageName,to.stageName,std::min(1.,t*2),width,baseline,27,18,true,textColor);
+        if(energies)drawCaption(g,from.energies,to.energies,t,width,baseline+(names?27:0),23,15,false,textColor);
+        if(transitionEnergies&&t>0&&t<1&&!to.transitionEnergies.empty())
+            drawCaption(g,"TS  "+to.transitionEnergies,"",std::abs(t-.5),width,height-25,23,15,false,textColor);
+    }
+};
+
+std::string encodeAnimation(AnimationTimeline& timeline,const Playback& playback){
+    const int width=timeline.width,height=timeline.height;
+    std::string bytes="GIF89a";
+    word(bytes,width);word(bytes,height);
+    const bool transparent=playback.background==AnimationBackground::Transparent;
+    const bool themed=playback.background==AnimationBackground::Theme;
+    bytes+='\xf7';
+    bytes+=char(transparent?0:255);
+    bytes+='\0';
+    for(int i=0;i<256;++i){
+        if(transparent&&i==254){bytes.append(3,char(0));continue;}
+        bytes+=char(((i>>5)&7)*255/7);
+        bytes+=char(((i>>2)&7)*255/7);
+        bytes+=char((i&3)*255/3);
+    }
+    if(playback.repeat)bytes.append("\x21\xff\x0bNETSCAPE2.0\x03\x01\0\0\0",19);
+    Bitmap bitmap(width,height,PixelFormat32bppARGB);
+    std::vector<size_t> frameOffsets;
+    for(int frame=0;frame<=timeline.lastFrame();++frame){
+        {
+            Graphics g(&bitmap);
+            g.Clear(transparent?Color(0,0,0,0):Color(255,255,255));
+            if(themed)appearance::background(g,RectF(0,0,float(width),float(height)));
+            g.SetSmoothingMode(SmoothingModeAntiAlias);
+            g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+            timeline.draw(g,frame,themed);
+        }
+        frameOffsets.push_back(bytes.size());
+        gifFrame(bytes,bitmap,width,height,timeline.delay(frame,playback),transparent);
+    }
+    frameOffsets.push_back(bytes.size());
+    // Replay the same frames in reverse, so the loop also has a continuous transition.
+    if(playback.repeat)for(size_t i=frameOffsets.size()-3;i>0;--i)
+        bytes.append(bytes,frameOffsets[i],frameOffsets[i+1]-frameOffsets[i]);
+    bytes+=';';
+    return bytes;
+}
+
+bool editAnimationCaptions(HWND owner,std::vector<AnimationStage>& stages){
+    ui::Table rows;
+    for(const auto& stage:stages)rows.push_back({stage.structureName,stage.stageName,stage.energies,stage.transitionEnergies});
+    auto labels=ui::table(owner,L"결합 애니메이션 · 단계별 자막",
+        {L"상단 구조 이름",L"하단 단계 이름",L"하단 구조 에너지",L"이 단계로 들어오는 TS 에너지"},rows,
+        [&](const ui::Table& edited)->std::wstring{
+            if(edited.size()!=stages.size())return L"구조와 자막 행의 개수를 같게 유지하세요.";
+            for(const auto& row:edited)for(const auto& cell:row)
+                if(cell.size()>480)return L"각 자막을 더 짧게 입력하세요.";
+            return {};
+        },false,L"자막은 비워 둘 수 있습니다. 에너지 예시  M=1: 0.0 / M=3: 12.5 kcal/mol");
+    if(!labels)return false;
+    for(size_t i=0;i<stages.size();++i){
+        stages[i].structureName=std::move((*labels)[i][0]);
+        stages[i].stageName=std::move((*labels)[i][1]);
+        stages[i].energies=std::move((*labels)[i][2]);
+        stages[i].transitionEnergies=std::move((*labels)[i][3]);
+    }
+    return true;
+}
+enum PreviewControl {
+    PreviewPlay=101,PreviewRestart,PreviewPrevious,PreviewNext,PreviewTiming,
+    PreviewCaptions,PreviewReplace,PreviewSave,PreviewClose,PreviewReadout,PreviewRepeat,PreviewBackground
+};
+constexpr int previewSidebar=252;
+
+struct AnimationPreview {
+    ui::DialogColors colors;
+    AnimationTimeline timeline;
+    Playback playback;
+    std::vector<ULONGLONG> frameEnds;
+    ULONGLONG started=0, position=0;
+    int frame=0;
+    bool playing=true, done=false, seeking=false;
+    HFONT font=nullptr;
+    std::unique_ptr<Bitmap> buffer;
+
+    explicit AnimationPreview(std::vector<AnimationStage> stages):timeline(std::move(stages)){
+        updateTiming(0);
+    }
+    ~AnimationPreview(){if(font)DeleteObject(font);}
+    void updateTiming(int selected){
+        frameEnds.clear();
+        ULONGLONG total=0;
+        for(int i=0;i<(playback.repeat?timeline.frameCount():timeline.lastFrame()+1);++i){
+            total+=10*timeline.delay(i,playback);
+            frameEnds.push_back(total);
+        }
+        seek(selected);
+    }
+    void seek(int selected){
+        frame=std::clamp(selected,0,int(frameEnds.size())-1);
+        position=frame?frameEnds[size_t(frame-1)]:0;
+        started=GetTickCount64();
+    }
+    void tick(){
+        if(!playing)return;
+        auto elapsed=position+GetTickCount64()-started;
+        if(!playback.repeat&&elapsed>=frameEnds.back()){
+            frame=timeline.lastFrame();
+            playing=false;
+            return;
+        }
+        elapsed%=frameEnds.back();
+        frame=int(std::upper_bound(frameEnds.begin(),frameEnds.end(),elapsed)-frameEnds.begin());
+    }
+    int stage() const {
+        return (timeline.forwardFrame(frame)+transitionSteps/2)/transitionSteps;
+    }
+};
+
+RECT seekBounds(HWND hwnd){
+    RECT rc{};
+    GetClientRect(hwnd,&rc);
+    return {rc.right-previewSidebar+18,74,rc.right-18,100};
+}
+
+void refreshPreview(HWND hwnd,const AnimationPreview& preview){
+    auto readout=L"단계 "+std::to_wstring(preview.stage()+1)+L" / "+std::to_wstring(preview.timeline.stages.size())+
+        L"    ·    프레임 "+std::to_wstring(preview.frame+1);
+    SetDlgItemTextW(hwnd,PreviewReadout,readout.c_str());
+    InvalidateRect(hwnd,nullptr,FALSE);
+}
+
+void previewButtons(HWND hwnd){
+    RECT rc{};
+    GetClientRect(hwnd,&rc);
+    const int x=rc.right-previewSidebar+16;
+    const int w=previewSidebar-32;
+    MoveWindow(GetDlgItem(hwnd,PreviewReadout),x+2,47,w-4,24,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewPlay),x,110,w,34,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewRestart),x,151,w,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewPrevious),x,190,(w-8)/2,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewNext),x+(w+8)/2,190,(w-8)/2,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewTiming),x,229,(w+20)/2,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewRepeat),x+(w+36)/2,229,(w-36)/2,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewBackground),x,268,w,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewCaptions),x,340,w,30,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewReplace),x,376,w,30,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewSave),x,rc.bottom-83,w,35,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewClose),x,rc.bottom-41,w,29,TRUE);
+}
+
+void paintPreview(HWND hwnd,HDC dc,AnimationPreview& preview){
+    RECT rc{};
+    GetClientRect(hwnd,&rc);
+    const int w=std::max(1L,rc.right),h=std::max(1L,rc.bottom);
+    if(!preview.buffer||preview.buffer->GetWidth()!=UINT(w)||preview.buffer->GetHeight()!=UINT(h))
+        preview.buffer=std::make_unique<Bitmap>(w,h,PixelFormat32bppARGB);
+    const auto& palette=preview.colors.palette;
+    {
+        Graphics g(preview.buffer.get());
+        g.Clear(palette.panel);
+        g.SetSmoothingMode(SmoothingModeAntiAlias);
+        g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+        const float sidebar=float(w-previewSidebar);
+        const RectF canvas(0,0,sidebar,float(h));
+        SolidBrush backdrop(palette.canvas);
+        g.FillRectangle(&backdrop,canvas);
+        auto saved=g.Save();
+        g.SetClip(canvas);
+        const auto& timeline=preview.timeline;
+        const float scale=std::max(.1f,std::min((sidebar-48)/timeline.width,(h-48.f)/timeline.height));
+        g.TranslateTransform((sidebar-timeline.width*scale)*.5f,(h-timeline.height*scale)*.5f);
+        g.ScaleTransform(scale,scale);
+        const bool themed=preview.playback.background==AnimationBackground::Theme;
+        if(themed){
+            appearance::background(g,RectF(0,0,float(timeline.width),float(timeline.height)));
+        }else{
+            SolidBrush whitePaper(Color(255,255,255));
+            g.FillRectangle(&whitePaper,0,0,timeline.width,timeline.height);
+            if(preview.playback.background==AnimationBackground::Transparent){
+                SolidBrush tile(Color(224,224,224));
+                for(int y=0;y<timeline.height;y+=12)for(int x=0;x<timeline.width;x+=12)
+                    if((x/12+y/12)%2)g.FillRectangle(&tile,x,y,std::min(12,timeline.width-x),std::min(12,timeline.height-y));
+            }
+        }
+        preview.timeline.draw(g,preview.timeline.forwardFrame(preview.frame),themed);
+        g.Restore(saved);
+
+        Pen divider(palette.edge,1);
+        g.DrawLine(&divider,sidebar,0.f,sidebar,float(h));
+        ui::drawLabel(g,L"재생",RectF(sidebar+16,13,220,26),18,palette.text,true);
+        ui::drawLabel(g,L"편집",RectF(sidebar+16,308,220,26),18,palette.text,true);
+        const auto seek=seekBounds(hwnd);
+        const float length=float(seek.right-seek.left);
+        const float filled=length*preview.frame/(preview.frameEnds.size()-1);
+        appearance::rounded(g,RectF(float(seek.left),84,length,6),3,palette.edge);
+        if(filled>0)appearance::rounded(g,RectF(float(seek.left),84,filled,6),3,palette.accent);
+        SolidBrush thumb(palette.accent);
+        g.FillEllipse(&thumb,seek.left+filled-5,82.f,10.f,10.f);
+    }
+    Graphics output(dc);
+    output.SetPageUnit(UnitPixel);
+    output.DrawImage(preview.buffer.get(),Gdiplus::Rect(0,0,w,h),0,0,w,h,UnitPixel);
+}
+
+void setPlaying(HWND hwnd,AnimationPreview& preview,bool playing){
+    preview.seek(preview.frame);
+    preview.playing=playing;
+    SetDlgItemTextW(hwnd,PreviewPlay,playing?L"일시정지":L"재생");
+}
+
+const std::vector<std::wstring> backgroundNames={L"현재 테마",L"투명",L"흰색"};
+
+void previewAction(HWND hwnd,AnimationPreview& preview,int id){
+    if(id==PreviewPlay){
+        if(!preview.playing&&!preview.playback.repeat&&preview.frame==preview.timeline.lastFrame())preview.seek(0);
+        setPlaying(hwnd,preview,!preview.playing);
+    }else if(id==PreviewRestart){
+        preview.seek(0);
+        setPlaying(hwnd,preview,true);
+    }else if(id==PreviewPrevious||id==PreviewNext){
+        const int current=preview.timeline.forwardFrame(preview.frame);
+        int stage=id==PreviewPrevious?(std::max(0,current-1)/transitionSteps):(current/transitionSteps+1);
+        preview.seek(std::min(stage*transitionSteps,preview.timeline.lastFrame()));
+        setPlaying(hwnd,preview,false);
+    }else if(id==PreviewTiming){
+        static const std::array<double,5> speeds={.5,.75,1.,1.5,2.};
+        const auto selected=std::find(speeds.begin(),speeds.end(),preview.playback.speed)-speeds.begin();
+        auto result=ui::form(hwnd,L"애니메이션 재생 설정",
+            {{L"재생 속도",std::to_string(selected),false,{L"0.5×",L"0.75×",L"1×",L"1.5×",L"2×"}},
+             {L"단계에서 정지 (초)",std::to_string(preview.playback.hold/100.)}});
+        if(result){
+            auto speed=speeds.at(size_t(std::stoi((*result)[0])));
+            auto hold=int(std::lround(numeric((*result)[1],0,10)*100));
+            preview.playback.speed=speed;
+            preview.playback.hold=hold;
+            preview.updateTiming(preview.frame);
+        }
+    }else if(id==PreviewRepeat){
+        const int frame=preview.timeline.forwardFrame(preview.frame);
+        preview.playback.repeat=!preview.playback.repeat;
+        preview.updateTiming(frame);
+        SetDlgItemTextW(hwnd,PreviewRepeat,preview.playback.repeat?L"반복 켬":L"반복 끔");
+    }else if(id==PreviewBackground){
+        auto result=ui::form(hwnd,L"애니메이션 배경",
+            {{L"미리보기와 GIF 배경",std::to_string(int(preview.playback.background)),false,backgroundNames}});
+        if(result){
+            preview.playback.background=AnimationBackground(std::stoi(result->front()));
+            auto label=L"배경 · "+backgroundNames.at(size_t(preview.playback.background))+L"…";
+            SetDlgItemTextW(hwnd,PreviewBackground,label.c_str());
+        }
+    }else if(id==PreviewCaptions||id==PreviewReplace){
+        auto stages=preview.timeline.stages;
+        if(id==PreviewCaptions){
+            if(!editAnimationCaptions(hwnd,stages))return;
+        }else{
+            auto path=animationFile(L"현재 단계에 넣을 구조 열기",false,hwnd);
+            if(!path)return;
+            stages[size_t(preview.stage())].structure=readStructure(*path);
+        }
+        preview.timeline=AnimationTimeline(std::move(stages));
+        preview.updateTiming(preview.frame);
+    }else if(id==PreviewSave){
+        auto path=animationFile(L"결합 애니메이션 GIF 저장",true,hwnd);
+        if(!path)return;
+        auto cursor=SetCursor(LoadCursorW(nullptr,IDC_WAIT));
+        try{writeFile(*path,encodeAnimation(preview.timeline,preview.playback));}
+        catch(...){SetCursor(cursor);throw;}
+        SetCursor(cursor);
+        status=L"결합 애니메이션 GIF를 저장했습니다.";
+        redraw();
+        MessageBoxW(hwnd,L"GIF를 저장했습니다.",L"결합 애니메이션",MB_OK|MB_ICONINFORMATION);
+    }
+}
+
+LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
+    auto* preview=reinterpret_cast<AnimationPreview*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+    if(msg==WM_CREATE){
+        preview=static_cast<AnimationPreview*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+        SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(preview));
+        preview->font=CreateFontW(-15,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
+        const wchar_t* labels[]={L"일시정지",L"처음부터 재생",L"이전 단계",L"다음 단계",L"속도 · 정지 시간…",
+            L"구조명 · 단계명 · 에너지…",L"현재 단계 구조 바꾸기…",L"GIF 저장…",L"닫기"};
+        for(int id=PreviewPlay;id<=PreviewClose;++id){
+            HWND control=CreateWindowW(L"BUTTON",labels[id-PreviewPlay],WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
+                0,0,0,0,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);
+            SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(preview->font),FALSE);
+        }
+        for(auto id:{PreviewRepeat,PreviewBackground}){
+            auto control=CreateWindowW(L"BUTTON",id==PreviewRepeat?L"반복 켬":L"배경 · 현재 테마…",
+                WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,0,0,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);
+            SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(preview->font),FALSE);
+        }
+        HWND readout=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,0,0,0,0,hwnd,
+            reinterpret_cast<HMENU>(INT_PTR(PreviewReadout)),nullptr,nullptr);
+        SendMessageW(readout,WM_SETFONT,reinterpret_cast<WPARAM>(preview->font),FALSE);
+        previewButtons(hwnd);
+        refreshPreview(hwnd,*preview);
+        SetTimer(hwnd,1,15,nullptr);
+        return 0;
+    }
+    if(!preview)return DefWindowProcW(hwnd,msg,wp,lp);
+    switch(msg){
+    case WM_GETMINMAXINFO:
+        reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={680,560};return 0;
+    case WM_SIZE:
+        previewButtons(hwnd);InvalidateRect(hwnd,nullptr,FALSE);return 0;
+    case WM_ERASEBKGND:return 1;
+    case WM_CTLCOLORSTATIC:return preview->colors.control(msg,reinterpret_cast<HDC>(wp));
+    case WM_DRAWITEM:{
+        const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+        preview->colors.draw(item,item.CtlID==PreviewSave);return TRUE;
+    }
+    case WM_PAINT:{
+        PAINTSTRUCT ps{};
+        auto dc=BeginPaint(hwnd,&ps);
+        try{paintPreview(hwnd,dc,*preview);}
+        catch(...){FillRect(dc,&ps.rcPaint,preview->colors.panel);}
+        EndPaint(hwnd,&ps);return 0;
+    }
+    case WM_TIMER:
+        if(IsWindowEnabled(hwnd)&&!IsIconic(hwnd)){
+            int before=preview->frame;
+            const bool wasPlaying=preview->playing;
+            preview->tick();
+            if(preview->playing!=wasPlaying)SetDlgItemTextW(hwnd,PreviewPlay,L"재생");
+            if(preview->frame!=before||preview->playing!=wasPlaying)refreshPreview(hwnd,*preview);
+        }
+        return 0;
+    case WM_LBUTTONDOWN:
+    case WM_MOUSEMOVE:{
+        POINT point{short(LOWORD(lp)),short(HIWORD(lp))};
+        const auto seek=seekBounds(hwnd);
+        if(msg==WM_LBUTTONDOWN&&PtInRect(&seek,point)){
+            preview->seeking=true;
+            setPlaying(hwnd,*preview,false);
+            SetCapture(hwnd);
+        }
+        if(preview->seeking){
+            double fraction=double(point.x-seek.left)/std::max(1L,seek.right-seek.left);
+            preview->seek(int(std::lround(std::clamp(fraction,0.,1.)*(preview->frameEnds.size()-1))));
+            refreshPreview(hwnd,*preview);
+        }
+        return 0;
+    }
+    case WM_LBUTTONUP:
+        if(preview->seeking)ReleaseCapture();
+        return 0;
+    case WM_CAPTURECHANGED:
+        preview->seeking=false;return 0;
+    case WM_COMMAND:{
+        const int id=LOWORD(wp);
+        if(id==PreviewClose||id==IDCANCEL){SendMessageW(hwnd,WM_CLOSE,0,0);return 0;}
+        if((id>=PreviewPlay&&id<=PreviewSave)||id==PreviewRepeat||id==PreviewBackground){
+            // Pause while editing or choosing an export destination.
+            if(id>=PreviewTiming&&id!=PreviewRepeat)setPlaying(hwnd,*preview,false);
+            try{previewAction(hwnd,*preview,id);}
+            catch(const std::exception& e){MessageBoxW(hwnd,ui::wide(e.what()).c_str(),L"결합 애니메이션",MB_OK|MB_ICONWARNING);}
+            refreshPreview(hwnd,*preview);
+        }
+        return 0;
+    }
+    case WM_CLOSE:
+        KillTimer(hwnd,1);preview->done=true;PostMessageW(hwnd,WM_NULL,0,0);return 0;
+    }
+    return DefWindowProcW(hwnd,msg,wp,lp);
+}
+
+void previewAnimation(std::vector<AnimationStage> stages){
+    static constexpr wchar_t windowClass[]=L"YoungDrawAnimationPreview";
+    static const ATOM registered=[](){
+        WNDCLASSW wc{};
+        wc.lpfnWndProc=animationPreviewProc;
+        wc.hInstance=GetModuleHandleW(nullptr);
+        wc.lpszClassName=windowClass;
+        wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);
+        return RegisterClassW(&wc);
+    }();
+    if(!registered)throw std::runtime_error("애니메이션 미리보기 창을 등록할 수 없습니다.");
+    AnimationPreview preview(std::move(stages));
+    const auto rect=ui::ownedWindowRect(win,1050,680);
+    auto hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,windowClass,L"결합 애니메이션 미리보기",
+        WS_CAPTION|WS_SYSMENU|WS_THICKFRAME|WS_MAXIMIZEBOX|WS_POPUP|WS_CLIPCHILDREN,
+        rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,win,nullptr,GetModuleHandleW(nullptr),&preview);
+    if(!hwnd)throw std::runtime_error("애니메이션 미리보기 창을 열 수 없습니다.");
+    appearance::titlebar(hwnd);
+    EnableWindow(win,FALSE);
+    ShowWindow(hwnd,SW_SHOW);
+    SetFocus(GetDlgItem(hwnd,PreviewPlay));
+    preview.seek(0);
+    MSG msg{};
+    BOOL read=1;
+    while(!preview.done&&(read=GetMessageW(&msg,nullptr,0,0))>0){
+        if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE&&IsWindowEnabled(hwnd))
+            SendMessageW(hwnd,WM_CLOSE,0,0);
+        else if(!IsDialogMessageW(hwnd,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}
+    }
+    EnableWindow(win,TRUE);
+    DestroyWindow(hwnd);
+    SetActiveWindow(win);
+    if(read==0)PostQuitMessage(int(msg.wParam));
+}
+
+} // namespace
+
+std::string bondAnimationGif(std::vector<AnimationStage> stages,bool repeat,AnimationBackground background){
+    AnimationTimeline timeline(std::move(stages));
+    Playback playback;
+    playback.repeat=repeat;
+    playback.background=background;
+    return encodeAnimation(timeline,playback);
+}
+
+void createBondAnimation(){
+    auto selected=selectedDocument();
+    std::vector<std::wstring> inputs;
+    std::vector<int> mechanisms;
+    int preferred=targetContainer;
+    for(const auto& mechanism:doc.reactions){
+        if(mechanism.slots.size()<2)continue;
+        mechanisms.push_back(mechanism.id);
+        std::wstring name=L"메커니즘 "+std::to_wstring(mechanisms.size())+L" · "+
+            ui::wide(mechanism.slots.front().label)+L" → "+ui::wide(mechanism.slots.back().label);
+        inputs.push_back(std::move(name));
+        if(contains(selection,mechanism.id)||(!preferred&&std::any_of(mechanism.slots.begin(),mechanism.slots.end(),
+            [&](const Slot& slot){return std::any_of(slot.members.begin(),slot.members.end(),
+                [&](int id){return contains(selection,id);});})))preferred=mechanism.id;
+    }
+    auto found=std::find(mechanisms.begin(),mechanisms.end(),preferred);
+    const auto initial=found==mechanisms.end()?0:size_t(found-mechanisms.begin());
+    auto ids=groupedSelection(selection);
+    auto isArrow=[](const Object& object){return object.kind==ObjectKind::Line&&object.head&&object.points.size()>=2;};
+    const bool canDetect=!doc.atoms.empty()&&std::any_of(doc.objects.begin(),doc.objects.end(),isArrow);
+    const bool detectSelection=canDetect&&!selected.atoms.empty()&&std::any_of(doc.objects.begin(),doc.objects.end(),
+        [&](const Object& object){return isArrow(object)&&contains(ids,object.id);});
+    if(canDetect)inputs.push_back(L"현재 문서에서 구조·화살표·자막 자동 인식");
+    inputs.push_back(L"시작·끝 구조를 파일에서 열기");
+    if(!selected.atoms.empty()){
+        inputs.push_back(L"선택한 구조 → 파일에서 열기");
+        inputs.push_back(L"선택한 구조 → 클립보드 구조");
+    }
+    auto options=ui::form(win,L"결합 애니메이션 GIF",{
+        {L"구조 가져오기\n같은 원소·라벨은 저장 순서로 대응",std::to_string(detectSelection&&found==mechanisms.end()?mechanisms.size():initial),false,inputs}
+    });
+    if(!options)return;
+    const auto mode=size_t(std::stoi(options->front()));
+    std::vector<AnimationStage> stages;
+    const bool autoDetect=canDetect&&mode==mechanisms.size();
+    if(mode<mechanisms.size()||autoDetect){
+        std::optional<Document> recognized;
+        const Document* source=&doc;
+        const Reaction* chosen=nullptr;
+        if(autoDetect){
+            recognized=doc;
+            arrangeImportedMechanism(*recognized,detectSelection?ids:std::vector<int>{},true);
+            source=&*recognized;
+            chosen=&source->reactions.back();
+        }else chosen=reaction(mechanisms[mode]);
+        const auto& mechanism=*chosen;
+        auto route=defaultRoute(mechanism);
+        const bool chooseRoute=mechanism.explicitConnections()&&
+            (route.size()!=mechanism.slots.size()||std::any_of(mechanism.links.begin(),mechanism.links.end(),
+                [&](const MechanismLink& link){
+                    if(link.from<0)return false;
+                    auto at=std::find(route.begin(),route.end(),size_t(link.from));
+                    if(at==route.end())return true;
+                    const auto next=std::next(at)==route.end()?route.front():*std::next(at);
+                    return size_t(link.to)!=next;
+                }));
+        if(chooseRoute){
+            std::string path;
+            for(size_t index:route){
+                if(!path.empty())path+=' ';
+                path+=std::to_string(index+1);
+            }
+            auto choice=ui::form(win,L"분기 메커니즘 경로",{
+                {L"화살표로 연결된 단계 번호\n예시  1 2 4",path}
+            });
+            if(!choice)return;
+            std::istringstream entered(choice->front());
+            route.clear();
+            int index;
+            while(entered>>index){
+                if(index<1||size_t(index)>mechanism.slots.size())throw std::runtime_error("표에 있는 단계 번호를 입력하세요.");
+                route.push_back(size_t(index-1));
+            }
+            if(!entered.eof()||route.size()<2||route.size()>maxStages)throw std::runtime_error("단계 번호를 공백으로 구분해 2~40개 입력하세요.");
+        }
+        stages=animationMechanismStages(*source,mechanism,route);
+    }else{
+        Document start,end;
+        const size_t external=mode-mechanisms.size()-size_t(canDetect);
+        if(external==0){
+            auto path=animationFile(L"시작 구조 열기");
+            if(!path)return;
+            start=readStructure(*path);
+        }else start=std::move(selected);
+        if(external==2){
+            auto copied=clipboardDocument();
+            if(!copied||copied->atoms.empty())throw std::runtime_error("ChemDraw 또는 YoungDraw의 끝 구조를 먼저 복사하세요.");
+            end=std::move(*copied);
+        }else{
+            auto path=animationFile(L"끝 구조 열기");
+            if(!path)return;
+            end=readStructure(*path);
+        }
+        stages={{std::move(start),"","단계 1","",""},{std::move(end),"","단계 2","",""}};
+    }
+
+    previewAnimation(std::move(stages));
+
+}
+
+} // namespace yd::editor

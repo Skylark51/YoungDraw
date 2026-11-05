@@ -1,4 +1,5 @@
 #include "win_editor_chrome.h"
+#include "win_editor_commands.h"
 #include "win_editor_shortcuts.h"
 #include "win_editor_state.h"
 #include "win_editor_tabs.h"
@@ -62,15 +63,67 @@ void icon(Graphics& g,int id,RectF box,Color color){
         positive.AddBezier(0.f,0.f,-16.f,-23.f,-27.f,-12.f,-20.f,0.f);positive.AddBezier(-20.f,0.f,-27.f,12.f,-16.f,23.f,0.f,0.f);positive.CloseFigure();g.FillPath(&brush,&positive);
         negative.AddBezier(0.f,0.f,16.f,-23.f,27.f,-12.f,20.f,0.f);negative.AddBezier(20.f,0.f,27.f,12.f,16.f,23.f,0.f,0.f);negative.CloseFigure();g.DrawPath(&pen,&negative);break;}
     case 127:case 137:case 219:g.DrawEllipse(&pen,-12.f,-12.f,24.f,24.f);g.DrawEllipse(&pen,-4.f,-4.f,8.f,8.f);for(int i=0;i<8;i++){double a=i*pi/4;line(float(13*std::cos(a)),float(13*std::sin(a)),float(20*std::cos(a)),float(20*std::sin(a)));}break;
-    case 130:case 131:case 141:line(-20,18,22,18);line(-20,18,-20,-19);g.DrawBezier(&pen,PointF(-17,11),PointF(-2,-27),PointF(7,20),PointF(20,-10));g.FillEllipse(&brush,-7.f,-5.f,5.f,5.f);break;
+    case 131:
+        g.DrawRectangle(&pen,-19.f,-16.f,38.f,32.f);
+        line(-19,-5,19,-5);line(-19,6,19,6);line(-7,-5,-7,16);line(7,-5,7,16);break;
+    case 130:line(-20,18,22,18);line(-20,18,-20,-19);g.DrawBezier(&pen,PointF(-17,11),PointF(-2,-27),PointF(7,20),PointF(20,-10));g.FillEllipse(&brush,-7.f,-5.f,5.f,5.f);break;
     case 132:g.DrawBezier(&pen,PointF(-21,12),PointF(-9,-25),PointF(10,-18),PointF(21,11));line(-21,19,-4,-3);line(-4,-3,21,19);break;
     case 133:line(-22,-10,22,-10);pen.SetDashStyle(DashStyleDash);line(-22,9,22,9);g.FillEllipse(&brush,-4.f,-14.f,8.f,8.f);break;
     case 110:line(-16,14,14,-16);for(int i=0;i<6;i++){double a=i*pi/3;line(float(11+7*std::cos(a)),float(-11+7*std::sin(a)),float(11+12*std::cos(a)),float(-11+12*std::sin(a)));}break;
     case 111:case 112:case 113:g.DrawRectangle(&pen,-20.f,-16.f,35.f,34.f);ring(6,false);if(id==112){line(13,4,13,22);line(4,13,22,13);}break;
-    case 120:case 140:arrow();g.DrawEllipse(&pen,-23.f,-18.f,10.f,10.f);g.DrawPolygon(&pen,std::vector<PointF>{{12,-15},{18,-22},{24,-15},{18,-8}}.data(),4);break;
+    case 120:arrow();g.DrawEllipse(&pen,-23.f,-18.f,10.f,10.f);g.DrawPolygon(&pen,std::vector<PointF>{{12,-15},{18,-22},{24,-15},{18,-8}}.data(),4);break;
+    case recognizeMechanismCommand:
+        for(float x:{-22.f,22.f})for(float y:{-19.f,19.f}){
+            line(x,y,x+(x<0?8:-8),y);line(x,y,x,y+(y<0?7:-7));
+        }
+        line(-10,0,10,0);line(10,0,5,-5);line(10,0,5,5);
+        g.DrawEllipse(&pen,-18.f,-3.f,6.f,6.f);g.DrawEllipse(&pen,12.f,-3.f,6.f,6.f);
+        break;
+    case 182:arrow();g.DrawEllipse(&pen,-19.f,-19.f,10.f,10.f);g.DrawEllipse(&pen,9.f,9.f,10.f,10.f);break;
+    case 183:line(-19,-18,-19,18);line(-19,18,21,18);line(-15,9,-3,-9);line(-3,-9,7,3);line(7,3,19,-14);break;
+    case 143:case 144:
+        g.DrawRectangle(&pen,-18.f,-15.f,36.f,30.f);line(-8,0,8,0);
+        if(id==143)line(0,-8,0,8);
+        break;
+    case 145:case 147:
+        g.DrawEllipse(&pen,-23.f,-4.f,8.f,8.f);g.DrawEllipse(&pen,15.f,-4.f,8.f,8.f);
+        if(id==145){line(-15,0,15,0);line(15,0,8,-5);line(15,0,8,5);}
+        else{line(-15,0,-7,0);line(7,0,15,0);line(-5,-5,5,5);line(-5,5,5,-5);}
+        break;
+    case 146:
+        g.DrawRectangle(&pen,-21.f,-15.f,17.f,26.f);g.DrawRectangle(&pen,4.f,-15.f,17.f,26.f);
+        line(-13,18,13,18);line(13,18,7,14);break;
+    case 149:arrow();line(-19,-15,19,-15);line(-19,-20,-19,-10);line(19,-20,19,-10);break;
+    case 135:line(20,0,1,0);line(1,0,-18,-14);line(1,0,-18,14);
+        line(-18,-14,-10,-13);line(-18,-14,-15,-7);line(-18,14,-10,13);line(-18,14,-15,7);break;
+    case 136:
+        line(-22,13,-9,13);line(9,-13,22,-13);line(-9,13,9,-13);
+        g.FillEllipse(&brush,-12.f,10.f,6.f,6.f);g.FillEllipse(&brush,6.f,-16.f,6.f,6.f);break;
+    case 138:g.DrawRectangle(&pen,-15.f,-20.f,30.f,40.f);
+        line(-8,-10,8,-10);line(-8,-2,8,-2);line(-8,6,5,6);line(-8,13,5,13);break;
+    case 139:arrow();line(-10,-17,10,-17);line(0,-17,0,-6);break;
+    case 142:{
+        const Color colors[]={Color(221,76,65),Color(57,157,130),Color(66,118,222)};
+        for(int i=0;i<3;i++){SolidBrush swatch(colors[i]);g.FillRectangle(&swatch,-20.f+14*i,-7.f,12.f,14.f);}
+        break;}
+    case 186:g.DrawRectangle(&pen,-21.f,-15.f,36.f,30.f);
+        line(-21,-8,15,-8);line(-3,10,21,-14);line(-3,10,2,9);break;
+    case bondAnimationCommand:{
+        g.DrawEllipse(&pen,-22.f,-15.f,9.f,9.f);
+        g.DrawEllipse(&pen,13.f,-15.f,9.f,9.f);
+        pen.SetDashStyle(DashStyleDash);line(-13,-10.5f,13,-10.5f);
+        PointF play[]={{-6,-1},{-6,19},{11,9}};g.FillPolygon(&brush,play,3);break;}
+    case 140:case 141:{
+        PointF folder[]={{-20,-14},{-5,-14},{0,-9},{20,-9},{20,16},{-20,16}};
+        g.DrawPolygon(&pen,folder,6);
+        if(id==140){line(-10,5,10,5);line(10,5,5,0);line(10,5,5,10);}
+        else{line(-12,9,-5,1);line(-5,1,3,7);line(3,7,12,-2);}
+        break;}
     case 121:line(-15,17,16,-15);line(-15,17,-18,22);line(-18,22,-10,20);line(12,-18,19,-11);break;
     case 122:arrow();line(0,-22,0,-8);line(-7,-15,7,-15);break;
-    case 123:case 124:g.DrawRectangle(&pen,-17.f,-16.f,30.f,35.f);g.DrawRectangle(&pen,-8.f,-21.f,14.f,8.f);line(-9,2,19,2);line(19,2,12,-4);line(19,2,12,8);break;
+    case 124:g.DrawRectangle(&pen,-18.f,-19.f,31.f,36.f);line(3,-19,13,-9);
+        line(3,-19,3,-9);line(3,-9,13,-9);line(20,7,-7,7);line(-7,7,-1,1);line(-7,7,-1,13);break;
+    case 123:g.DrawRectangle(&pen,-17.f,-16.f,30.f,35.f);g.DrawRectangle(&pen,-8.f,-21.f,14.f,8.f);line(-9,2,19,2);line(19,2,12,-4);line(19,2,12,8);break;
     case 134:pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,-20.f,-17.f,40.f,34.f);line(-6,0,6,0);line(0,-6,0,6);break;
     case 150:{FontFamily ff(L"Arial");Font f(&ff,29,FontStyleBold,UnitPixel);g.DrawString(L"B",-1,&f,PointF(-19,-22),&brush);pen.SetWidth(4);line(-17,18,20,18);break;}
     case 156:{line(-12,7,0,-20);line(0,-20,12,7);line(-8,-2,8,-2);
@@ -104,7 +157,14 @@ void button(Graphics& g,int id,std::wstring label,RectF r,bool active){
 
 HWND tooltip=nullptr;bool tipActive=false;RECT tipRect{};int tipCommand=0;std::wstring tipText;
 std::wstring helpText(int id){
-    if(id>=143&&id<=149)return L"단계·연결 편집\n단계 추가·삭제·합치기, 드래그 연결과 연결 표, 화살표 길이를 수정합니다. Ctrl+Z로 되돌릴 수 있습니다.";
+    if(id==recognizeMechanismCommand)return L"현재 파일 → 메커니즘 편집\n열린 그림에서 구조, 반응 화살표, 이름과 에너지를 인식합니다. 미리보기를 적용하면 단계 편집 표가 열립니다.";
+    if(id==143)return L"단계 추가\n기본값은 맨 끝입니다. 위치 번호를 바꾸면 기존 단계 앞에 삽입합니다.";
+    if(id==144)return L"단계 삭제\n단계 번호를 지정하고 그 안의 구조를 캔버스에 남길지 선택합니다.";
+    if(id==145)return L"드래그로 연결\n연결 모드를 켠 뒤 시작 칸에서 도착 칸으로 드래그합니다. 다시 누르거나 Esc를 눌러 종료합니다.";
+    if(id==146)return L"두 단계 합치기\n지정한 단계의 구조와 연결을 다른 단계로 옮깁니다.";
+    if(id==147)return L"선택 연결 삭제\n삭제할 메커니즘 화살표를 먼저 클릭하세요.";
+    if(id==149)return L"화살표 길이\n선택한 메커니즘의 화살표 길이를 지정합니다. 0이면 설명에 맞춰 자동으로 정합니다.";
+    if(id==140||id==141)return L"예제로 바꾸기\n현재 탭의 내용을 예제로 교체합니다. Ctrl+Z로 이전 내용을 복원합니다.";
     if(id==186)return L"구조 고치기\n선택한 단계의 구조만 독립 창에서 수정합니다. 적용하면 해당 구조만 교체하며 Ctrl+Z로 되돌릴 수 있습니다.";
     if(id==187)return L"취소\n독립 창의 수정을 버리고 메커니즘으로 돌아갑니다.";
     if(id==185)return L"내 프로젝트\n프로젝트 생성·열기·삭제, 구조·CDXML·이미지 보관, 이름·노트 편집과 드래그 순서 변경을 지원합니다.";
@@ -122,6 +182,7 @@ std::wstring helpText(int id){
     static const std::map<int,std::wstring> help={
       {100,L"새 문서 (Ctrl+N)\n새 문서를 만듭니다."},{101,L"열기 (Ctrl+O)\nYoungDraw 또는 CDXML 문서를 엽니다."},{102,L"저장 (Ctrl+S)\n구조·그래프·이미지와 편집 정보를 저장합니다."},{103,L"SVG 내보내기\n논문용 벡터 그림으로 저장합니다."},{106,L"JACS 출판용 SVG\n240/504 pt 열 너비를 선택하고 출력 시 글자·선 두께·그림 높이를 검사합니다."},{108,L"CDXML 내보내기\nChemDraw에서 편집할 수 있는 문서로 저장합니다."},{104,L"실행 취소 (Ctrl+Z)\n직전 편집을 되돌립니다."},{105,L"다시 실행 (Ctrl+Shift+Z)\n취소한 편집을 다시 적용합니다."},{107,L"화면 맞춤\n전체 그림이 보이도록 확대·축소합니다."},
       {110,L"분자 구조 정리 (Ctrl+Shift+K)\n결합 길이와 고리 모양을 정돈합니다. 입체 배치는 보존합니다."},{111,L"템플릿\n기본 구조 또는 저장한 개인 템플릿을 삽입합니다."},{112,L"템플릿 보관\n선택한 객체를 재사용할 템플릿 파일로 저장합니다."},{113,L"구조 파일 삽입\nCDXML/.ydraw 파일을 현재 문서에 삽입합니다."},
+      {bondAnimationCommand,L"결합 애니메이션 GIF 만들기\n메커니즘의 여러 단계 또는 두 구조의 결합 변화를 반복 GIF로 저장합니다."},
       {120,L"반응 메커니즘 추가\n구조·단계 이름·화살표 설명을 담는 반응 블록을 만듭니다."},{121,L"선택 항목 편집\n메커니즘은 표로, 일반 객체는 속성창으로 편집합니다."},{122,L"반응 단계 추가\n선택한 메커니즘의 마지막에 새 단계를 추가합니다."},{123,L"구조 붙여넣기\n선택한 구조 삽입 영역에 복사한 구조·이미지를 크기와 위치를 맞춰 넣습니다."},{124,L"구조 파일 삽입\n선택한 구조 삽입 영역을 CDXML/.ydraw 또는 GIF/PNG/JPEG 파일로 채웁니다."},
       {125,L"자동 크기·간격 정렬\n선택한 구조나 반응 블록의 크기·단계 간격·이름 위치를 정돈합니다."},{126,L"촉매 순환 배치\n반응 단계를 원형으로 배치하고 마지막에서 첫 단계로 연결합니다."},{127,L"메커니즘 설정\n단위, 가로·순환 배치, 정방향·평형 화살표를 바꿉니다."},
       {130,L"에너지 그래프 추가\n여러 경로를 비교하는 에너지 프로필을 만듭니다."},{131,L"에너지 표 편집\n상태 이름과 경로별 에너지를 셀 단위로 편집합니다. Excel 표를 붙여넣을 수 있습니다."},{132,L"경로 추가\n선택한 그래프에 비교할 에너지 경로를 추가합니다."},{135,L"양쪽 분기 추가\n첫 상태를 중앙에 두고 기존 경로는 오른쪽, 새 경로는 왼쪽으로 이어집니다."},{133,L"경로 스타일\n이름·색·선 종류·굵기·표식을 바꿉니다."},{134,L"구조 삽입 영역 표시\n메커니즘과 그래프의 구조 삽입 영역을 표시하거나 숨깁니다. 내보내기에는 포함되지 않습니다."},{138,L"출판용 비율·여백 정돈\n선택 그래프의 가로·세로 비율과 글자 크기를 조정합니다. 데이터·색·선·축 범위는 유지합니다."},{139,L"반응 이름·화살표\n그래프 x축 위에 표시할 반응 이름과 화살표의 시작·끝 범위(0~100%)를 편집합니다."},{136,L"화살표 자석 배치\n준위의 왼쪽 끝·중앙·오른쪽 끝에서 두 점을 클릭하여 화살표 범위를 정합니다."},{142,L"구간별 색상\n같은 경로 안에서 준위·표식과 연결선 색상을 구간별로 설정합니다."},{137,L"그래프·축 설정\n제목·단위·크기·그래프 형태·y축 범위·눈금 간격·글자 크기·축 글자색·첨자를 설정합니다."},
@@ -131,7 +192,7 @@ void hideTooltip(){KillTimer(win,911);if(!tooltip||!tipActive)return;TOOLINFOW i
 void showTooltip(){KillTimer(win,911);if(!tipActive||drawing||dragging||boxing||panning||GetForegroundWindow()!=win)return;POINT point{};GetCursorPos(&point);POINT client=point;ScreenToClient(win,&client);if(!PtInRect(&tipRect,client))return;TOOLINFOW info{};info.cbSize=TTTOOLINFOW_V1_SIZE;info.hwnd=win;info.uId=1;SendMessageW(tooltip,TTM_TRACKPOSITION,0,MAKELPARAM(point.x+16,point.y+22));SendMessageW(tooltip,TTM_TRACKACTIVATE,TRUE,(LPARAM)&info);}
 void updateTooltip(){if(!tooltip)return;if(drawing||dragging||boxing||panning){hideTooltip();return;}const Hit* hit=nullptr;for(auto& h:hits)if(h.box.Contains(float(mouse.x),float(mouse.y))){hit=&h;break;}if(!hit){hideTooltip();return;}RECT rect{LONG(hit->box.X),LONG(hit->box.Y),LONG(hit->box.X+hit->box.Width),LONG(hit->box.Y+hit->box.Height)};if(tipActive&&tipCommand==hit->id&&EqualRect(&rect,&tipRect))return;hideTooltip();tipText=helpText(hit->id);if(tipText.empty())return;tipRect=rect;tipCommand=hit->id;TOOLINFOW info{};info.cbSize=TTTOOLINFOW_V1_SIZE;info.hwnd=win;info.uId=1;info.uFlags=TTF_TRACK|TTF_ABSOLUTE;info.rect=rect;info.lpszText=tipText.data();tipActive=SendMessageW(tooltip,TTM_ADDTOOLW,0,(LPARAM)&info)!=0;if(tipActive)SetTimer(win,911,450,nullptr);}
 void createTooltip(){INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_WIN95_CLASSES};InitCommonControlsEx(&controls);tooltip=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,win,nullptr,GetModuleHandleW(nullptr),nullptr);SendMessageW(tooltip,TTM_SETMAXTIPWIDTH,0,360);SendMessageW(tooltip,TTM_SETDELAYTIME,TTDT_INITIAL,450);SendMessageW(tooltip,TTM_SETDELAYTIME,TTDT_AUTOPOP,15000);SendMessageW(tooltip,TTM_SETDELAYTIME,TTDT_RESHOW,80);}
-void menuBar(HWND hwnd){HMENU bar=CreateMenu();auto menu=[&](const wchar_t* label,std::initializer_list<std::pair<int,const wchar_t*>> items){HMENU m=CreatePopupMenu();for(auto& item:items)AppendMenuW(m,MF_STRING,item.first,item.second);AppendMenuW(bar,MF_POPUP|MF_OWNERDRAW,(UINT_PTR)m,label);MENUITEMINFOW info{sizeof(info)};info.fMask=MIIM_STRING;info.dwTypeData=const_cast<wchar_t*>(label);SetMenuItemInfoW(bar,UINT(GetMenuItemCount(bar)-1),TRUE,&info);};menu(L"파일(&F)",{{185,L"내 프로젝트…"},{100,L"새 문서\tCtrl+N"},{101,L"열기…\tCtrl+O"},{102,L"저장\tCtrl+S"},{112,L"템플릿으로 저장…"},{109,L"현재 탭 닫기\tCtrl+W"},{108,L"CDXML 내보내기…"},{103,L"SVG 내보내기…"},{106,L"JACS 출판용 SVG…"}});menu(L"편집(&E)",{{186,L"구조 고치기 · 독립 창…"},{104,L"실행 취소\tCtrl+Z"},{105,L"다시 실행\tCtrl+Shift+Z"},{198,L"그룹 만들기\tCtrl+G"},{199,L"그룹 해제\tCtrl+Shift+G"},{121,L"선택 항목 편집…"},{110,L"구조 정리\tCtrl+Shift+K"},{153,L"선택 부분을 뒤쪽으로 (옅은 회색)"},{154,L"선택 부분을 앞쪽으로 (검정)"},{160,L"선택 구조 좌우 반전"},{161,L"선택 구조 상하 반전"},{162,L"선택 구조 반시계 90° 회전"},{163,L"선택 구조 시계 90° 회전"},{164,L"선택 구조 각도 지정 회전…\tCtrl+R"},{165,L"선택 구조 크기 조정…\tCtrl+K"},{166,L"벤젠을 Ph로 축약\tCtrl+Shift+P"}});menu(L"삽입(&I)",{{111,L"템플릿…"},{113,L"구조 파일…"},{215,L"직선\tl"},{216,L"공명 화살표 ↔\tr"},{217,L"공명 결합 (실선+파선)\ta"},{218,L"오비탈 그리기"},{219,L"오비탈 설정…"},{221,L"첫 구조 없이 분기 메커니즘…"},{220,L"세로선 분기 화살표…"},{120,L"반응 메커니즘…"},{130,L"에너지 그래프…"}});menu(L"배치(&L)",{{143,L"단계 삽입…"},{144,L"단계 제거…"},{146,L"두 단계 합치기…"},{145,L"드래그로 단계 연결"},{147,L"선택한 연결 제거"},{148,L"단계·연결 표 편집…"},{149,L"화살표 길이…"},{167,L"가져온 메커니즘 정리 (구조 보존)"},{169,L"메커니즘 분기 추가…"},{168,L"화살표 중앙 X 설정…"},{125,L"크기·간격 자동 정렬"},{126,L"촉매 순환 배치"},{127,L"메커니즘 설정…"},{137,L"그래프·축 설정…"},{138,L"출판용 비율·여백 정돈"},{139,L"반응 이름·화살표…"},{136,L"화살표 자석 배치…"},{142,L"그래프 구간별 색상…"},{135,L"그래프 양쪽 분기 추가…"},{190,L"선택 객체 왼쪽 맞춤\tCtrl+Shift+Alt+L"},{191,L"선택 객체 가로 중앙 맞춤\tCtrl+Shift+Alt+C"},{192,L"선택 객체 오른쪽 맞춤\tCtrl+Shift+Alt+R"},{193,L"선택 객체 위쪽 맞춤\tCtrl+Shift+Alt+T"},{194,L"선택 객체 상하 중앙 맞춤\tCtrl+Shift+Alt+M"},{195,L"선택 객체 아래쪽 맞춤\tCtrl+Shift+Alt+B"},{196,L"선택 객체 가로 간격 배분\tCtrl+Shift+Alt+H"},{197,L"선택 객체 세로 간격 배분\tCtrl+Shift+Alt+V"}});menu(L"보기(&V)",{{184,L"배경 · 테마…"},{176,L"레이어 패널"},{107,L"화면 맞춤"},{134,L"구조 삽입 영역 표시"},{140,L"메커니즘 예제"},{141,L"에너지 그래프 예제"}});if(isolatedStructureEditing){auto file=GetSubMenu(bar,0);while(GetMenuItemCount(file)>0)DeleteMenu(file,0,MF_BYPOSITION);AppendMenuW(file,MF_STRING,186,L"적용하고 돌아가기\tCtrl+S");AppendMenuW(file,MF_STRING,187,L"취소하고 돌아가기\tCtrl+W");for(int id:{120,130,167,169,220,221,186,140,141})EnableMenuItem(bar,id,MF_BYCOMMAND|MF_GRAYED);EnableMenuItem(file,186,MF_BYCOMMAND|MF_ENABLED);}
+void menuBar(HWND hwnd){HMENU bar=CreateMenu();auto menu=[&](const wchar_t* label,std::initializer_list<std::pair<int,const wchar_t*>> items){HMENU m=CreatePopupMenu();for(auto& item:items)AppendMenuW(m,MF_STRING,item.first,item.second);AppendMenuW(bar,MF_POPUP|MF_OWNERDRAW,(UINT_PTR)m,label);MENUITEMINFOW info{sizeof(info)};info.fMask=MIIM_STRING;info.dwTypeData=const_cast<wchar_t*>(label);SetMenuItemInfoW(bar,UINT(GetMenuItemCount(bar)-1),TRUE,&info);};menu(L"파일(&F)",{{185,L"내 프로젝트…"},{100,L"새 문서\tCtrl+N"},{101,L"열기…\tCtrl+O"},{102,L"저장\tCtrl+S"},{112,L"템플릿으로 저장…"},{109,L"현재 탭 닫기\tCtrl+W"},{108,L"CDXML 내보내기…"},{103,L"SVG 내보내기…"},{106,L"JACS 출판용 SVG…"}});menu(L"편집(&E)",{{186,L"구조 고치기 · 독립 창…"},{104,L"실행 취소\tCtrl+Z"},{105,L"다시 실행\tCtrl+Shift+Z"},{198,L"그룹 만들기\tCtrl+G"},{199,L"그룹 해제\tCtrl+Shift+G"},{121,L"선택 항목 편집…"},{110,L"구조 정리\tCtrl+Shift+K"},{153,L"선택 부분을 뒤쪽으로 (옅은 회색)"},{154,L"선택 부분을 앞쪽으로 (검정)"},{160,L"선택 구조 좌우 반전"},{161,L"선택 구조 상하 반전"},{162,L"선택 구조 반시계 90° 회전"},{163,L"선택 구조 시계 90° 회전"},{164,L"선택 구조 각도 지정 회전…\tCtrl+R"},{165,L"선택 구조 크기 조정…\tCtrl+K"},{166,L"벤젠을 Ph로 축약\tCtrl+Shift+P"}});menu(L"삽입(&I)",{{111,L"템플릿…"},{113,L"구조 파일…"},{215,L"직선\tl"},{216,L"공명 화살표 ↔\tr"},{217,L"공명 결합 (실선+파선)\ta"},{218,L"오비탈 그리기"},{219,L"오비탈 설정…"},{externalMechanismCommand,L"첫 구조 없이 분기 메커니즘…"},{insertBranchArrowsCommand,L"세로선 분기 화살표…"},{120,L"반응 메커니즘…"},{bondAnimationCommand,L"결합 애니메이션 GIF…"},{130,L"에너지 그래프…"}});menu(L"배치(&L)",{{143,L"단계 삽입…"},{144,L"단계 제거…"},{146,L"두 단계 합치기…"},{145,L"드래그로 단계 연결"},{147,L"선택한 연결 제거"},{148,L"단계·연결 표 편집…"},{149,L"화살표 길이…"},{recognizeMechanismCommand,L"현재 파일 → 메커니즘 편집…"},{167,L"가져온 메커니즘 정리 (구조 보존)"},{169,L"메커니즘 분기 추가…"},{168,L"화살표 중앙 X 설정…"},{125,L"크기·간격 자동 정렬"},{126,L"촉매 순환 배치"},{127,L"메커니즘 설정…"},{137,L"그래프·축 설정…"},{138,L"출판용 비율·여백 정돈"},{139,L"반응 이름·화살표…"},{136,L"화살표 자석 배치…"},{142,L"그래프 구간별 색상…"},{135,L"그래프 양쪽 분기 추가…"},{190,L"선택 객체 왼쪽 맞춤\tCtrl+Shift+Alt+L"},{191,L"선택 객체 가로 중앙 맞춤\tCtrl+Shift+Alt+C"},{192,L"선택 객체 오른쪽 맞춤\tCtrl+Shift+Alt+R"},{193,L"선택 객체 위쪽 맞춤\tCtrl+Shift+Alt+T"},{194,L"선택 객체 상하 중앙 맞춤\tCtrl+Shift+Alt+M"},{195,L"선택 객체 아래쪽 맞춤\tCtrl+Shift+Alt+B"},{196,L"선택 객체 가로 간격 배분\tCtrl+Shift+Alt+H"},{197,L"선택 객체 세로 간격 배분\tCtrl+Shift+Alt+V"}});menu(L"보기(&V)",{{184,L"배경 · 테마…"},{176,L"레이어 패널"},{107,L"화면 맞춤"},{134,L"구조 삽입 영역 표시"},{140,L"메커니즘 예제"},{141,L"에너지 그래프 예제"}});if(isolatedStructureEditing){auto file=GetSubMenu(bar,0);while(GetMenuItemCount(file)>0)DeleteMenu(file,0,MF_BYPOSITION);AppendMenuW(file,MF_STRING,186,L"적용하고 돌아가기\tCtrl+S");AppendMenuW(file,MF_STRING,187,L"취소하고 돌아가기\tCtrl+W");for(int id:{120,130,167,169,insertBranchArrowsCommand,externalMechanismCommand,bondAnimationCommand,recognizeMechanismCommand,186,140,141})EnableMenuItem(bar,id,MF_BYCOMMAND|MF_GRAYED);EnableMenuItem(file,186,MF_BYCOMMAND|MF_ENABLED);}
  SetMenu(hwnd,bar);refreshAppearance();}
 void refreshAppearance(){const auto& p=appearance::palette();ink=p.text;muted=p.muted;accent=p.accent;border=p.edge;appearance::titlebar(win);HBRUSH old=menuBackground;menuBackground=CreateSolidBrush(RGB(p.chrome.GetR(),p.chrome.GetG(),p.chrome.GetB()));MENUINFO info{sizeof(info)};info.fMask=MIM_BACKGROUND;info.hbrBack=menuBackground;if(GetMenu(win))SetMenuInfo(GetMenu(win),&info);if(old)DeleteObject(old);DrawMenuBar(win);if(documentTabs)InvalidateRect(documentTabs,nullptr,FALSE);redraw();}
 

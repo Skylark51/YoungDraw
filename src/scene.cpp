@@ -320,8 +320,20 @@ Scene makeScene(const Document& d,const Measure& measure){
                 }if(!line.empty())flush();
             }return wrapped;
         };
+        const auto stateX=[&](size_t i){return x0+50+(w-100)*i/std::max(size_t(1),plot.states.size()-1);};
+        auto stageRange=[&](const MechanismStage& stage){
+            double a=x0+w*stage.start/100,b=x0+w*stage.end/100;
+            if(plot.states.size()>1){
+                // Axis-edge ranges terminate at the outer level centers when they fit.
+                double left=stage.start==0?stateX(0):a;
+                double right=stage.end==100?stateX(plot.states.size()-1):b;
+                if(right-left>=w/100){a=left;b=right;}
+            }
+            return std::pair{a,b};
+        };
         for(size_t i=0;i<plot.stages.size();i++){
-            const auto& stage=plot.stages[i];double span=w*(stage.end-stage.start)/100;
+            const auto& stage=plot.stages[i];
+            const auto [a,b]=stageRange(stage);double span=b-a;
             // Preserve readable type; use multiple lines instead of shrinking all stages to the longest label.
             double font=stage.fontSize>0?stage.fontSize:tickFont;
             font=std::min(font,span*.65); // Only physically tiny intervals constrain individual glyph size.
@@ -351,7 +363,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         arrow({x0,axisY},{x0+w+12*plot.axisScale,axisY},"#000000",std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,plot.axisScale*(3.5/3.0));
         arrow({x0,axisY},{x0,topY-14*plot.axisScale},"#000000",std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,plot.axisScale*(3.5/3.0));
         for(size_t i=0;i<plot.stages.size();i++){
-            const auto& stage=plot.stages[i];double a=x0+w*stage.start/100,b=x0+w*stage.end/100,c=(a+b)/2;
+            const auto [a,b]=stageRange(plot.stages[i]);double c=(a+b)/2;
             const auto& layout=stageLayouts[i];double font=layout.font;
             double y=y0+8+laneOffsets[layout.lane]+laneHeights[layout.lane]/2;
             double gap=widthOf(layout.text,font)/2+std::min(font*.35,(b-a)*.04),shaft=std::max(.01,(b-a)/2-gap);
@@ -412,7 +424,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 cursor+=sampleWidth+swatchGap+widthOf(path.name,legendFont)+itemGap;
             }
         }
-        auto pointAt=[&](size_t i,double value){return Vec{x0+50+(w-100)*i/std::max(size_t(1),plot.states.size()-1),y0-h*(value-low)/(high-low)};};
+        auto pointAt=[&](size_t i,double value){return Vec{stateX(i),y0-h*(value-low)/(high-low)};};
         // All plateaus share one symmetric length; marker and state center never move.
         double stateGap=(w-100)/std::max(size_t(1),plot.states.size()-1),labelWidth=0;
         for(auto& path:paths)for(size_t i=0;i<path.values.size();i++)if(path.hasValue(i)){

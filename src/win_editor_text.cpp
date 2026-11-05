@@ -77,6 +77,7 @@ LRESULT CALLBACK inlineProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     return CallWindowProcW(oldEditProc,hwnd,msg,wp,lp);
 }
 void beginInline(std::optional<InlineTarget> target,Vec at){
+    if(tool!=Text)return;
     if(!finishInline(true))return;if(target&&doc.isLocked(target->owner))return;inlineBefore=doc;
     if(target)inlineTarget=*target;else{Object o;o.id=doc.nextId++;o.kind=ObjectKind::Text;o.fontSize=doc.style.fontSize;o.face=1;o.points={at};doc.objects.push_back(o);inlineTarget={o.id,0,-1,at,o.fontSize};}
     selection={inlineTarget.owner};inlineValid=true;auto value=inlineValue(inlineTarget);
