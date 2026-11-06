@@ -16,12 +16,37 @@ namespace yd::editor {
 
 static std::optional<InlineTarget> energyDrag;
 
+static bool energyDestination(const Reaction& r,const Slot& slot){
+    return !slot.members.empty()&&slot.energy.empty()&&!doc.isLocked(r.id)&&
+        (!energyDrag->role||r.id==energyDrag->owner);
+}
+static Rect energyArea(const Reaction& r,size_t i){
+    const Vec c=reactionSlot(r,i);
+    return {c.x-r.slotWidth/2,c.y-r.slotHeight/2,r.slotWidth,r.slotHeight+4*mechanismFontSize(r,doc.style)};
+}
+static bool inside(Rect b,Vec p){return p.x>=b.x&&p.x<=b.x+b.w&&p.y>=b.y&&p.y<=b.y+b.h;}
+
 Scene energyDragPreview(const Scene& scene){
     Scene preview;
     if(!dragging||!moved||!energyDrag)return preview;
     Vec offset=(mouse-down)*(1/zoom);
+    const Vec cursor=world(mouse);
+    bool valid=false;
+    for(const auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();++i){
+        const auto b=energyArea(r,i);
+        const bool hovered=inside(b,cursor),allowed=energyDestination(r,r.slots[i]);
+        valid|=hovered&&allowed;
+        if(!allowed&&!hovered)continue;
+        Primitive outline;
+        outline.type=Primitive::Line;
+        outline.color=allowed?"#008778":"#d6203b";
+        outline.width=(hovered?2.5:1.2)/zoom;
+        outline.points={{b.x,b.y},{b.x+b.w,b.y},{b.x+b.w,b.y+b.h},{b.x,b.y+b.h},{b.x,b.y}};
+        preview.items.push_back(std::move(outline));
+    }
     for(auto item:scene.items)if(item.type==Primitive::Text&&item.owner==energyDrag->owner&&
         item.textRole==energyDrag->role&&item.textIndex==energyDrag->index){
+        item.color=valid?"#008778":"#d6203b";
         for(auto& point:item.points)point=point+offset;
         preview.items.push_back(std::move(item));
     }
@@ -33,9 +58,8 @@ static void dropEnergy(Vec p){
     for(auto& r:doc.reactions){
         if(doc.isLocked(r.id)||(energyDrag->role&&r.id!=energyDrag->owner))continue;
         for(size_t i=0;i<r.slots.size();i++){
-            if(r.slots[i].members.empty())continue;
-            Vec c=reactionSlot(r,i);double font=mechanismFontSize(r,doc.style);
-            if(std::abs(p.x-c.x)>r.slotWidth/2||p.y<c.y-r.slotHeight/2||p.y>c.y+r.slotHeight/2+4*font)continue;
+            if(!energyDestination(r,r.slots[i])||!inside(energyArea(r,i),p))continue;
+            Vec c=reactionSlot(r,i);
             double distance=(p-c).length();
             if(distance<best){best=distance;owner=r.id;slot=i;}
         }

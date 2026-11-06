@@ -153,11 +153,11 @@ static void CALLBACK driveAutoAnimation(HWND parent,UINT,UINT_PTR timer,DWORD){
         const std::wstring firstFrame=L"프레임 1";
         if(readoutText.empty()||(readoutText.size()>=firstFrame.size()&&
            readoutText.compare(readoutText.size()-firstFrame.size(),firstFrame.size(),firstFrame)==0))return;
-        SendMessageW(dialog,WM_COMMAND,111,0);
-        wchar_t repeatLabel[24]{};
-        GetDlgItemTextW(dialog,111,repeatLabel,24);
+        const auto initialLoop=SendDlgItemMessageW(dialog,111,CB_GETCURSEL,0,0);
+        SendDlgItemMessageW(dialog,111,CB_SETCURSEL,0,0);
+        SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(111,CBN_SELCHANGE),LPARAM(GetDlgItem(dialog,111)));
         previewPlaying=GetDlgItem(dialog,108)!=nullptr&&GetDlgItem(dialog,104)!=nullptr&&
-            GetDlgItem(dialog,112)!=nullptr&&std::wstring(repeatLabel)==L"반복 끔";
+            GetDlgItem(dialog,112)!=nullptr&&initialLoop==2&&SendDlgItemMessageW(dialog,111,CB_GETCURSEL,0,0)==0;
         auto readout=GetDlgItem(dialog,110);
         auto dc=GetDC(readout);
         SendMessageW(dialog,WM_CTLCOLORSTATIC,reinterpret_cast<WPARAM>(dc),reinterpret_cast<LPARAM>(readout));

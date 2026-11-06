@@ -4,6 +4,9 @@
 #include <memory>
 
 namespace yd::editor {
+bool scrollTools(Vec at,int delta);
+bool pinTool(Vec at);
+
 
 extern std::unique_ptr<Bitmap> paintBuffer;
 Document draftOrbital(Vec pointer);

@@ -1,3 +1,4 @@
+#include "win_dialog_style.h"
 #include "win_projects.h"
 #include "win_dialogs.h"
 #include "win_theme.h"
@@ -9,6 +10,9 @@
 #include <windowsx.h>
 #include <algorithm>
 #include <memory>
+
+#include <wincrypt.h>
+#pragma comment(lib,"crypt32.lib")
 
 namespace yd::projects {
 namespace fs=std::filesystem;
@@ -49,12 +53,74 @@ LRESULT CALLBACK itemListProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DW
     }
     return DefSubclassProc(hwnd,msg,wp,lp);
 }
+// Keep extracted data isolated until the existing project importer validates its manifest.
+struct ZipWorkspace {
+    fs::path folder;
+    ZipWorkspace(){
+        GUID id{};
+        if(FAILED(CoCreateGuid(&id)))throw std::runtime_error("임시 작업 폴더를 만들 수 없습니다.");
+        wchar_t name[40]{};StringFromGUID2(id,name,40);
+        folder=fs::temp_directory_path()/(std::wstring(L"YoungDraw-")+name);
+        if(!fs::create_directory(folder))throw std::runtime_error("임시 작업 폴더를 만들 수 없습니다.");
+    }
+    ~ZipWorkspace(){std::error_code error;fs::remove_all(folder,error);}
+};
+
+std::wstring zipBase64(const std::wstring& value){
+    DWORD length=0;
+    const auto data=reinterpret_cast<const BYTE*>(value.data());
+    const auto size=DWORD(value.size()*sizeof(wchar_t));
+    constexpr DWORD flags=CRYPT_STRING_BASE64|CRYPT_STRING_NOCRLF;
+    if(!CryptBinaryToStringW(data,size,flags,nullptr,&length))throw std::runtime_error("ZIP 명령을 준비할 수 없습니다.");
+    std::wstring encoded(length,L'\0');
+    if(!CryptBinaryToStringW(data,size,flags,encoded.data(),&length))throw std::runtime_error("ZIP 명령을 준비할 수 없습니다.");
+    encoded.resize(length);
+    return encoded;
+}
+std::wstring zipLiteral(const fs::path& path){
+    return L"[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('"+
+        zipBase64(fs::absolute(path).wstring())+L"'))";
+}
+void zipCommand(const std::wstring& operation){
+    const auto script=L"$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; "+operation;
+    const auto encoded=zipBase64(script);
+    wchar_t system[MAX_PATH]{};
+    if(!GetSystemDirectoryW(system,MAX_PATH))throw std::runtime_error("Windows ZIP 구성 요소를 찾을 수 없습니다.");
+    auto exe=fs::path(system)/L"WindowsPowerShell/v1.0/powershell.exe";
+    auto command=L"\""+exe.wstring()+L"\" -NoProfile -NonInteractive -EncodedCommand "+encoded;
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION process{};
+    if(!CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&startup,&process))
+        throw std::runtime_error("Windows ZIP 도구를 시작할 수 없습니다.");
+    CloseHandle(process.hThread);
+    WaitForSingleObject(process.hProcess,INFINITE);
+    DWORD code=1;GetExitCodeProcess(process.hProcess,&code);CloseHandle(process.hProcess);
+    if(code!=0)throw std::runtime_error("ZIP 파일을 처리할 수 없습니다. 파일 형식과 저장 공간을 확인하세요.");
+}
+
+Project importZip(const fs::path& path){
+    ZipWorkspace temp;
+    // ExtractToDirectory rejects entries that escape the destination.
+    zipCommand(L"[IO.Compression.ZipFile]::ExtractToDirectory("+zipLiteral(path)+L","+zipLiteral(temp.folder)+L")");
+    return Project::importFrom(temp.folder/L"project.ydproject",root());
+}
+
+void exportZip(const Project& project,const fs::path& path,const PngWriter& png){
+    ZipWorkspace temp;
+    const auto exported=project.exportTo(temp.folder,png);
+    const auto archive=temp.folder/L"project.zip";
+    zipCommand(L"[IO.Compression.ZipFile]::CreateFromDirectory("+zipLiteral(exported.folder)+L","+zipLiteral(archive)+L")");
+    if(!MoveFileExW(archive.c_str(),path.c_str(),MOVEFILE_COPY_ALLOWED|MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
+        throw std::runtime_error("ZIP 파일을 저장할 수 없습니다.");
+}
+
 struct Manager {
     HWND window=nullptr, projects=nullptr, items=nullptr, note=nullptr, heading=nullptr, hint=nullptr;
     HFONT font=nullptr;
     HBRUSH chromeBrush=nullptr,panelBrush=nullptr,raisedBrush=nullptr;
     ~Manager(){if(font)DeleteObject(font);if(chromeBrush)DeleteObject(chromeBrush);if(panelBrush)DeleteObject(panelBrush);if(raisedBrush)DeleteObject(raisedBrush);}
     Callbacks callbacks;
+    fs::path initial;
     std::vector<Project> all;
     int selected=-1, item=-1, dragging=-1, insertion=-1;
     bool refreshing=false, noteDirty=false;
@@ -66,7 +132,8 @@ struct Manager {
     Project* project(){return selected>=0&&selected<int(all.size())?&all[selected]:nullptr;}
     void layout(){
         RECT r;GetClientRect(window,&r);int w=r.right,h=r.bottom,side=std::max(280,w-750);
-        MoveWindow(GetDlgItem(window,1),16,12,210,24,TRUE);
+        MoveWindow(GetDlgItem(window,1),16,12,132,24,TRUE);
+        MoveWindow(GetDlgItem(window,16),154,9,72,29,TRUE);
         MoveWindow(GetDlgItem(window,10),16,44,64,30,TRUE);MoveWindow(GetDlgItem(window,11),84,44,68,30,TRUE);MoveWindow(GetDlgItem(window,12),156,44,70,30,TRUE);
         MoveWindow(GetDlgItem(window,13),16,80,76,30,TRUE);MoveWindow(GetDlgItem(window,14),96,80,76,30,TRUE);MoveWindow(GetDlgItem(window,15),176,80,50,30,TRUE);
         MoveWindow(projects,16,120,210,h-168,TRUE);
@@ -110,7 +177,9 @@ struct Manager {
         for(auto& dir:fs::directory_iterator(root()))if(dir.is_directory()&&fs::exists(dir.path()/L"project.ydproject")){
             try{all.push_back(Project::load(dir.path()));}catch(const std::exception& e){errors+=dir.path().filename().wstring()+L": "+ui::wide(e.what())+L"\n";}
         }
-        std::sort(all.begin(),all.end(),[](auto& a,auto& b){return a.name<b.name;});refreshProjects(all.empty()?-1:0);
+        std::sort(all.begin(),all.end(),[](auto& a,auto& b){return a.name<b.name;});int index=all.empty()?-1:0;
+        for(size_t i=0;i<all.size();++i)if(all[i].folder==initial){index=int(i);break;}
+        refreshProjects(index);
         if(!errors.empty())MessageBoxW(window,(L"일부 프로젝트를 읽지 못했습니다. 원본은 유지됩니다.\n\n"+errors).c_str(),L"내 프로젝트",MB_OK|MB_ICONWARNING);
     }
     std::optional<std::vector<std::string>> edit(const std::wstring& title,const std::wstring& name,const std::wstring& text=L""){
@@ -129,25 +198,46 @@ struct Manager {
         fs::path first(buffer.data());auto next=buffer.data()+wcslen(buffer.data())+1;std::vector<fs::path> files;
         if(!*next)files.push_back(first);else while(*next){files.push_back(first/next);next+=wcslen(next)+1;}addFiles(files);
     }
+    void searchProjects(){
+        std::vector<ui::SearchItem> entries;
+        std::vector<std::pair<int,int>> positions;
+        for(int j=0;j<int(all.size());++j){
+            const auto& p=all[j];
+            entries.push_back({p.name,p.note});positions.emplace_back(j,-1);
+            for(int k=0;k<int(p.items.size());++k){
+                const auto& entry=p.items[k];
+                entries.push_back({p.name+L"  /  "+entry.name,p.note+L"\r\n"+entry.note});
+                positions.emplace_back(j,k);
+            }
+        }
+        if(auto match=ui::search(window,L"프로젝트 · 구조 · 노트 검색",entries,L"선택",true)){
+            auto [projectIndex,itemIndex]=positions[*match];
+            refreshProjects(projectIndex);refreshItems(itemIndex);
+        }
+    }
     void action(int id){
         saveNote();auto p=project();
+        if(id==16){searchProjects();return;}
         if(id==10){auto value=edit(L"새 프로젝트",L"새 프로젝트");if(!value)return;auto created=Project::create(root(),ui::wide((*value)[0]));created.note=ui::wide((*value)[1]);created.save();all.push_back(created);refreshProjects(int(all.size()-1));return;}
         if(id==13){
             wchar_t path[32768]{};OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=window;f.lpstrFile=path;f.nMaxFile=32768;
-            f.lpstrTitle=L"이전 프로젝트 폴더 안의 project.ydproject를 선택하세요";
-            f.lpstrFilter=L"YoungDraw 프로젝트 정보\0*.ydproject\0\0";f.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+            f.lpstrTitle=L"프로젝트 ZIP 또는 기존 프로젝트 정보를 선택하세요";
+            f.lpstrFilter=L"프로젝트 ZIP\0*.zip\0기존 프로젝트 정보\0*.ydproject\0\0";f.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
             if(!GetOpenFileNameW(&f)){if(CommDlgExtendedError())throw std::runtime_error("프로젝트 선택 창을 열 수 없습니다.");return;}
-            auto imported=Project::importFrom(path,root());all.push_back(std::move(imported));refreshProjects(int(all.size()-1));
+            auto imported=_wcsicmp(fs::path(path).extension().c_str(),L".zip")==0?importZip(path):Project::importFrom(path,root());all.push_back(std::move(imported));refreshProjects(int(all.size()-1));
             SetWindowTextW(hint,L"이전 프로젝트를 이 PC에 복사했습니다. 항목을 선택하고 열기 / 편집을 누르세요.");return;
         }
         if(id==15){fs::create_directories(root());auto folder=p?p->folder:root();if(INT_PTR(ShellExecuteW(window,L"open",folder.c_str(),nullptr,nullptr,SW_SHOWNORMAL))<=32)throw std::runtime_error("저장 폴더를 열 수 없습니다.");return;}
         if(!p)return;
         if(id==14){
-            BROWSEINFOW info{};info.hwndOwner=window;info.lpszTitle=L"프로젝트를 복사할 폴더를 선택하세요 (USB 또는 공유 폴더)";info.ulFlags=BIF_RETURNONLYFSDIRS|BIF_NEWDIALOGSTYLE;
-            auto chosen=SHBrowseForFolderW(&info);if(!chosen)return;wchar_t path[MAX_PATH]{};BOOL ok=SHGetPathFromIDListW(chosen,path);CoTaskMemFree(chosen);if(!ok)throw std::runtime_error("파일 시스템 폴더를 선택하세요.");
+            wchar_t path[32768]{};
+            OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=window;f.lpstrFile=path;f.nMaxFile=32768;
+            f.lpstrTitle=L"프로젝트 ZIP 내보내기";f.lpstrDefExt=L"zip";
+            f.lpstrFilter=L"프로젝트 ZIP\0*.zip\0\0";f.Flags=OFN_EXPLORER|OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+            if(!GetSaveFileNameW(&f)){if(CommDlgExtendedError())throw std::runtime_error("ZIP 저장 창을 열 수 없습니다.");return;}
             if(callbacks.saveForExport&&!callbacks.saveForExport(p->folder))return;
-            auto exported=p->exportTo(path,callbacks.writePng);
-            MessageBoxW(window,(L"프로젝트를 내보냈습니다. 구조 문서와 투명 PNG가 같은 폴더에 저장됩니다.\n\n"+exported.folder.wstring()+L"\n\n다른 PC에서는 내 프로젝트 → 불러오기에서 project.ydproject를 선택하세요.").c_str(),L"프로젝트 내보내기",MB_OK|MB_ICONINFORMATION);return;
+            exportZip(*p,path,callbacks.writePng);
+            SetWindowTextW(hint,L"프로젝트를 ZIP 파일로 내보냈습니다.");return;
         }
         if(id==11){auto value=edit(L"프로젝트 이름·노트",p->name,p->note);if(!value)return;auto before=*p;p->name=ui::wide((*value)[0]);p->note=ui::wide((*value)[1]);try{p->save();}catch(...){*p=before;throw;}refreshProjects(selected);return;}
         if(id==12){if(MessageBoxW(window,L"이 프로젝트를 삭제하시겠습니까?\n파일은 프로젝트 휴지통에 보관됩니다.",L"프로젝트 삭제",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
@@ -221,7 +311,7 @@ struct Manager {
                 self->panelBrush=CreateSolidBrush(color(palette.panel));
                 self->raisedBrush=CreateSolidBrush(color(palette.raised));
                 self->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
-                self->control(L"STATIC",L"내 프로젝트",1,0);self->control(L"STATIC",L"파일 노트 (항목 전환·닫을 때 자동 저장)",2,0);
+                self->control(L"STATIC",L"내 프로젝트",1,0);self->control(L"BUTTON",L"검색…",16,WS_TABSTOP|BS_OWNERDRAW);self->control(L"STATIC",L"파일 노트 (항목 전환·닫을 때 자동 저장)",2,0);
                 self->heading=self->control(L"STATIC",L"",3,SS_ENDELLIPSIS);
                 const wchar_t* labels[]={L"새로",L"정보",L"삭제",L"불러오기",L"내보내기",L"폴더"};
                 for(int i=0;i<6;i++)self->control(L"BUTTON",labels[i],10+i,WS_TABSTOP|BS_OWNERDRAW);
@@ -253,7 +343,7 @@ struct Manager {
                 }
                 SetBkColor(dc,color(palette.chrome));return (LRESULT)self->chromeBrush;}
             case WM_DRAWITEM:self->drawControl(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
-            case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={1100,700};return 0;
+            case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={950,585};return 0;
             case WM_SIZE:self->layout();return 0;
             case WM_COMMAND:
                 if(LOWORD(wp)==IDCANCEL){SendMessageW(h,WM_CLOSE,0,0);return 0;}
@@ -293,10 +383,15 @@ struct Manager {
     }
 };
 }
-void manage(HWND owner,const Callbacks& callbacks){
+void manage(HWND owner,const Callbacks& callbacks,const fs::path& initial){
     WNDCLASSW wc{};wc.lpfnWndProc=Manager::procedure;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawProjectManager";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
-    Manager manager;manager.callbacks=callbacks;RECT r;GetWindowRect(owner,&r);int w=1140,h=760;
-    HWND window=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,L"내 프로젝트 — YoungDraw",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,std::max(0L,r.left+(r.right-r.left-w)/2),std::max(0L,r.top+(r.bottom-r.top-h)/2),w,h,owner,nullptr,wc.hInstance,&manager);
+    Manager manager;manager.callbacks=callbacks;manager.initial=initial;
+    MONITORINFO monitor{sizeof(monitor)};
+    GetMonitorInfoW(MonitorFromWindow(owner,MONITOR_DEFAULTTONEAREST),&monitor);
+    const int w=std::min(1140,int(monitor.rcWork.right-monitor.rcWork.left));
+    const int h=std::min(760,int(monitor.rcWork.bottom-monitor.rcWork.top));
+    const RECT r=ui::ownedWindowRect(owner,w,h);
+    HWND window=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,L"내 프로젝트 — YoungDraw",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,r.left,r.top,w,h,owner,nullptr,wc.hInstance,&manager);
     if(!window)throw std::runtime_error("프로젝트 창을 열 수 없습니다.");
     appearance::titlebar(window);
     EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);MSG msg{};

@@ -19,7 +19,8 @@ bool switchDocumentTab(size_t index);
 void newDocumentTab(Document document={},std::wstring path=L"",bool fromOffice=false);
 bool closeDocumentTab(size_t index);
 bool closeAllDocuments();
-void manageProjects();
+void manageProjects(const std::wstring& initial={});
+void showRecent();
 Document officeCurrentDocument();
 void createDocumentTabs();
 

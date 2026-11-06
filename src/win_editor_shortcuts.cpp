@@ -62,6 +62,78 @@ void formatSelectedText(int mask,bool plain=false){
     auto before=doc;for(auto& o:doc.objects)if(contains(selection,o.id)&&o.kind==ObjectKind::Text){o.face=plain?0:o.face^mask;for(auto& run:o.runs)run.face=plain?0:run.face^mask;}
     if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();repeatAction=[mask,plain](){formatSelectedText(mask,plain);};}
 }
+namespace {
+constexpr auto preferences=L"Software\\YoungDraw\\Workflow";
+DWORD preference(const wchar_t* name){
+    DWORD value=0,size=sizeof(value);
+    RegGetValueW(HKEY_CURRENT_USER,preferences,name,RRF_RT_REG_DWORD,nullptr,&value,&size);
+    return value;
+}
+void setPreference(const wchar_t* name,DWORD value){
+    RegSetKeyValueW(HKEY_CURRENT_USER,preferences,name,REG_DWORD,&value,sizeof(value));
+}
+struct Guide {int command;const wchar_t* title;const wchar_t* steps;};
+const Guide guidesList[]={
+    {bondAnimationCommand,L"GIF · 분기 경로와 저장",L"1. 메커니즘을 선택하고 GIF 명령을 실행합니다. 분기에서는 구조를 화살표 순서대로 클릭합니다.\r\n2. 썸네일을 드래그해 순서를 바꾸고 반복·출력 설정을 지정합니다.\r\n3. GIF 저장을 눌러 진행률, 예상 용량과 남은 시간을 확인합니다."},
+    {137,L"그래프 · 에너지 단위 변환",L"1. 그래프를 선택하고 그래프·축 설정을 엽니다.\r\n2. 기본 탭에서 kJ/mol 등을 고르고 에너지와 축 수치도 변환을 선택합니다."},
+    {185,L"프로젝트 · 검색과 ZIP 이동",L"1. 내 프로젝트에서 검색을 눌러 프로젝트, 구조 또는 노트의 단어를 입력합니다.\r\n2. 내보내기로 ZIP을 저장하고 다른 PC의 불러오기에서 그 ZIP을 선택합니다."},
+    {145,L"메커니즘 · 단계 연결",L"1. 메커니즘을 선택하고 단계 연결을 실행합니다.\r\n2. 시작 구조 칸에서 도착 구조 칸까지 드래그합니다."}
+};
+}
+void firstUseGuide(int id){
+    if(!IsWindowVisible(win))return;
+    static std::vector<int> shown;
+    for(const auto& guide:guidesList)if(guide.command==id){
+        const auto name=L"Guide"+std::to_wstring(id);
+        if(preference(name.c_str())||std::find(shown.begin(),shown.end(),id)!=shown.end())return;
+        shown.push_back(id);
+        const auto text=std::wstring(guide.steps)+L"\r\n\r\n이 안내를 다시 보지 않으시겠습니까?";
+        if(MessageBoxW(win,text.c_str(),guide.title,MB_YESNO|MB_DEFBUTTON2|MB_ICONINFORMATION)==IDYES)
+            setPreference(name.c_str(),1);
+        return;
+    }
+}
+void shortcutSettings(){
+    auto choice=ui::form(win,L"단축키 호환",{{L"Ctrl+Y 동작",std::to_string(preference(L"WindowsKeys")?1:0),false,
+        {L"ChemDraw형 · 마지막 작업 반복",L"Windows형 · 다시 실행"}}});
+    if(choice)setPreference(L"WindowsKeys",choice->front()=="1");
+}
+void showHelp(){
+    std::vector<ui::SearchItem> entries;
+    for(const auto& guide:guidesList)entries.push_back({guide.title,guide.steps});
+    entries.push_back({L"편집 · 실행 취소와 다시 실행",
+        L"Ctrl+Z 실행 취소 / Ctrl+Shift+Z 다시 실행. Ctrl+Y는 보기 → 단축키 호환에서 작업 반복 또는 다시 실행으로 지정합니다."});
+    entries.push_back({L"구조 · 정리, 크기, 회전",
+        L"예: 구조를 선택하고 Ctrl+Shift+K로 정리합니다. Ctrl+K 크기 / Ctrl+R 회전 / Ctrl+G 그룹 / Ctrl+Shift+G 그룹 해제."});
+    entries.push_back({L"배치 · 정렬, 이동, 반전",
+        L"Ctrl+Shift+Alt+L/C/R 가로 정렬, T/M/B 세로 정렬, H/V 간격 배분. Ctrl+Shift+H/V 반전. 방향키 1 pt, Shift+방향키 10 pt, Alt+방향키 회전, Ctrl+방향키 반응 복제."});
+    entries.push_back({L"그리기 · 도구, 첨자, 클립보드",
+        L"Space 선택 도구, Shift+G 오비탈, F9/F10 아래·위첨자, Ctrl+D CDXML 복사, Ctrl+Shift+X 반응 배치. Ctrl+우클릭 드래그로 화면을 이동합니다."});
+    entries.push_back({L"작업 공간 · 스크롤, 도구 고정, 명령 검색",
+        L"작은 창에서는 도구 영역에 마우스를 두고 휠을 돌립니다. 그리기 도구를 우클릭해 상단에 고정합니다. Ctrl+Shift+F를 누르고 명령을 검색해 Enter로 실행합니다."});
+    entries.push_back({L"메커니즘 · 에너지 직접 편집과 이동",
+        L"에너지를 더블클릭해 값을 바꿉니다. 드래그하면 붙여넣을 수 있는 구조 영역이 청록색으로 표시됩니다."});
+    ui::search(win,L"YoungDraw 도움말 · F1",entries,L"확인",true);
+}
+void searchCommands(){
+    std::vector<ui::SearchItem> entries;
+    std::vector<int> commands;
+    HMENU bar=GetMenu(win);
+    for(int i=0;i<GetMenuItemCount(bar);++i){
+        wchar_t group[96]{};GetMenuStringW(bar,i,group,96,MF_BYPOSITION);
+        auto menu=GetSubMenu(bar,i);
+        for(int j=0;j<GetMenuItemCount(menu);++j){
+            const UINT id=GetMenuItemID(menu,j);
+            if(!id||id==UINT(-1)||(GetMenuState(menu,j,MF_BYPOSITION)&(MF_GRAYED|MF_DISABLED)))continue;
+            wchar_t label[240]{};GetMenuStringW(menu,j,label,240,MF_BYPOSITION);
+            if(id==230)continue;
+            std::wstring title(label);
+            if(const auto pos=title.find(L'\t');pos!=std::wstring::npos)title.replace(pos,1,L"   ·   ");
+            entries.push_back({std::move(title),group});commands.push_back(int(id));
+        }
+    }
+    if(auto selected=ui::search(win,L"명령 검색 · Ctrl+Shift+F",entries,L"실행"))command(commands[*selected]);
+}
 void key(WPARAM k){
     if(mechanismConnectionDrag){if(k==VK_ESCAPE)cancel();return;}
     if(mechanismConnecting&&k==VK_ESCAPE){cancel();return;}
@@ -83,6 +155,7 @@ void key(WPARAM k){
         return;
     }
     if(ctrl){
+        if(shift&&k=='F'){searchCommands();return;}
         if(shift&&k=='P'){command(166);return;}
         if(shift&&(k=='H'||k=='V')){command(k=='H'?160:161);return;}
         if(shift&&k=='X'){command(125);return;}
@@ -91,7 +164,7 @@ void key(WPARAM k){
         switch(k){
         case VK_TAB:if(!documents.empty())switchDocumentTab((activeDocument+documents.size()+(shift?-1:1))%documents.size());break;
         case 'W':command(109);break;case 'N':command(100);break;case 'O':command(101);break;case 'S':save(shift);break;
-        case 'Z':command(shift?105:104);break;case 'Y':if(repeatAction){auto repeat=repeatAction;repeat();}break;
+        case 'Z':command(shift?105:104);break;case 'Y':if(preference(L"WindowsKeys"))command(105);else if(repeatAction){auto repeat=repeatAction;repeat();}break;
         case 'A':selection=doc.editableIds();tool=Select;break;case 'C':copy();break;case 'D':copyCdxmlText();break;
         case 'X':copy();if(!selection.empty()){history.checkpoint(doc);doc.erase(selection);selection.clear();changed();}break;
         case 'V':pasteClipboard();break;case 'K':command(shift?110:165);break;case 'R':command(164);break;
@@ -104,7 +177,7 @@ void key(WPARAM k){
     if(k==VK_LEFT||k==VK_RIGHT||k==VK_UP||k==VK_DOWN){double step=shift?10:1;nudgeSelection({k==VK_LEFT?-step:k==VK_RIGHT?step:0,k==VK_UP?-step:k==VK_DOWN?step:0});redraw();return;}
     if(k==VK_ESCAPE){selectedCycleOwner=0;selectedCycleArrow=-1;tool=Select;selection.clear();targetContainer=0;}
     if(k==VK_DELETE||k==VK_BACK){if(activeStructureTarget()&&reaction(targetContainer)){command(144);return;}if(deleteSelectedCycleArrow())return;if(!selection.empty()){history.checkpoint(doc);doc.erase(selection);selection.clear();changed();}}
-    if(k==VK_F1)MessageBoxW(win,L"Ctrl+K: 크기 / Ctrl+R: 회전 / Ctrl+Shift+K: 구조 정리\nCtrl+Shift+Alt+L/C/R: 왼쪽 / 가로 중앙 / 오른쪽 정렬\nCtrl+Shift+Alt+T/M/B: 위 / 세로 중앙 / 아래 정렬\nCtrl+Shift+Alt+H/V: 가로 / 세로 간격 배분\nCtrl+Shift+H/V: 좌우 / 상하 반전\n방향키: 1 pt 이동 / Shift+방향키: 10 pt 이동\nAlt+좌우: 1° 회전 / Alt+상하: 15° 회전\nCtrl+방향키: 반응 화살표와 복제 구조 추가\nCtrl+G / Ctrl+Shift+G: 그룹 / 그룹 해제\nCtrl+D: CDXML 복사 / Ctrl+Shift+X: 반응 배치\nCtrl+Z: 실행 취소 / Ctrl+Shift+Z: 다시 실행 / Ctrl+Y: 마지막 작업 반복\nShift+G: 오비탈 도구 / Space: 선택 도구\n텍스트 편집 F9/F10: 아래 / 위첨자\nCtrl+우클릭 드래그: 화면 이동",L"YoungDraw · ChemDraw 호환 단축키",MB_OK);
+    if(k==VK_F1)showHelp();
     if(k==VK_RETURN){if(hoverAtom){selection={hoverAtom};editObject(hoverAtom);}else edit();}redraw();
 }
 

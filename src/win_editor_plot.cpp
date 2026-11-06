@@ -74,14 +74,32 @@ void publicationLayout(int id){
     relocatePlot(original,fitted);*plot(id)=std::move(fitted);history.checkpoint(before);
     status=L"출판용 비율과 자동 글자 크기를 적용했습니다. Ctrl+Z로 되돌릴 수 있습니다.";changed();fit();
 }
+static std::optional<double> kilojoulesPerUnit(const std::string& unit){
+    if(unit=="kcal/mol"||unit=="kcal mol^{-1}"||unit==ui::utf8(L"kcal mol⁻¹"))return 4.184;
+    if(unit=="kJ/mol"||unit=="kJ mol^{-1}"||unit==ui::utf8(L"kJ mol⁻¹"))return 1.;
+    if(unit=="eV")return 96.4853321233;
+    return {};
+}
 void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");EnergyPlot original=*p;Document before=doc;
     auto update=[&](const std::vector<std::string>& v)->std::wstring{try{EnergyPlot p=original;p.title=v[0];p.unit=v[1]==ui::utf8(L"kcal mol⁻¹")?"kcal mol^{-1}":v[1];p.xLabel=v[2];p.yLabel=v[3];p.xColor=colorValue(v[4]);p.yColor=colorValue(v[5]);auto size=values(v[6]);if(size.size()!=2||size[0]<180||size[1]<140||size[0]>4000||size[1]>4000)return L"크기는 180×140 ~ 4000×4000 pt로 입력하세요.";p.width=size[0];p.height=size[1];p.mode=std::stoi(v[7]);p.showValues=v[8]=="1";p.yTickStep=v[9].empty()?0:numeric(v[9],0);p.yMin=v[10].empty()?std::optional<double>{}:numeric(v[10]);p.yMax=v[11].empty()?std::optional<double>{}:numeric(v[11]);
  p.axisFontSize=numeric(v[12],0,72);p.tickFontSize=numeric(v[13],0,72);p.valueFontSize=numeric(v[14],0,72);p.energyLabelFontSize=numeric(v[15],0,72);p.thinLines=v[16]=="1";p.boldLevels=v[17]=="1";
  for(double font:{p.axisFontSize,p.tickFontSize,p.valueFontSize,p.energyLabelFontSize})if(font>0&&font<4)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
+ if(v[18]=="1"&&p.unit!=original.unit){
+     auto from=kilojoulesPerUnit(original.unit),to=kilojoulesPerUnit(p.unit);
+     if(!from||!to)return L"수치 변환은 kcal/mol, kJ/mol, eV 사이에서 사용할 수 있습니다.";
+     const double factor=*from / *to;
+     for(auto& state:p.states)state.energy*=factor;
+     for(auto& series:p.series)for(auto& value:series.values)value*=factor;
+     if(p.yMin)*p.yMin*=factor;
+     if(p.yMax)*p.yMax*=factor;
+     p.yTickStep*=factor;
+ }
  energyAxis(p);if(p.yTickStep>0&&(p.yTickStep<1e-9||energyAxis(p).step>p.yTickStep*1.001))return L"y축 눈금이 너무 촘촘합니다. 더 큰 간격을 입력하세요.";doc=before;relocatePlot(original,p);*plot(id)=p;redraw();UpdateWindow(win);return {};}catch(const std::exception& e){return ui::wide(e.what());}};
-    auto r=ui::form(win,L"그래프·축 설정",{{L"제목",p->title,false,{},false,4,true},{L"에너지 단위 (선택 / 직접 입력)",p->unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):p->unit,false,{L"kcal/mol",L"kcal mol⁻¹"},false,4,true,true},{L"x축 (위·아래첨자 버튼)",p->xLabel,false,{},false,4,true},{L"y축 (위·아래첨자 버튼)",p->yLabel,false,{},false,4,true},{L"x축 글자색",p->xColor,false,{},true},{L"y축 글자색",p->yColor,false,{},true},{L"너비 / 높이 (pt)",number(p->width)+" "+number(p->height)},{L"그래프 형태",std::to_string(p->mode),false,{L"부드러운 곡선",L"직선",L"에너지 준위 (점선 연결)",L"평평한 준위와 직선"}},{L"에너지 값 표시",p->showValues?"1":"0",false,{L"아니요",L"예"}},{L"y축 눈금 간격 (0: 자동)",number(p->yTickStep)},
+    auto r=ui::form(win,L"그래프·축 설정",{{L"제목",p->title,false,{},false,4,true},{L"에너지 단위 (선택 / 직접 입력)",p->unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):p->unit,false,{L"kcal/mol",L"kcal mol⁻¹",L"kJ/mol",L"eV"},false,4,true,true},{L"x축 (위·아래첨자 버튼)",p->xLabel,false,{},false,4,true},{L"y축 (위·아래첨자 버튼)",p->yLabel,false,{},false,4,true},{L"x축 글자색",p->xColor,false,{},true},{L"y축 글자색",p->yColor,false,{},true},{L"너비 / 높이 (pt)",number(p->width)+" "+number(p->height)},{L"그래프 형태",std::to_string(p->mode),false,{L"부드러운 곡선",L"직선",L"에너지 준위 (점선 연결)",L"평평한 준위와 직선"}},{L"에너지 값 표시",p->showValues?"1":"0",false,{L"아니요",L"예"}},{L"y축 눈금 간격 (0: 자동)",number(p->yTickStep)},
  {L"y축 최솟값 (빈칸: 자동)",p->yMin?number(*p->yMin):""},{L"y축 최댓값 (빈칸: 자동)",p->yMax?number(*p->yMax):""},
- {L"x축·그래프 제목 (pt, 0: 자동)",number(p->axisFontSize)},{L"눈금·상태 이름 (pt, 0: 자동)",number(p->tickFontSize)},{L"데이터 값 크기 (pt, 0: 자동)",number(p->valueFontSize)},{L"에너지 축 제목 (pt, 0: 자동)",number(p->energyLabelFontSize)},{L"그래프 두께",p->thinLines?"1":"0",false,{L"굵게 (기존)",L"얇게 (선·축·글자)"}},{L"평평한 준위선만 굵게",p->boldLevels?"1":"0",false,{L"아니요 (그래프 두께에 맞춤)",L"예 (기존 굵은 두께 유지)"}}},update);if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
+ {L"x축·그래프 제목 (pt, 0: 자동)",number(p->axisFontSize)},{L"눈금·상태 이름 (pt, 0: 자동)",number(p->tickFontSize)},{L"데이터 값 크기 (pt, 0: 자동)",number(p->valueFontSize)},{L"에너지 축 제목 (pt, 0: 자동)",number(p->energyLabelFontSize)},{L"그래프 두께",p->thinLines?"1":"0",false,{L"굵게 (기존)",L"얇게 (선·축·글자)"}},{L"평평한 준위선만 굵게",p->boldLevels?"1":"0",false,{L"아니요 (그래프 두께에 맞춤)",L"예 (기존 굵은 두께 유지)"}},
+ {L"단위를 바꿀 때","0",false,{L"단위 표시만 변경",L"에너지와 축 수치도 변환"}}},update,
+ {{L"기본",{0,1,18,6}},{L"축",{2,3,9,10,11}},{L"글자",{4,5,8,12,13,14,15}},{L"선 스타일",{7,16,17}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
 }
 void editPlotStages(int id){
     auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");Document before=doc;

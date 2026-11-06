@@ -36,7 +36,12 @@ void command(int id){if(isolatedStructureEditing){if(id==102)id=186;if(id==109)i
     if(images!=doc.imagesLocked||graphs!=doc.graphsLocked){history.checkpoint(doc);doc.imagesLocked=images;doc.graphsLocked=graphs;pruneLockedSelection();status=L"레이어 잠금 적용 · 잠긴 항목은 보이지만 선택·이동·삭제되지 않습니다.";changed();}redraw();return;
  }
  pruneLockedSelection();if(id>=200&&id<=218){if(id==217){auto before=doc;if(delocalizeBonds(doc,selection)){history.checkpoint(before);changed();}tool=Delocalized;}else{tool=Tool(id-200);selection.clear();}redraw();return;}if(id>=301&&id<=418){element=id-300;int aid=hoverAtom?hoverAtom:(doc.atom(primary())?primary():0);if(aid){history.checkpoint(doc);auto a=doc.atom(aid);setAtomElement(doc,aid,element);a->label.clear();a->labelRuns.clear();a->explicitH=-1;changed();}redraw();return;}
+ firstUseGuide(id);
  switch(id){
+ case 230:searchCommands();break;
+ case 231:showHelp();break;
+ case 232:shortcutSettings();break;
+ case 233:showRecent();break;
  case bondAnimationCommand:createBondAnimation();break;
  case 143:case 144:case 145:case 146:case 147:case 148:case 149:editMechanismControls(id);break;
  case 186:if(isolatedStructureEditing){writeFile(isolatedStructureResult,toNative(doc));dirty=false;DestroyWindow(win);}else editTargetStructure();break;

@@ -1,3 +1,4 @@
+#include "win_dialogs.h"
 #include "win_editor_chrome.h"
 #include "win_editor_files.h"
 #include "win_editor_images.h"
@@ -20,13 +21,80 @@ namespace yd::editor {
 
 HWND documentTabs=nullptr;HFONT tabFont=nullptr;bool officeDocument=false;
 std::vector<DocumentTab> documents;size_t activeDocument=0;
+namespace {
+constexpr auto recentKey=L"Software\\YoungDraw\\RecentDocuments";
+std::vector<std::wstring> recentDocuments(){
+    std::vector<std::wstring> files;
+    for(int i=0;i<5;++i){
+        wchar_t path[32768]{};DWORD bytes=sizeof(path);
+        const auto name=std::to_wstring(i);
+        if(RegGetValueW(HKEY_CURRENT_USER,recentKey,name.c_str(),RRF_RT_REG_SZ,nullptr,path,&bytes)==ERROR_SUCCESS)
+            files.emplace_back(path);
+    }
+    return files;
+}
+void rememberDocument(const std::wstring& path){
+    if(path.empty()||isolatedStructureEditing)return;
+    std::error_code error;
+    const auto full=fs::absolute(path,error).lexically_normal().wstring();
+    if(error)return;
+    auto files=recentDocuments();
+    files.erase(std::remove_if(files.begin(),files.end(),[&](const auto& old){return !_wcsicmp(old.c_str(),full.c_str());}),files.end());
+    files.insert(files.begin(),full);
+    for(size_t i=0;i<std::min(files.size(),size_t(5));++i){
+        const auto name=std::to_wstring(i);
+        RegSetKeyValueW(HKEY_CURRENT_USER,recentKey,name.c_str(),REG_SZ,files[i].c_str(),DWORD((files[i].size()+1)*sizeof(wchar_t)));
+    }
+}
+}
+void showRecent(){
+    struct Entry {fs::path path;bool project;fs::file_time_type time;std::wstring title;};
+    std::vector<Entry> entries;
+    for(const auto& path:recentDocuments()){
+        std::error_code error;auto time=fs::last_write_time(path,error);
+        if(!error)entries.push_back({path,false,time,fs::path(path).filename().wstring()});
+    }
+    const auto root=projects::root();
+    std::error_code error;
+    for(fs::directory_iterator it(root,error),end;!error&&it!=end;it.increment(error)){
+        const auto folder=it->path();
+        auto time=fs::last_write_time(folder/L"project.ydproject",error);
+        if(error){error.clear();continue;}
+        try{
+            auto project=projects::Project::load(folder);
+            for(const auto& item:project.items){
+                std::error_code itemError;
+                const auto modified=fs::last_write_time(folder/item.file,itemError);
+                if(!itemError)time=std::max(time,modified);
+            }
+            entries.push_back({folder,true,time,project.name});
+        }catch(const std::exception&){}
+    }
+    std::stable_sort(entries.begin(),entries.end(),[](const Entry& a,const Entry& b){return a.time>b.time;});
+    if(entries.size()>5)entries.resize(5);
+    std::vector<ui::SearchItem> choices;
+    for(const auto& entry:entries)choices.push_back({(entry.project?L"프로젝트 · ":L"문서 · ")+entry.title,entry.path.wstring()});
+    if(auto chosen=ui::search(win,L"최근 수정한 프로젝트·문서",choices,L"열기",true)){
+        const auto& entry=entries[*chosen];
+        if(entry.project)manageProjects(entry.path.wstring());
+        else{
+            for(size_t i=0;i<documents.size();++i){
+                const auto& path=i==activeDocument?filePath:documents[i].path;
+                if(!path.empty()&&_wcsicmp(fs::absolute(path).lexically_normal().c_str(),entry.path.c_str())==0){
+                    switchDocumentTab(i);return;
+                }
+            }
+            newDocumentTab(fromCdxml(readFile(entry.path.wstring())),entry.path.wstring());
+        }
+    }
+}
 bool save(bool as){if(officeDocument&&office::editing()&&!as){if(FAILED(office::update()))throw std::runtime_error("Office 문서에 변경 내용을 반영하지 못했습니다.");dirty=false;title();status=L"Office 문서에 변경 내용을 반영했습니다.";redraw();return true;}auto path=filePath;
     if(path.empty()||as||_wcsicmp(fs::path(path).extension().c_str(),L".cdxml")!=0){
         auto p=fileDialog(true);if(!p)return false;path=*p;
         if(_wcsicmp(fs::path(path).extension().c_str(),L".cdxml")!=0)
             throw std::runtime_error("CDXML 확장자로 저장하세요.");
     }
-    writeFile(path,toCdxml(doc));filePath=path;dirty=false;title();status=L"CDXML을 저장했습니다. ChemDraw와 YoungDraw에서 열 수 있습니다.";redraw();return true;}
+    writeFile(path,toCdxml(doc));filePath=path;rememberDocument(filePath);dirty=false;title();status=L"CDXML을 저장했습니다. ChemDraw와 YoungDraw에서 열 수 있습니다.";redraw();return true;}
 bool discard(){if(!dirty)return true;int answer=MessageBoxW(win,L"변경 내용을 저장하시겠습니까?",L"YoungDraw",MB_YESNOCANCEL|MB_ICONQUESTION);return answer==IDNO||(answer==IDYES&&save());}
 void storeDocumentTab(){
     if(documents.empty())documents.emplace_back();
@@ -60,7 +128,7 @@ void newDocumentTab(Document document,std::wstring path,bool fromOffice){
     snapPlot=0;snapStart.reset();
     if(!finishInline(true))return;
     storeDocumentTab();activeDocument=documents.size();documents.emplace_back();
-    doc=std::move(document);history.clear();filePath=std::move(path);selection.clear();targetContainer=0;targetSlot=0;targetAbove=false;
+    doc=std::move(document);history.clear();filePath=std::move(path);rememberDocument(filePath);selection.clear();targetContainer=0;targetSlot=0;targetAbove=false;
     Document beforeUpgrade=doc;normalizeChemicalLabels(doc);bool upgraded=upgradeBondGeometry(doc);upgraded=upgraded||toNative(doc)!=toNative(beforeUpgrade);if(upgraded)history.checkpoint(beforeUpgrade);dirty=upgraded;officeDocument=fromOffice;tool=Select;hoverAtom=hoverBond=0;status=upgraded?L"벤젠 75%·벤질 연결 길이 기준을 적용했습니다. 저장하면 새 기준이 유지됩니다.":L"새 문서 탭 · Ctrl+Tab: 다음 탭 · Ctrl+W: 현재 탭 닫기";
     fit();storeDocumentTab();title();
 }
@@ -81,7 +149,7 @@ bool closeAllDocuments(){
     for(size_t i=0;i<documents.size();i++){if(!switchDocumentTab(i)||!discard())return false;storeDocumentTab();}
     switchDocumentTab(initial);return true;
 }
-void manageProjects(){
+void manageProjects(const std::wstring& initial){
     if(!finishInline(true))return;
     projects::Callbacks callbacks;
     callbacks.blank=toCdxml(Document{});
@@ -134,7 +202,7 @@ void manageProjects(){
         }catch(...){switchDocumentTab(initial);throw;}
         switchDocumentTab(initial);return true;
     };
-    projects::manage(win,callbacks);title();redraw();
+    projects::manage(win,callbacks,initial);title();redraw();
 }
 Document officeCurrentDocument(){
     if(officeDocument)return doc;
@@ -142,6 +210,19 @@ Document officeCurrentDocument(){
     return doc;
 }
 LRESULT CALLBACK documentTabProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR){
+    if(msg==WM_NOTIFY&&reinterpret_cast<NMHDR*>(lp)->code==TTN_GETDISPINFOW){
+        POINT point{};GetCursorPos(&point);ScreenToClient(hwnd,&point);
+        TCHITTESTINFO hit{point,0};
+        const int i=TabCtrl_HitTest(hwnd,&hit);
+        static std::wstring label;
+        label.clear();
+        if(i>=0&&size_t(i)<documents.size()){
+            const auto& path=size_t(i)==activeDocument?filePath:documents[i].path;
+            label=path.empty()?L"제목 없음":fs::path(path).filename().wstring()+L"\n"+fs::absolute(path).wstring();
+        }
+        reinterpret_cast<NMTTDISPINFOW*>(lp)->lpszText=label.data();
+        return 0;
+    }
     if(msg==WM_ERASEBKGND)return 1;
     if(msg==WM_MOUSEMOVE){TRACKMOUSEEVENT tracking{sizeof(tracking),TME_LEAVE,hwnd,0};TrackMouseEvent(&tracking);InvalidateRect(hwnd,nullptr,FALSE);}
     if(msg==WM_MOUSELEAVE)InvalidateRect(hwnd,nullptr,FALSE);
@@ -165,11 +246,11 @@ LRESULT CALLBACK documentTabProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR
 void createDocumentTabs(){
     if(isolatedStructureEditing){storeDocumentTab();return;}
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_TAB_CLASSES};InitCommonControlsEx(&controls);
-    documentTabs=CreateWindowExW(0,WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|TCS_FOCUSNEVER, left,89,ww-left-right,30,win,(HMENU)950,GetModuleHandleW(nullptr),nullptr);
+    documentTabs=CreateWindowExW(0,WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|TCS_FOCUSNEVER|TCS_TOOLTIPS, left,89,ww-left-right,30,win,(HMENU)950,GetModuleHandleW(nullptr),nullptr);
     tabFont=CreateFontW(-14,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
     SendMessageW(documentTabs,WM_SETFONT,(WPARAM)tabFont,TRUE);SetWindowSubclass(documentTabs,documentTabProc,1,0);
     TabCtrl_SetPadding(documentTabs,20,5);
-    storeDocumentTab();refreshDocumentTabs();
+    rememberDocument(filePath);storeDocumentTab();refreshDocumentTabs();
 }
 
 } // namespace yd::editor
