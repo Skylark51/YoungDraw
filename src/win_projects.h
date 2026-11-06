@@ -37,5 +37,5 @@ struct Callbacks {
     std::function<bool(const std::filesystem::path&)> saveForExport;
     PngWriter writePng;
 };
-void manage(HWND owner, const Callbacks& callbacks);
+void manage(HWND owner, const Callbacks& callbacks,const std::filesystem::path& initial={});
 }

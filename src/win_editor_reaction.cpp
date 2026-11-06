@@ -1,3 +1,5 @@
+#include "win_theme.h"
+#include "win_editor_render.h"
 #include "win_editor_commands.h"
 #include "win_editor_pointer.h"
 #include "win_editor_reaction.h"
@@ -187,9 +189,28 @@ void editMechanismControls(int id){
     if(id==149){auto value=ui::form(win,L"화살표 길이",{{L"길이 (pt, 0: 설명에 맞춰 자동)",number(r->arrowLength)}});if(!value)return;double length=numeric((*value)[0],0,10000);if(length>0&&length<20)throw std::runtime_error("길이는 20 pt 이상 또는 0(자동)으로 입력하세요.");Document candidate=doc;for(auto& row:candidate.reactions)if(row.id==owner)row.arrowLength=length;optimizeMechanism(candidate,{owner},r->cyclic);history.checkpoint(doc);doc=std::move(candidate);changed();fit();return;}
     if(id==147){if(selectedCycleOwner!=owner||selectedCycleArrow<0)throw std::runtime_error("제거할 화살표를 먼저 클릭하세요.");Document candidate=doc;for(auto& row:candidate.reactions)if(row.id==owner)removeMechanismConnection(row,size_t(selectedCycleArrow));history.checkpoint(doc);doc=std::move(candidate);selectedCycleArrow=-1;selection={owner};changed();return;}
     size_t selected=targetContainer==owner?std::min(targetSlot,r->slots.size()-1):0;
+    auto stagePreview=[&](HDC dc,const RECT& box,const std::vector<std::string>& values){
+        const double n=numeric(values.at(0),1,double(r->slots.size()+1));
+        if(n!=std::floor(n))return;
+        const bool append=size_t(n)>r->slots.size();
+        const size_t index=append?selected:size_t(n)-1;
+        const auto& palette=appearance::palette();
+        Graphics g(dc);
+        SolidBrush background(palette.raised);
+        g.FillRectangle(&background,RectF(float(box.left),float(box.top),float(box.right-box.left),float(box.bottom-box.top)));
+        const auto label=(append?L"끝에 삽입  ·  현재 ":L"")+std::wstring(L"단계 ")+
+            std::to_wstring(index+1)+L" · "+ui::wide(r->slots[index].label);
+        ui::drawLabel(g,label,RectF(float(box.left+10),float(box.top+8),600,23),14,palette.text,true,true);
+        auto structure=makeScene(structureInSlot(doc,owner,index),measure);
+        const auto& b=structure.bounds;
+        const auto scale=float(std::min(600./std::max(1.,b.w),80./std::max(1.,b.h)));
+        g.SetSmoothingMode(SmoothingModeAntiAlias);
+        g.TranslateTransform(float(box.left+box.right)/2-float(b.x+b.w/2)*scale,float(box.top+35)-float(b.y)*scale);
+        g.ScaleTransform(scale,scale);render(g,structure,false,true);
+    };
     if(id==143){
         const size_t end=r->slots.size();
-        auto value=ui::form(win,L"단계 추가",{{L"삽입할 위치 (1부터, 마지막 뒤: 단계 수+1)",std::to_string(end+1)}});
+        auto value=ui::form(win,L"단계 추가",{{L"삽입할 위치 (1부터, 마지막 뒤: 단계 수+1)",std::to_string(end+1)}},{},{},stagePreview);
         if(!value)return;
         double n=numeric((*value)[0],1,double(end+1));
         if(n!=std::floor(n))throw std::runtime_error("정수 위치를 입력하세요.");
@@ -208,7 +229,7 @@ void editMechanismControls(int id){
     if(id==144||id==146){std::vector<ui::Field> fields={{L"제거하거나 합칠 단계 번호 (1부터)",std::to_string(selected+1)}};
         if(id==146)fields.push_back({L"구조와 연결을 받을 단계 번호 (1부터)",std::to_string(selected?selected:std::min(size_t(2),r->slots.size()))});
         else fields.push_back({L"해당 단계의 구조", "0",false,{L"캔버스에 유지 (단계·연결만 제거)",L"구조도 함께 삭제"}});
-        auto value=ui::form(win,id==146?L"잘못 나뉜 단계 합치기":L"단계 제거",fields);if(!value)return;
+        auto value=ui::form(win,id==146?L"잘못 나뉜 단계 합치기":L"단계 제거",fields,{},{},stagePreview);if(!value)return;
         double stage=numeric((*value)[0],1,double(r->slots.size()));if(stage!=std::floor(stage))throw std::runtime_error("정수 단계 번호를 입력하세요.");int merge=-1;
         if(id==146){double n=numeric((*value)[1],1,double(r->slots.size()));if(n!=std::floor(n))throw std::runtime_error("정수 단계 번호를 입력하세요.");merge=int(n)-1;}
         Document candidate=doc;removeMechanismStage(candidate,owner,size_t(stage)-1,merge,id==144&&(*value)[1]=="1");

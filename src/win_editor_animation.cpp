@@ -10,10 +10,12 @@
 #include "win_editor_structure.h"
 #include "win_ui.h"
 #include <commdlg.h>
+#include <commctrl.h>
 #include <array>
 #include <deque>
 #include <tuple>
 #include <sstream>
+#include <windowsx.h>
 
 namespace yd::editor {
 namespace {
@@ -345,7 +347,12 @@ namespace {
 struct Playback {
     double speed=1.;
     int hold=stageDelay; // Centiseconds, like GIF frame delays.
-    bool repeat=true;
+    enum Loop {Once,Forward,PingPong};
+    Loop loop=PingPong;
+    double scale=1.;
+    int resolution=0;
+    double multiplier=1.;
+    int stride=1;
     AnimationBackground background=AnimationBackground::Theme;
 };
 class AnimationTimeline {
@@ -414,8 +421,13 @@ public:
     }
 };
 
-std::string encodeAnimation(AnimationTimeline& timeline,const Playback& playback){
-    const int width=timeline.width,height=timeline.height;
+int outputPixels(int base,const Playback& playback){return std::max(1,int(std::lround(base*playback.scale)));}
+
+using GifProgress=std::function<bool(int,int,size_t)>;
+std::string encodeAnimation(AnimationTimeline& timeline,const Playback& playback,const GifProgress& progress={}){
+    const int width=outputPixels(timeline.width,playback),height=outputPixels(timeline.height,playback);
+    const int forwardCount=timeline.lastFrame()/playback.stride+1;
+    const int total=playback.loop==Playback::PingPong?2*forwardCount-2:forwardCount;
     std::string bytes="GIF89a";
     word(bytes,width);word(bytes,height);
     const bool transparent=playback.background==AnimationBackground::Transparent;
@@ -429,25 +441,30 @@ std::string encodeAnimation(AnimationTimeline& timeline,const Playback& playback
         bytes+=char(((i>>2)&7)*255/7);
         bytes+=char((i&3)*255/3);
     }
-    if(playback.repeat)bytes.append("\x21\xff\x0bNETSCAPE2.0\x03\x01\0\0\0",19);
+    if(playback.loop!=Playback::Once)bytes.append("\x21\xff\x0bNETSCAPE2.0\x03\x01\0\0\0",19);
     Bitmap bitmap(width,height,PixelFormat32bppARGB);
     std::vector<size_t> frameOffsets;
-    for(int frame=0;frame<=timeline.lastFrame();++frame){
+    for(int frame=0;frame<=timeline.lastFrame();frame+=playback.stride){
+        if(progress&&!progress(int(frameOffsets.size()),total,bytes.size()))return {};
         {
             Graphics g(&bitmap);
             g.Clear(transparent?Color(0,0,0,0):Color(255,255,255));
             if(themed)appearance::background(g,RectF(0,0,float(width),float(height)));
             g.SetSmoothingMode(SmoothingModeAntiAlias);
             g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+            g.ScaleTransform(float(width)/timeline.width,float(height)/timeline.height);
             timeline.draw(g,frame,themed);
         }
         frameOffsets.push_back(bytes.size());
-        gifFrame(bytes,bitmap,width,height,timeline.delay(frame,playback),transparent);
+        gifFrame(bytes,bitmap,width,height,timeline.delay(frame,playback)+(frame<timeline.lastFrame()?(playback.stride-1)*std::max(2,int(std::lround(frameDelay/playback.speed))):0),transparent);
     }
     frameOffsets.push_back(bytes.size());
     // Replay the same frames in reverse, so the loop also has a continuous transition.
-    if(playback.repeat)for(size_t i=frameOffsets.size()-3;i>0;--i)
+    if(playback.loop==Playback::PingPong)for(size_t i=frameOffsets.size()-3;i>0;--i){
+        if(progress&&!progress(total-int(i),total,bytes.size()))return {};
         bytes.append(bytes,frameOffsets[i],frameOffsets[i+1]-frameOffsets[i]);
+    }
+    if(progress&&!progress(total,total,bytes.size()+1))return {};
     bytes+=';';
     return bytes;
 }
@@ -474,9 +491,10 @@ bool editAnimationCaptions(HWND owner,std::vector<AnimationStage>& stages){
 }
 enum PreviewControl {
     PreviewPlay=101,PreviewRestart,PreviewPrevious,PreviewNext,PreviewTiming,
-    PreviewCaptions,PreviewReplace,PreviewSave,PreviewClose,PreviewReadout,PreviewRepeat,PreviewBackground
+    PreviewCaptions,PreviewReplace,PreviewSave,PreviewClose,PreviewReadout,PreviewRepeat,PreviewBackground,PreviewAdd,PreviewRemove
 };
 constexpr int previewSidebar=252;
+const std::vector<std::wstring> loopModes={L"1회 재생",L"정방향 반복",L"왕복 반복"};
 
 struct AnimationPreview {
     ui::DialogColors colors;
@@ -486,17 +504,30 @@ struct AnimationPreview {
     ULONGLONG started=0, position=0;
     int frame=0;
     bool playing=true, done=false, seeking=false;
+    int thumbFrom=-1,thumbOffset=0;
+    std::vector<Scene> thumbs;
     HFONT font=nullptr;
     std::unique_ptr<Bitmap> buffer;
 
     explicit AnimationPreview(std::vector<AnimationStage> stages):timeline(std::move(stages)){
-        updateTiming(0);
+        rebuildThumbs();updateTiming(0);
+    }
+    void rebuildThumbs(){
+        thumbs.clear();
+        for(const auto& stage:timeline.stages)thumbs.push_back(makeScene(stage.structure,measure));
+    }
+    void replace(std::vector<AnimationStage> stages,int index){
+        timeline=AnimationTimeline(std::move(stages));
+        rebuildThumbs();
+        thumbOffset=std::min(thumbOffset,int(thumbs.size())-1);
+        if(playback.resolution)playback.scale=playback.resolution*playback.multiplier/std::max(timeline.width,timeline.height);
+        updateTiming(index*transitionSteps);
     }
     ~AnimationPreview(){if(font)DeleteObject(font);}
     void updateTiming(int selected){
         frameEnds.clear();
         ULONGLONG total=0;
-        for(int i=0;i<(playback.repeat?timeline.frameCount():timeline.lastFrame()+1);++i){
+        for(int i=0;i<(playback.loop==Playback::PingPong?timeline.frameCount():timeline.lastFrame()+1);++i){
             total+=10*timeline.delay(i,playback);
             frameEnds.push_back(total);
         }
@@ -510,7 +541,7 @@ struct AnimationPreview {
     void tick(){
         if(!playing)return;
         auto elapsed=position+GetTickCount64()-started;
-        if(!playback.repeat&&elapsed>=frameEnds.back()){
+        if(playback.loop==Playback::Once&&elapsed>=frameEnds.back()){
             frame=timeline.lastFrame();
             playing=false;
             return;
@@ -533,6 +564,9 @@ void refreshPreview(HWND hwnd,const AnimationPreview& preview){
     auto readout=L"단계 "+std::to_wstring(preview.stage()+1)+L" / "+std::to_wstring(preview.timeline.stages.size())+
         L"    ·    프레임 "+std::to_wstring(preview.frame+1);
     SetDlgItemTextW(hwnd,PreviewReadout,readout.c_str());
+    const auto output=L"출력 · "+std::to_wstring(outputPixels(preview.timeline.width,preview.playback))+L" × "+
+        std::to_wstring(outputPixels(preview.timeline.height,preview.playback))+L" px…";
+    SetDlgItemTextW(hwnd,PreviewBackground,output.c_str());
     InvalidateRect(hwnd,nullptr,FALSE);
 }
 
@@ -546,11 +580,13 @@ void previewButtons(HWND hwnd){
     MoveWindow(GetDlgItem(hwnd,PreviewRestart),x,151,w,32,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewPrevious),x,190,(w-8)/2,32,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewNext),x+(w+8)/2,190,(w-8)/2,32,TRUE);
-    MoveWindow(GetDlgItem(hwnd,PreviewTiming),x,229,(w+20)/2,32,TRUE);
-    MoveWindow(GetDlgItem(hwnd,PreviewRepeat),x+(w+36)/2,229,(w-36)/2,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewTiming),x,229,(w-8)/2,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewRepeat),x+(w+8)/2,232,(w-8)/2,145,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewBackground),x,268,w,32,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewCaptions),x,340,w,30,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewReplace),x,376,w,30,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewAdd),x,412,(w-8)/2,28,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewRemove),x+(w+8)/2,412,(w-8)/2,28,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewSave),x,rc.bottom-83,w,35,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewClose),x,rc.bottom-41,w,29,TRUE);
 }
@@ -568,14 +604,14 @@ void paintPreview(HWND hwnd,HDC dc,AnimationPreview& preview){
         g.SetSmoothingMode(SmoothingModeAntiAlias);
         g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
         const float sidebar=float(w-previewSidebar);
-        const RectF canvas(0,0,sidebar,float(h));
+        const RectF canvas(0,0,sidebar,float(h-83));
         SolidBrush backdrop(palette.canvas);
         g.FillRectangle(&backdrop,canvas);
         auto saved=g.Save();
         g.SetClip(canvas);
         const auto& timeline=preview.timeline;
-        const float scale=std::max(.1f,std::min((sidebar-48)/timeline.width,(h-48.f)/timeline.height));
-        g.TranslateTransform((sidebar-timeline.width*scale)*.5f,(h-timeline.height*scale)*.5f);
+        const float scale=std::max(.1f,std::min((sidebar-48)/timeline.width,(h-125.f)/timeline.height));
+        g.TranslateTransform((sidebar-timeline.width*scale)*.5f,(h-83-timeline.height*scale)*.5f);
         g.ScaleTransform(scale,scale);
         const bool themed=preview.playback.background==AnimationBackground::Theme;
         if(themed){
@@ -592,6 +628,21 @@ void paintPreview(HWND hwnd,HDC dc,AnimationPreview& preview){
         preview.timeline.draw(g,preview.timeline.forwardFrame(preview.frame),themed);
         g.Restore(saved);
 
+        saved=g.Save();g.SetClip(RectF(0,float(h-83),sidebar,83));
+        for(size_t i=size_t(preview.thumbOffset);i<preview.thumbs.size();++i){
+            const float x=8+float(i-preview.thumbOffset)*92;
+            if(x>=sidebar)break;
+            RectF box(x,float(h-78),86,70);
+            appearance::rounded(g,box,6,int(i)==preview.stage()||int(i)==preview.thumbFrom?palette.hover:palette.raised);
+            const auto& scene=preview.thumbs[i];
+            const auto& b=scene.bounds;
+            const float fit=float(std::min(74./std::max(1.,b.w),46./std::max(1.,b.h)));
+            auto thumbState=g.Save();
+            g.TranslateTransform(x+43-float(b.x+b.w/2)*fit,float(h-53)-float(b.y+b.h/2)*fit);
+            g.ScaleTransform(fit,fit);render(g,scene,false,true);g.Restore(thumbState);
+            ui::drawLabel(g,std::to_wstring(i+1)+L" "+ui::wide(timeline.stages[i].structureName),RectF(x+3,float(h-26),80,17),11,palette.text,false,true);
+        }
+        g.Restore(saved);
         Pen divider(palette.edge,1);
         g.DrawLine(&divider,sidebar,0.f,sidebar,float(h));
         ui::drawLabel(g,L"재생",RectF(sidebar+16,13,220,26),18,palette.text,true);
@@ -617,9 +668,51 @@ void setPlaying(HWND hwnd,AnimationPreview& preview,bool playing){
 
 const std::vector<std::wstring> backgroundNames={L"현재 테마",L"투명",L"흰색"};
 
+struct ExportProgress {
+    HWND owner,window=nullptr,readout=nullptr,bar=nullptr,cancel=nullptr;
+    ULONGLONG start=GetTickCount64();
+    bool stopped=false;
+    explicit ExportProgress(HWND parent):owner(parent){
+        const RECT r=ui::ownedWindowRect(owner,420,176);
+        window=CreateWindowExW(WS_EX_DLGMODALFRAME,L"STATIC",L"GIF 생성 중",WS_POPUP|WS_CAPTION,
+            r.left,r.top,420,176,owner,nullptr,nullptr,nullptr);
+        if(!window)throw std::runtime_error("진행 창을 열 수 없습니다.");
+        readout=CreateWindowW(L"STATIC",L"첫 프레임 생성 중…",WS_CHILD|WS_VISIBLE,16,14,378,28,window,nullptr,nullptr,nullptr);
+        bar=CreateWindowW(PROGRESS_CLASSW,L"",WS_CHILD|WS_VISIBLE,16,48,378,22,window,nullptr,nullptr,nullptr);
+        cancel=CreateWindowW(L"BUTTON",L"취소",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,290,83,104,28,window,nullptr,nullptr,nullptr);
+        for(auto child:{readout,cancel})SendMessageW(child,WM_SETFONT,WPARAM(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
+        SetWindowSubclass(window,proc,1,reinterpret_cast<DWORD_PTR>(this));
+        EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);SetFocus(cancel);
+    }
+    ~ExportProgress(){EnableWindow(owner,TRUE);DestroyWindow(window);SetActiveWindow(owner);}
+    static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR data){
+        auto& self=*reinterpret_cast<ExportProgress*>(data);
+        if(msg==WM_CLOSE||(msg==WM_COMMAND&&HWND(lp)==self.cancel)){self.stopped=true;return 0;}
+        return DefSubclassProc(hwnd,msg,wp,lp);
+    }
+    bool update(int done,int total,size_t bytes){
+        MSG msg{};
+        while(PeekMessageW(&msg,window,0,0,PM_REMOVE)){
+            if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE)stopped=true;
+            TranslateMessage(&msg);DispatchMessageW(&msg);
+        }
+        if(stopped)return false;
+        if(done){
+            const auto eta=(GetTickCount64()-start)*(total-done)/done/1000;
+            const auto estimate=double(bytes)*total/done/1048576.;
+            wchar_t label[160]{};
+            swprintf_s(label,L"%d%%  ·  예상 %.2f MB  ·  남은 시간 %llu초",100*done/total,estimate,eta);
+            SetWindowTextW(readout,label);
+        }
+        SendMessageW(bar,PBM_SETPOS,100*done/total,0);
+        UpdateWindow(window);UpdateWindow(readout);UpdateWindow(bar);
+        return true;
+    }
+};
+
 void previewAction(HWND hwnd,AnimationPreview& preview,int id){
     if(id==PreviewPlay){
-        if(!preview.playing&&!preview.playback.repeat&&preview.frame==preview.timeline.lastFrame())preview.seek(0);
+        if(!preview.playing&&preview.playback.loop==Playback::Once&&preview.frame==preview.timeline.lastFrame())preview.seek(0);
         setPlaying(hwnd,preview,!preview.playing);
     }else if(id==PreviewRestart){
         preview.seek(0);
@@ -644,39 +737,81 @@ void previewAction(HWND hwnd,AnimationPreview& preview,int id){
         }
     }else if(id==PreviewRepeat){
         const int frame=preview.timeline.forwardFrame(preview.frame);
-        preview.playback.repeat=!preview.playback.repeat;
-        preview.updateTiming(frame);
-        SetDlgItemTextW(hwnd,PreviewRepeat,preview.playback.repeat?L"반복 켬":L"반복 끔");
-    }else if(id==PreviewBackground){
-        auto result=ui::form(hwnd,L"애니메이션 배경",
-            {{L"미리보기와 GIF 배경",std::to_string(int(preview.playback.background)),false,backgroundNames}});
-        if(result){
-            preview.playback.background=AnimationBackground(std::stoi(result->front()));
-            auto label=L"배경 · "+backgroundNames.at(size_t(preview.playback.background))+L"…";
-            SetDlgItemTextW(hwnd,PreviewBackground,label.c_str());
+        const auto mode=SendDlgItemMessageW(hwnd,PreviewRepeat,CB_GETCURSEL,0,0);
+        if(mode!=CB_ERR){
+            preview.playback.loop=Playback::Loop(mode);
+            preview.updateTiming(frame);
         }
-    }else if(id==PreviewCaptions||id==PreviewReplace){
+    }else if(id==PreviewBackground){
+        const int longest=std::max(preview.timeline.width,preview.timeline.height);
+        auto scaleFor=[&](const std::vector<std::string>& values){
+            const double pixels=std::lround(numeric(values[1],32,2400))*numeric(values[2],.25,4);
+            if(pixels<32||pixels>2400)throw std::runtime_error("최종 해상도의 긴 변은 32~2400 px로 설정하세요.");
+            return pixels/longest;
+        };
+        auto result=ui::form(hwnd,L"GIF 출력 설정",{
+            {L"배경",std::to_string(int(preview.playback.background)),false,backgroundNames},
+            {L"기준 해상도 · 긴 변 (px)",std::to_string(preview.playback.resolution?preview.playback.resolution:longest)},
+            {L"출력 배율 (예: 1, 2)",std::to_string(preview.playback.multiplier)},
+            {L"모션 화질",std::to_string(preview.playback.stride-1),false,
+                {L"높음 · 모든 프레임",L"보통 · 2프레임 간격",L"낮음 · 3프레임 간격"}}
+        },[&](const auto& values)->std::wstring{scaleFor(values);return {};},{},
+        [&](HDC dc,const RECT& box,const auto& values){
+            auto playback=preview.playback;playback.scale=scaleFor(values);
+            const auto label=L"최종 GIF · "+std::to_wstring(outputPixels(preview.timeline.width,playback))+L" × "+
+                std::to_wstring(outputPixels(preview.timeline.height,playback))+L" px";
+            Graphics g(dc);
+            ui::drawLabel(g,label,RectF(float(box.left),float(box.top),600,40),18,appearance::palette().text,true);
+        });
+        if(result){
+            preview.playback.scale=scaleFor(*result);
+            preview.playback.resolution=int(std::lround(numeric((*result)[1],32,2400)));
+            preview.playback.multiplier=numeric((*result)[2],.25,4);
+            preview.playback.background=AnimationBackground(std::stoi(result->front()));
+            preview.playback.stride=1+std::stoi((*result)[3]);
+        }
+    }else if(id==PreviewCaptions||id==PreviewReplace||id==PreviewAdd||id==PreviewRemove){
         auto stages=preview.timeline.stages;
+        int index=preview.stage();
         if(id==PreviewCaptions){
             if(!editAnimationCaptions(hwnd,stages))return;
+        }else if(id==PreviewRemove){
+            if(stages.size()<=2)throw std::runtime_error("GIF에는 단계가 두 개 이상 필요합니다.");
+            stages.erase(stages.begin()+index);
+            index=std::min(index,int(stages.size())-1);
         }else{
-            auto path=animationFile(L"현재 단계에 넣을 구조 열기",false,hwnd);
+            auto path=animationFile(L"단계에 넣을 구조 열기",false,hwnd);
             if(!path)return;
-            stages[size_t(preview.stage())].structure=readStructure(*path);
+            auto structure=readStructure(*path);
+            if(id==PreviewAdd){
+                ++index;
+                stages.insert(stages.begin()+index,{std::move(structure),"","단계 "+std::to_string(index+1),"",""});
+            }else stages[size_t(index)].structure=std::move(structure);
         }
-        preview.timeline=AnimationTimeline(std::move(stages));
-        preview.updateTiming(preview.frame);
+        preview.replace(std::move(stages),index);
     }else if(id==PreviewSave){
         auto path=animationFile(L"결합 애니메이션 GIF 저장",true,hwnd);
         if(!path)return;
-        auto cursor=SetCursor(LoadCursorW(nullptr,IDC_WAIT));
-        try{writeFile(*path,encodeAnimation(preview.timeline,preview.playback));}
-        catch(...){SetCursor(cursor);throw;}
-        SetCursor(cursor);
+        std::string bytes;
+        {
+            ExportProgress progress(hwnd);
+            bytes=encodeAnimation(preview.timeline,preview.playback,[&](int done,int total,size_t size){
+                return progress.update(done,total,size);
+            });
+        }
+        if(bytes.empty())return;
+        writeFile(*path,bytes);
         status=L"결합 애니메이션 GIF를 저장했습니다.";
         redraw();
         MessageBoxW(hwnd,L"GIF를 저장했습니다.",L"결합 애니메이션",MB_OK|MB_ICONINFORMATION);
     }
+}
+
+int thumbnailAt(HWND hwnd,const AnimationPreview& preview,POINT p){
+    RECT rc{};GetClientRect(hwnd,&rc);
+    if(p.y<rc.bottom-83||p.y>=rc.bottom||p.x<8||p.x>=rc.right-previewSidebar)return -1;
+    const int i=preview.thumbOffset+(p.x-8)/92;
+    return size_t(i)<preview.thumbs.size()?i:-1;
 }
 
 LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
@@ -692,8 +827,13 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 0,0,0,0,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);
             SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(preview->font),FALSE);
         }
-        for(auto id:{PreviewRepeat,PreviewBackground}){
-            auto control=CreateWindowW(L"BUTTON",id==PreviewRepeat?L"반복 켬":L"배경 · 현재 테마…",
+        HWND repeat=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
+            0,0,0,0,hwnd,HMENU(INT_PTR(PreviewRepeat)),nullptr,nullptr);
+        SendMessageW(repeat,WM_SETFONT,WPARAM(preview->font),FALSE);
+        for(const auto& mode:loopModes)SendMessageW(repeat,CB_ADDSTRING,0,LPARAM(mode.c_str()));
+        SendMessageW(repeat,CB_SETCURSEL,Playback::PingPong,0);
+        for(auto id:{PreviewBackground,PreviewAdd,PreviewRemove}){
+            auto control=CreateWindowW(L"BUTTON",id==PreviewAdd?L"단계 추가…":id==PreviewRemove?L"단계 삭제":L"출력 설정…",
                 WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,0,0,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);
             SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(preview->font),FALSE);
         }
@@ -708,7 +848,7 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(!preview)return DefWindowProcW(hwnd,msg,wp,lp);
     switch(msg){
     case WM_GETMINMAXINFO:
-        reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={680,560};return 0;
+        reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={680,580};return 0;
     case WM_SIZE:
         previewButtons(hwnd);InvalidateRect(hwnd,nullptr,FALSE);return 0;
     case WM_ERASEBKGND:return 1;
@@ -737,6 +877,14 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     case WM_MOUSEMOVE:{
         POINT point{short(LOWORD(lp)),short(HIWORD(lp))};
         const auto seek=seekBounds(hwnd);
+        if(msg==WM_LBUTTONDOWN){
+            const int thumb=thumbnailAt(hwnd,*preview,point);
+            if(thumb>=0){
+                setPlaying(hwnd,*preview,false);
+                preview->thumbFrom=thumb;preview->seek(thumb*transitionSteps);
+                SetCapture(hwnd);refreshPreview(hwnd,*preview);return 0;
+            }
+        }
         if(msg==WM_LBUTTONDOWN&&PtInRect(&seek,point)){
             preview->seeking=true;
             setPlaying(hwnd,*preview,false);
@@ -749,17 +897,36 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         }
         return 0;
     }
-    case WM_LBUTTONUP:
-        if(preview->seeking)ReleaseCapture();
-        return 0;
+    case WM_LBUTTONUP:{
+        const int from=preview->thumbFrom;
+        const int to=thumbnailAt(hwnd,*preview,{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)});
+        if(preview->seeking||from>=0)ReleaseCapture();
+        if(from>=0&&to>=0&&to!=from){
+            auto stages=preview->timeline.stages;
+            auto stage=std::move(stages[from]);
+            stages.erase(stages.begin()+from);
+            stages.insert(stages.begin()+to,std::move(stage));
+            try{preview->replace(std::move(stages),to);}
+            catch(const std::exception& e){MessageBoxW(hwnd,ui::wide(e.what()).c_str(),L"단계 순서",MB_OK|MB_ICONWARNING);}
+        }
+        refreshPreview(hwnd,*preview);return 0;
+    }
+    case WM_MOUSEWHEEL:{
+        RECT rc{};GetClientRect(hwnd,&rc);
+        const int visible=std::max(1,int(rc.right-previewSidebar-8)/92);
+        preview->thumbOffset=std::clamp(preview->thumbOffset-GET_WHEEL_DELTA_WPARAM(wp)/WHEEL_DELTA,
+            0,std::max(0,int(preview->thumbs.size())-visible));
+        InvalidateRect(hwnd,nullptr,FALSE);return 0;
+    }
     case WM_CAPTURECHANGED:
-        preview->seeking=false;return 0;
+        preview->seeking=false;preview->thumbFrom=-1;return 0;
     case WM_COMMAND:{
         const int id=LOWORD(wp);
         if(id==PreviewClose||id==IDCANCEL){SendMessageW(hwnd,WM_CLOSE,0,0);return 0;}
-        if((id>=PreviewPlay&&id<=PreviewSave)||id==PreviewRepeat||id==PreviewBackground){
+        if(id==PreviewRepeat&&HIWORD(wp)!=CBN_SELCHANGE)return 0;
+        if((id>=PreviewPlay&&id<=PreviewSave)||id==PreviewRepeat||id==PreviewBackground||id==PreviewAdd||id==PreviewRemove){
             // Pause while editing or choosing an export destination.
-            if(id>=PreviewTiming&&id!=PreviewRepeat)setPlaying(hwnd,*preview,false);
+            if(id>=PreviewTiming)setPlaying(hwnd,*preview,false);
             try{previewAction(hwnd,*preview,id);}
             catch(const std::exception& e){MessageBoxW(hwnd,ui::wide(e.what()).c_str(),L"결합 애니메이션",MB_OK|MB_ICONWARNING);}
             refreshPreview(hwnd,*preview);
@@ -770,6 +937,127 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         KillTimer(hwnd,1);preview->done=true;PostMessageW(hwnd,WM_NULL,0,0);return 0;
     }
     return DefWindowProcW(hwnd,msg,wp,lp);
+}
+
+struct RoutePicker {
+    const Reaction& reaction;
+    Scene scene;
+    std::vector<bool> available;
+    std::vector<size_t> route;
+    HWND info=nullptr;
+    double zoom=1.;
+    Vec origin;
+    bool done=false,accepted=false;
+
+    void update(HWND hwnd){
+        std::wstring text=L"구조를 화살표 순서대로 클릭하세요. 선택:";
+        for(auto i:route)text+=L" "+std::to_wstring(i+1);
+        SetWindowTextW(info,text.c_str());
+        EnableWindow(GetDlgItem(hwnd,IDOK),route.size()>=2);
+        InvalidateRect(hwnd,nullptr,TRUE);
+    }
+    static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
+        if(msg==WM_CREATE){
+            auto p=static_cast<RoutePicker*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+            SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(p));
+            RECT r{};GetClientRect(hwnd,&r);
+            p->info=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE|SS_PATHELLIPSIS,14,9,r.right-28,22,hwnd,nullptr,nullptr,nullptr);
+            for(auto [id,label,x]:std::vector<std::tuple<int,const wchar_t*,int>>{
+                {3,L"마지막 선택 취소",14},{IDOK,L"경로 적용",int(r.right)-228},{IDCANCEL,L"닫기",int(r.right)-116}}){
+                HWND button=CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|WS_TABSTOP,x,r.bottom-40,108,28,hwnd,HMENU(INT_PTR(id)),nullptr,nullptr);
+                SendMessageW(button,WM_SETFONT,WPARAM(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
+            }
+            p->update(hwnd);return 0;
+        }
+        auto* p=reinterpret_cast<RoutePicker*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+        if(!p)return DefWindowProcW(hwnd,msg,wp,lp);
+        if(msg==WM_PAINT){
+            PAINTSTRUCT ps{};HDC dc=BeginPaint(hwnd,&ps);
+            RECT r{};GetClientRect(hwnd,&r);
+            Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);
+            g.SetClip(RectF(0,36,float(r.right),float(r.bottom-84)));
+            const auto& b=p->scene.bounds;
+            p->zoom=std::min((r.right-32)/std::max(1.,b.w),(r.bottom-98)/std::max(1.,b.h));
+            p->origin={16-b.x*p->zoom,44-b.y*p->zoom};
+            g.TranslateTransform(float(p->origin.x),float(p->origin.y));
+            g.ScaleTransform(float(p->zoom),float(p->zoom));render(g,p->scene);
+            g.ResetTransform();
+            for(size_t i=0;i<p->reaction.slots.size();++i){
+                if(!p->available[i])continue;
+                const Vec c=p->origin+reactionSlot(p->reaction,i)*p->zoom;
+                const auto found=std::find(p->route.begin(),p->route.end(),i);
+                const bool selected=found!=p->route.end();
+                Pen pen(selected?Color(0,135,120):Color(155,160,164),selected?2.f:1.f);
+                const float w=float(p->reaction.slotWidth*p->zoom),h=float(p->reaction.slotHeight*p->zoom);
+                g.DrawRectangle(&pen,float(c.x)-w/2,float(c.y)-h/2,w,h);
+                if(selected)ui::drawLabel(g,std::to_wstring(found-p->route.begin()+1),
+                    RectF(float(c.x)-w/2+2,float(c.y)-h/2+2,25,18),14,Color(0,100,90),true);
+            }
+            EndPaint(hwnd,&ps);return 0;
+        }
+        if(msg==WM_LBUTTONDOWN&&p->zoom>0){
+            const Vec pt=(Vec{double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))}-p->origin)*(1/p->zoom);
+            size_t next=p->available.size();double distance=1e30;
+            for(size_t i=0;i<p->available.size();++i){
+                const Vec d=pt-reactionSlot(p->reaction,i);
+                if(p->available[i]&&std::abs(d.x)<=p->reaction.slotWidth/2&&std::abs(d.y)<=p->reaction.slotHeight/2&&d.length()<distance){
+                    next=i;distance=d.length();
+                }
+            }
+            if(next<p->available.size()&&p->route.size()<maxStages){
+                if(p->route.empty()||std::any_of(p->reaction.links.begin(),p->reaction.links.end(),
+                    [&](const MechanismLink& link){return link.from==int(p->route.back())&&link.to==int(next);})){
+                    p->route.push_back(next);p->update(hwnd);
+                }else MessageBeep(MB_ICONWARNING);
+            }
+            return 0;
+        }
+        if(msg==WM_CLOSE||msg==WM_COMMAND){
+            const auto id=msg==WM_CLOSE?IDCANCEL:LOWORD(wp);
+            if(id==3&&!p->route.empty()){p->route.pop_back();p->update(hwnd);}
+            if(id==IDCANCEL||(id==IDOK&&p->route.size()>=2)){
+                p->accepted=id==IDOK;p->done=true;
+            }
+            return 0;
+        }
+        return DefWindowProcW(hwnd,msg,wp,lp);
+    }
+};
+
+std::optional<std::vector<size_t>> pickRoute(const Document& source,const Reaction& mechanism){
+    RoutePicker picker{mechanism};
+    Document mechanismDrawing=source;
+    mechanismDrawing.reactions.erase(std::remove_if(mechanismDrawing.reactions.begin(),mechanismDrawing.reactions.end(),
+        [&](const Reaction& r){return r.id!=mechanism.id;}),mechanismDrawing.reactions.end());
+    mechanismDrawing.plots.clear();
+    std::vector<int> keep{mechanism.id};
+    for(size_t i=0;i<mechanism.slots.size();++i){
+        auto structure=structureInSlot(source,mechanism.id,i);
+        picker.available.push_back(!structure.atoms.empty());
+        keep.insert(keep.end(),mechanism.slots[i].members.begin(),mechanism.slots[i].members.end());
+    }
+    mechanismDrawing=mechanismDrawing.subset(keep);
+    picker.scene=makeScene(mechanismDrawing,measure);
+    static const auto registered=[]{
+        WNDCLASSW wc{};wc.lpfnWndProc=RoutePicker::proc;wc.hInstance=GetModuleHandleW(nullptr);
+        wc.lpszClassName=L"YoungDrawRoutePicker";wc.hCursor=LoadCursorW(nullptr,IDC_HAND);
+        wc.hbrBackground=HBRUSH(COLOR_WINDOW+1);return RegisterClassW(&wc);
+    }();
+    if(!registered)return {};
+    const RECT r=ui::ownedWindowRect(win,1040,670);
+    HWND hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawRoutePicker",L"분기 메커니즘 경로",
+        WS_POPUP|WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN,r.left,r.top,r.right-r.left,r.bottom-r.top,win,nullptr,nullptr,&picker);
+    if(!hwnd)return {};
+    EnableWindow(win,FALSE);ShowWindow(hwnd,SW_SHOW);
+    MSG msg{};BOOL got=1;
+    while(!picker.done&&(got=GetMessageW(&msg,nullptr,0,0))>0){
+        if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE)picker.done=true;
+        else if(!IsDialogMessageW(hwnd,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}
+    }
+    EnableWindow(win,TRUE);DestroyWindow(hwnd);SetActiveWindow(win);
+    if(!got)PostQuitMessage(int(msg.wParam));
+    if(picker.accepted)return picker.route;
+    return {};
 }
 
 void previewAnimation(std::vector<AnimationStage> stages){
@@ -784,7 +1072,10 @@ void previewAnimation(std::vector<AnimationStage> stages){
     }();
     if(!registered)throw std::runtime_error("애니메이션 미리보기 창을 등록할 수 없습니다.");
     AnimationPreview preview(std::move(stages));
-    const auto rect=ui::ownedWindowRect(win,1050,680);
+    MONITORINFO monitor{sizeof(monitor)};
+    GetMonitorInfoW(MonitorFromWindow(win,MONITOR_DEFAULTTONEAREST),&monitor);
+    const auto rect=ui::ownedWindowRect(win,std::min(1050,int(monitor.rcWork.right-monitor.rcWork.left)),
+        std::min(680,int(monitor.rcWork.bottom-monitor.rcWork.top)));
     auto hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,windowClass,L"결합 애니메이션 미리보기",
         WS_CAPTION|WS_SYSMENU|WS_THICKFRAME|WS_MAXIMIZEBOX|WS_POPUP|WS_CLIPCHILDREN,
         rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,win,nullptr,GetModuleHandleW(nullptr),&preview);
@@ -812,7 +1103,7 @@ void previewAnimation(std::vector<AnimationStage> stages){
 std::string bondAnimationGif(std::vector<AnimationStage> stages,bool repeat,AnimationBackground background){
     AnimationTimeline timeline(std::move(stages));
     Playback playback;
-    playback.repeat=repeat;
+    playback.loop=repeat?Playback::PingPong:Playback::Once;
     playback.background=background;
     return encodeAnimation(timeline,playback);
 }
@@ -874,23 +1165,9 @@ void createBondAnimation(){
                     return size_t(link.to)!=next;
                 }));
         if(chooseRoute){
-            std::string path;
-            for(size_t index:route){
-                if(!path.empty())path+=' ';
-                path+=std::to_string(index+1);
-            }
-            auto choice=ui::form(win,L"분기 메커니즘 경로",{
-                {L"화살표로 연결된 단계 번호\n예시  1 2 4",path}
-            });
+            auto choice=pickRoute(*source,mechanism);
             if(!choice)return;
-            std::istringstream entered(choice->front());
-            route.clear();
-            int index;
-            while(entered>>index){
-                if(index<1||size_t(index)>mechanism.slots.size())throw std::runtime_error("표에 있는 단계 번호를 입력하세요.");
-                route.push_back(size_t(index-1));
-            }
-            if(!entered.eof()||route.size()<2||route.size()>maxStages)throw std::runtime_error("단계 번호를 공백으로 구분해 2~40개 입력하세요.");
+            route=std::move(*choice);
         }
         stages=animationMechanismStages(*source,mechanism,route);
     }else{

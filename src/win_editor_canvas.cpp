@@ -15,6 +15,62 @@
 #include "win_ui.h"
 
 namespace yd::editor {
+namespace {
+int topOffset=0,leftOffset=0,rightOffset=0,topLimit=0;
+std::vector<int> favorites;
+bool favoritesLoaded=false;
+
+void loadFavorites(){
+    if(favoritesLoaded)return;
+    favoritesLoaded=true;
+    for(int id=200;id<=219;++id){
+        DWORD value=0,size=sizeof(value);
+        const auto key=std::to_wstring(id);
+        if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Favorites",key.c_str(),RRF_RT_REG_DWORD,nullptr,&value,&size)==ERROR_SUCCESS&&value)
+            favorites.push_back(id);
+    }
+}
+}
+bool pinTool(Vec at){
+    for(const auto& hit:hits){
+        if(hit.id<200||hit.id>219||!hit.box.Contains(float(at.x),float(at.y)))continue;
+        auto found=std::find(favorites.begin(),favorites.end(),hit.id);
+        const bool pinned=found!=favorites.end();
+        HMENU menu=CreatePopupMenu();
+        AppendMenuW(menu,MF_STRING,1,pinned?L"상단 고정 해제":L"상단 도구 모음에 고정");
+        POINT point{LONG(at.x),LONG(at.y)};ClientToScreen(win,&point);
+        const auto choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,win,nullptr);
+        DestroyMenu(menu);
+        if(choice){
+            if(pinned)favorites.erase(found);else favorites.push_back(hit.id);
+            const DWORD value=!pinned;
+            const auto key=std::to_wstring(hit.id);
+            RegSetKeyValueW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Favorites",key.c_str(),REG_DWORD,&value,sizeof(value));
+            redraw();
+        }
+        return true;
+    }
+    return false;
+}
+bool scrollTools(Vec at,int delta){
+    int* offset=nullptr,limit=0;
+    if(at.y<89){offset=&topOffset;limit=topLimit;}
+    else if(at.x<left){offset=&leftOffset;limit=std::max(0,786-(wh-bottom));}
+    else if(at.x>=ww-right){offset=&rightOffset;limit=std::max(0,684-(wh-bottom));}
+    if(!offset)return false;
+    *offset=std::clamp(*offset+delta,0,limit);
+    hideTooltip();redraw();return true;
+}
+
+static void clipHits(size_t first,const RectF& clip,float x,float y){
+    for(size_t i=first;i<hits.size();){
+        auto& box=hits[i].box;
+        box.X+=x;box.Y+=y;
+        if(!box.Intersect(clip))hits.erase(hits.begin()+i);
+        else ++i;
+    }
+}
+
 
 std::unique_ptr<Bitmap> paintBuffer;
 double bondFraction(int id,Vec p){auto* b=doc.bond(id);if(!b)return .5;Vec a=doc.atom(b->a)->p,v=doc.atom(b->b)->p-a;double ll=v.x*v.x+v.y*v.y;return ll>1e-9?std::clamp(((p-a).x*v.x+(p-a).y*v.y)/ll,0.,1.):.5;}
@@ -46,6 +102,13 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  Graphics g(paintBuffer.get());g.SetSmoothingMode(SmoothingModeAntiAlias);g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);g.Clear(palette.panel);hits.clear();fill(g,{0,0,float(ww),float(top)},palette.chrome);rule(g,0,87,float(ww),87,border);
  // One icon row beneath the native Korean menu; the same hit rectangles drive tooltips and commands.
  float toolbarX=12;
+ loadFavorites();
+ const int toolbarWidth=isolatedStructureEditing?ww-308:ww;
+ topLimit=std::max(0,(isolatedStructureEditing?880:1090+int(favorites.size())*48)-toolbarWidth);
+ topOffset=std::min(topOffset,topLimit);
+ const auto toolbarClip=RectF(0,0,float(toolbarWidth),63);
+ auto toolbarState=g.Save();g.SetClip(toolbarClip);g.TranslateTransform(float(-topOffset),0);
+ const auto topHits=hits.size();
  auto group=[&](std::initializer_list<int> ids){
      for(int id:ids){RectF box{toolbarX,18,44,44};hits.push_back({id,box});
          bool hovered=box.Contains(float(mouse.x),float(mouse.y));
@@ -57,18 +120,22 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
  if(!isolatedStructureEditing)group({185,100,101,102});else group({102});separator();group({104,105});separator();group({107,125,155,156});separator();
  group({170,171,172,173,174});separator();group({160,161,162,163,164});
+ if(!isolatedStructureEditing){separator();group({bondAnimationCommand});}
+ for(int id:favorites)group({id});
+ g.Restore(toolbarState);
+ clipHits(topHits,toolbarClip,float(-topOffset),0);
  if(isolatedStructureEditing){
      button(g,186,L"적용 · Ctrl+S",{float(ww-300),23,140,34});
      button(g,187,L"취소",{float(ww-152),23,136,34});
  }else{
-     rule(g,toolbarX+2,51,toolbarX+10,29,muted);
-     toolbarX+=16;
-     group({bondAnimationCommand});
-     const bool compact=ww-168<toolbarX;
-     button(g,184,L"배경 · 테마  ◇",{float(ww-168),compact?63.f:23.f,152,compact?22.f:34.f});
+     button(g,184,L"배경 · 테마 ◇",{float(ww-168),63,152,22});
  }
  text(g,L"YOUNGDRAW  /  SCIENTIFIC ATELIER",16,70,9,muted,true);
  if(isolatedStructureEditing)text(g,L"이 창에서는 선택한 단계의 구조만 편집합니다. 적용하면 원래 메커니즘에 반영됩니다.",left+12,96,12,ink,true);
+ if(topLimit)text(g,L"↔ 휠로 도구 모음 스크롤",float(left+8),69,11,muted);
+ const RectF leftClip(0,89,float(left),float(std::max(0,wh-bottom-89)));
+ leftOffset=std::min(leftOffset,std::max(0,786-(wh-bottom)));
+ const auto leftHits=hits.size();auto leftState=g.Save();g.SetClip(leftClip);g.TranslateTransform(0,float(-leftOffset));
  text(g,L"그리기",16,101,11,muted,true);
  const std::vector<int> drawingTools={200,201,202,217,203,204,205,206,207,208,209,210,211,212,213,214,215,216,218,219};
  for(size_t i=0;i<drawingTools.size();i++)toolButton(g,drawingTools[i],{float(12+(i%2)*82),float(122+(i/2)*44),74,40},int(tool)==drawingTools[i]-200);
@@ -77,6 +144,9 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  int shown=int(tool);for(auto& h:hits)if(h.id>=200&&h.id<=218&&h.box.Contains(float(mouse.x),float(mouse.y)))shown=h.id-200;
  text(g,toolNames[size_t(shown)],12,728,10,muted);
  button(g,150,L"Arial 굵게 / 2 pt",{12,750,156,29});
+
+ g.Restore(leftState);clipHits(leftHits,leftClip,0,float(-leftOffset));
+ if(wh-bottom<786)text(g,L"↕ 휠",float(left-46),89,10,muted);
 
  auto cb=canvasBox();appearance::background(g,cb);auto state=g.Save();g.SetClip(cb);g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));const Scene& sc=sceneForPaint(reuseScene);animationVisible=false;animationDelay=1000;render(g,sc,true,true);auto draggedEnergy=energyDragPreview(sc);if(!draggedEnergy.items.empty())render(g,draggedEnergy,false,true);if(animationVisible)SetTimer(win,912,animationDelay,nullptr);else KillTimer(win,912);g.Restore(state);
  state=g.Save();g.SetClip(cb);auto guide=[&](Vec c,double w,double h,std::wstring label,int owner,size_t index,bool above){Vec p=screen(c);RectF r(float(p.x-w*zoom/2),float(p.y-h*zoom/2),float(w*zoom),float(h*zoom));bool active=targetContainer==owner&&targetSlot==index&&targetAbove==above;Pen pen(active?accent:Color(255,201,215,223),active?1.6f:1);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,r);text(g,label,r.X+3,r.Y+3,10,appearance::palette().canvasInk);};
@@ -95,7 +165,10 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  if(!inlineEdit)for(int id:selection){auto it=sc.objectBounds.find(id);if(it!=sc.objectBounds.end()){auto r=it->second;Vec p=screen({r.x,r.y});Pen pen(Color(150,0,135,120),1.5);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,float(p.x-4),float(p.y-4),float(r.w*zoom+8),float(r.h*zoom+8));}else if(auto a=doc.atom(id)){Vec p=screen(a->p);Pen pen(accent,1.5);g.DrawEllipse(&pen,float(p.x-8),float(p.y-8),16.f,16.f);}}
  if(selection.size()==1){auto found=sc.arrowPaths.find(selection.front());if(found!=sc.arrowPaths.end()&&found->second.size()==4){const auto& path=found->second;Pen guidePen(Color(170,0,135,120),1);guidePen.SetDashStyle(DashStyleDash);for(int i:{0,2}){Vec a=screen(path[i]),b=screen(path[i+1]);g.DrawLine(&guidePen,float(a.x),float(a.y),float(b.x),float(b.y));}Pen outline(accent,1.5);SolidBrush body(white),control(accent);for(int i=0;i<4;i++){Vec p=screen(path[i]);g.FillEllipse(i==1||i==2?&control:&body,float(p.x-5),float(p.y-5),10.f,10.f);g.DrawEllipse(&outline,float(p.x-5),float(p.y-5),10.f,10.f);}}}
  if(hoverAtom){Vec p=screen(doc.atom(hoverAtom)->p);Pen pen(accent,1);g.DrawEllipse(&pen,float(p.x-7),float(p.y-7),14.f,14.f);}if(boxing){Pen p(accent,1);p.SetDashStyle(DashStyleDash);g.DrawRectangle(&p,float(std::min(down.x,mouse.x)),float(std::min(down.y,mouse.y)),float(std::abs(down.x-mouse.x)),float(std::abs(down.y-mouse.y)));}if(drawing){if(tool==Orbital){auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,makeScene(draftOrbital(mouse),measure),false,true);g.Restore(transform);}else if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance){Document preview=doc;preview.objects.push_back(draftArrow(mouse));auto all=makeScene(preview,measure);Scene arrow;for(auto& item:all.items)if(item.owner==-1)arrow.items.push_back(item);auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,arrow,false,true);g.Restore(transform);}else{Pen p(accent,1.5);p.SetDashStyle(DashStyleDash);g.DrawLine(&p,float(down.x),float(down.y),float(mouse.x),float(mouse.y));}}g.Restore(state);
- float rx=float(ww-right);fill(g,{rx,float(top),float(right),float(wh-top-bottom)},palette.panel);button(g,175,L"도구",{rx+12,91,114,28},!showLayers);button(g,176,L"레이어",{rx+132,91,116,28},showLayers);
+ float rx=float(ww-right);fill(g,{rx,float(top),float(right),float(wh-top-bottom)},palette.panel);const RectF rightClip(rx,89,float(right),float(std::max(0,wh-bottom-89)));
+ rightOffset=std::min(rightOffset,std::max(0,684-(wh-bottom)));
+ const auto rightHits=hits.size();auto rightState=g.Save();g.SetClip(rightClip);g.TranslateTransform(0,float(-rightOffset));
+ button(g,175,L"도구",{rx+12,91,114,28},!showLayers);button(g,176,L"레이어",{rx+132,91,116,28},showLayers);
  if(showLayers){
     text(g,L"레이어 잠금",rx+16,142,14,ink,true);
     text(g,L"잠긴 레이어는 클릭되지 않습니다.",rx+16,170,11,muted);
@@ -158,6 +231,8 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
     if(sidebarPage==0)row(620,{{186,L"구조 편집"},{113,L"파일 삽입"}});
     else row(620,{{186,L"구조 편집"},{113,L"파일 삽입"},{138,L"출판용 정돈"}});
  }
+ g.Restore(rightState);clipHits(rightHits,rightClip,0,float(-rightOffset));
+ if(wh-bottom<684)text(g,L"↕ 휠",rx+float(right-44),91,10,muted);
  fill(g,{0,float(wh-bottom),float(ww),float(bottom)},palette.chrome);rule(g,0,float(wh-bottom),float(ww),float(wh-bottom),border);text(g,status,14,float(wh-bottom+9),11,muted);Graphics out(dc);presentBuffer(out,*paintBuffer);}
 
 } // namespace yd::editor
