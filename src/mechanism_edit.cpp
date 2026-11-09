@@ -166,7 +166,7 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
     std::vector<const Object*> arrows,stems;
     for(auto& o:d.objects)if(o.kind==ObjectKind::Line&&o.points.size()>=2&&!owned.count(o.id)&&selected({o.id})){
         if(o.head)arrows.push_back(&o);
-        else if(std::abs(o.points.front().x-o.points.back().x)<.1)stems.push_back(&o);
+        else if(!o.dash&&std::abs(o.points.front().x-o.points.back().x)<.1)stems.push_back(&o);
     }
     // A state may contain disconnected molecules/ions. Merge nearby components
     // only inside the same arrow-delimited region; never across a reaction arrow.
@@ -266,6 +266,9 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
             }
             consumed.push_back(o.id);
         }else if(o.kind==ObjectKind::Curve){size_t i=nearest(o.points.front());r.slots[i].members.push_back(o.id);}
+        else if(o.kind==ObjectKind::Ellipse&&!d.isLocked(o.id)){
+            r.slots[nearest(center(bounds(d,{o.id})))].members.push_back(o.id);
+        }
     }
     for(auto& p:notations){size_t edge=0;double best=1e30;for(size_t i=0;i<mids.size();i++){double v=(p.at-mids[i]).length();if(v<best){best=v;edge=i;}}if(best<180)r.links[edge].members.insert(r.links[edge].members.end(),p.ids.begin(),p.ids.end());}
     // Dissolve only grouping that crosses frame boundaries; per-molecule groups survive.

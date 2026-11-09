@@ -89,6 +89,7 @@ void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에�
      if(!from||!to)return L"수치 변환은 kcal/mol, kJ/mol, eV 사이에서 사용할 수 있습니다.";
      const double factor=*from / *to;
      for(auto& state:p.states)state.energy*=factor;
+     for(auto& crossing:p.crossings)crossing.energy*=factor;
      for(auto& series:p.series)for(auto& value:series.values)value*=factor;
      if(p.yMin)*p.yMin*=factor;
      if(p.yMax)*p.yMax*=factor;
@@ -100,6 +101,54 @@ void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에�
  {L"x축·그래프 제목 (pt, 0: 자동)",number(p->axisFontSize)},{L"눈금·상태 이름 (pt, 0: 자동)",number(p->tickFontSize)},{L"데이터 값 크기 (pt, 0: 자동)",number(p->valueFontSize)},{L"에너지 축 제목 (pt, 0: 자동)",number(p->energyLabelFontSize)},{L"그래프 두께",p->thinLines?"1":"0",false,{L"굵게 (기존)",L"얇게 (선·축·글자)"}},{L"평평한 준위선만 굵게",p->boldLevels?"1":"0",false,{L"아니요 (그래프 두께에 맞춤)",L"예 (기존 굵은 두께 유지)"}},
  {L"단위를 바꿀 때","0",false,{L"단위 표시만 변경",L"에너지와 축 수치도 변환"}}},update,
  {{L"기본",{0,1,18,6}},{L"축",{2,3,9,10,11}},{L"글자",{4,5,8,12,13,14,15}},{L"선 스타일",{7,16,17}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
+}
+void editPlotCrossings(int id){
+    auto* p=plot(id);
+    if(!p||doc.isLocked(id)||p->states.size()<2||p->series.size()<2)
+        throw std::runtime_error("두 경로와 두 상태 이상이 있는 에너지 그래프를 선택하세요.");
+    Document before=doc;
+    const auto original=*p;
+    ui::Table rows;
+    for(const auto& crossing:p->crossings)
+        rows.push_back({crossing.label,std::to_string(crossing.segment+1),std::to_string(crossing.firstPath+1),
+                        std::to_string(crossing.secondPath+1),number(crossing.position*100),number(crossing.energy),
+                        crossing.labelOffset?number(crossing.labelOffset->x)+" "+number(crossing.labelOffset->y):"",
+                        number(crossing.leaderWidth)});
+    auto update=[&](const ui::Table& cells)->std::wstring{
+        try{
+            auto candidate=original;
+            candidate.crossings.clear();
+            auto index=[](const std::string& value,size_t count){
+                const double n=numeric(value,1,double(count));
+                if(n!=std::floor(n))throw std::runtime_error("상태와 경로 번호는 정수로 입력하세요.");
+                return int(n)-1;
+            };
+            for(const auto& row:cells){
+                if(std::all_of(row.begin(),row.end(),[](const std::string& value){return value.empty();}))continue;
+                EnergyCrossing crossing{row.at(0),index(row.at(1),original.states.size()-1),
+                    index(row.at(2),original.series.size()),index(row.at(3),original.series.size()),
+                    numeric(row.at(4),.01,99.99)/100.,numeric(row.at(5),-1e6,1e6)};
+                if(!row.at(6).empty()){
+                    const auto xy=values(row.at(6));
+                    if(xy.size()!=2)throw std::runtime_error("라벨 위치는 X Y 두 값으로 입력하세요. 빈칸은 자동 배치입니다.");
+                    crossing.labelOffset=Vec{xy[0],xy[1]};
+                }
+                if(!row.at(7).empty())crossing.leaderWidth=numeric(row.at(7),0,6);
+                candidate.crossings.push_back(std::move(crossing));
+            }
+            validateEnergyCrossings(candidate);
+            *plot(id)=std::move(candidate);
+            redraw();UpdateWindow(win);
+            return {};
+        }catch(const std::exception& e){return ui::wide(e.what());}
+    };
+    std::wstring hint=L"상태·경로 번호: 1부터 시작 · 교차 위치: 준위 사이의 백분율 · 라벨: 드래그 또는 X Y(pt), 빈칸은 자동 · 지시선: 0이면 숨김, 최대 6 pt.";
+    for(size_t i=0;i<original.series.size();i++)hint+=L"  "+std::to_wstring(i+1)+L": "+ui::wide(original.series[i].name);
+    auto result=ui::table(win,L"스핀 교차점",{
+        L"표기",L"왼쪽 상태 번호",L"경로 1",L"경로 2",L"위치 (%)",L"에너지",L"라벨 위치 (X Y)",L"지시선 (pt)"},rows,update,true,hint);
+    if(result){
+        if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}
+    }else{doc=before;redraw();}
 }
 void editPlotStages(int id){
     auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");Document before=doc;

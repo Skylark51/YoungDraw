@@ -16,6 +16,59 @@ static bool overlaps(Rect a,Rect b){return a.x<b.x+b.w-0.01&&a.x+a.w>b.x+0.01&&a
 static EnergyPlot sample(){EnergyPlot p;p.id=1;p.p={30,90};p.width=760;p.height=400;p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#167d9a",{0,37.2,17.7,27.3,-9.9},0,2},{"Path 2","#b44758",{0,37.2,17.7,27.3,-9.9},1,2}};return p;}
 int main(){try{
     {
+        auto p=sample();
+        p.crossings={{"MECP",0,0,1,.42,9.458344}};
+        validateEnergyCrossings(p);
+        Document d;
+        d.plots={p};
+        const auto scene=makeScene(d,measure);
+        const Primitive* diamond=nullptr;
+        for(const auto& item:scene.items)
+            if(item.type==Primitive::Polygon&&item.closed&&item.points.size()==4)diamond=&item;
+        check(diamond!=nullptr,"crossing emits one outlined diamond");
+        const Vec crossing=(diamond->points[0]+diamond->points[2])*.5;
+        const bool halo=std::any_of(scene.items.begin(),scene.items.end(),[&](const Primitive& item){
+            return item.type==Primitive::Polygon&&item.color=="#ffffff"&&item.points.size()==4&&
+                   (item.points[0]+item.points[2]-crossing*2).length()<1e-8&&
+                   item.points[0].y<diamond->points[0].y;
+        });
+        check(halo,"crossing has a white knockout around its two-color diamond");
+        for(const auto& series:p.series){
+            const bool coloredFace=std::any_of(scene.items.begin(),scene.items.end(),[&](const Primitive& item){
+                return item.type==Primitive::Polygon&&item.color==series.color&&item.points.size()==3&&
+                       std::abs((item.points[0].x+item.points[2].x)*.5-crossing.x)<1e-8&&
+                       std::abs((item.points[0].y+item.points[2].y)*.5-crossing.y)<1.;
+            });
+            check(coloredFace,"crossing diamond has a face in each path color");
+            int incident=0;
+            for(const auto& item:scene.items)
+                if(item.type==Primitive::Line&&item.color==series.color&&item.dash==series.dash&&item.points.size()==2&&
+                   ((item.points[0]-crossing).length()<1e-8||(item.points[1]-crossing).length()<1e-8))incident++;
+            check(incident==2,"both paths meet exactly at the crossing");
+        }
+        check(bilateralPlot(p).crossings.front().segment==4,"branch insertion remaps crossing to original segment");
+        auto& styled=d.plots.front().crossings.front();
+        styled.labelOffset=Vec{26,46};
+        styled.leaderWidth=0;
+        auto shifted=makeScene(d,measure);
+        check((shifted.crossingCaptions.at(0).offset-Vec{26,46}).length()<1e-8,"caption offset moves the label alone");
+        auto isLeader=[](const Primitive& item){return item.type==Primitive::Line&&item.color=="#606060";};
+        check(std::none_of(shifted.items.begin(),shifted.items.end(),isLeader),"zero width hides the crossing leader");
+        styled.leaderWidth=2.25;
+        d.plots.front().thinLines=true;
+        shifted=makeScene(d,measure);
+        const auto leader=std::find_if(shifted.items.begin(),shifted.items.end(),isLeader);
+        check(leader!=shifted.items.end()&&std::abs(leader->width-2.25)<1e-8,"leader retains its chosen width in thin-plot mode");
+#ifdef TEST_CDXML
+        check(toNative(fromCdxml(toCdxml(d)))==toNative(d),"crossing survives CDXML and Office native state");
+#endif
+        auto invalid=p;
+        invalid.crossings.front().secondPath=0;
+        bool rejected=false;
+        try{validateEnergyCrossings(invalid);}catch(const std::runtime_error&){rejected=true;}
+        check(rejected,"crossing requires distinct paths");
+    }
+    {
         auto p=sample();p.series.resize(1);p.series[0].values={0,0,10,5,5};p.series[0].dash=1;p.thinLines=true;
         Document d;d.plots={p};
         for(int mode:{0,1,2,3}){

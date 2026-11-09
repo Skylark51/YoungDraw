@@ -9,6 +9,8 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath=0,const st
 std::vector<MechanismStage> defaultMechanismStages();
 std::vector<MechanismStage> mechanismStageData(const std::vector<std::vector<std::string>>& cells);
 EnergyAxis energyAxis(const EnergyPlot& plot);
+void validateEnergyCrossings(const EnergyPlot& plot);
+bool hasCrossingEndpoints(const EnergyPlot& plot,const EnergyCrossing& crossing);
 std::string energyTickLabel(double value,double step);
 // CSV columns: state, energy, marker (auto/none/circle/square/diamond/triangle).
 std::vector<EnergyRow> parseEnergyTable(const std::string& csv);

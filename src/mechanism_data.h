@@ -2,6 +2,12 @@
 #include "model.h"
 #include <functional>
 namespace yd {
+struct MechanismArc {
+    Vec center;
+    double radius,start,end;
+    Vec point(double angle) const {return center+Vec{std::cos(angle),std::sin(angle)}*radius;}
+};
+std::optional<MechanismArc> mechanismLinkArc(const Reaction&,size_t,const Style&);
 std::vector<Vec> mechanismLinkPath(const Reaction&,size_t,const Style&);
 Vec mechanismLinkCaption(const Reaction&,size_t,const Style&);
 struct SpinEnergy {double spin=0;std::string value;};
@@ -16,6 +22,7 @@ double mechanismArrowWeight(const Reaction&,const Style&);
 double mechanismArrowHead(const Reaction&,const Style&);
 double mechanismArrowMargin(const Reaction& reaction,const Style& style);
 double mechanismCaptionHeight(const Reaction& reaction,const Style& style);
+double mechanismStageCaptionWidth(const Slot& slot,double font);
 struct TransitionCaption {std::string name,description;bool separated=false;};
 TransitionCaption transitionCaption(const std::string& value);
 std::string transitionCaptionText(const TransitionCaption& caption);
@@ -28,6 +35,12 @@ using MechanismRows=std::vector<std::vector<std::string>>;
 MechanismRows mechanismRows(const Reaction& reaction);
 Reaction mechanismGridData(const Reaction& original,const MechanismRows& rows);
 void makeMechanismGraph(Reaction& reaction);
+enum class MechanismTemplate { Linear, FeedIntoCycle, SplitAndMerge, CatalyticCycle };
+Reaction mechanismTemplate(MechanismTemplate layout,int horizontal=1,int left=2,int right=1);
+bool arrangeCircularMerge(Reaction& reaction,const Style& style);
+size_t splitMechanismLink(Reaction& reaction,size_t edge);
+bool mechanismLinkSelected(const MechanismLink& link,const std::set<size_t>& stages);
+Document copyMechanismStages(const Document& document,int owner,const std::set<size_t>& stages);
 void arrangeMechanismGraph(Reaction& reaction);
 size_t connectMechanismStages(Reaction& reaction,int from,int to,int replace=-1);
 void removeMechanismConnection(Reaction& reaction,size_t edge);

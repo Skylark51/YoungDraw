@@ -7,6 +7,8 @@ namespace yd::editor {
 struct AnimationStage {
     Document structure;
     std::string structureName, stageName, energies, transitionEnergies;
+    int arrowGrowth=72,arrowHold=65; // Centiseconds for the outgoing transition.
+    std::optional<int> morphTime;
 };
 std::vector<AnimationStage> animationMechanismStages(const Document& source,const Reaction& reaction,
                                                     const std::vector<size_t>& route={});

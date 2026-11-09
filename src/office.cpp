@@ -122,6 +122,28 @@ public:
 };
 HRESULT start(Editor value,bool embedding,bool registerClass){editor=std::move(value);embeddingServer=embedding;auto hr=registerClass?registerServer():S_OK;if(FAILED(hr))return hr;if(embedding){auto factory=new Factory;hr=CoRegisterClassObject(classId,factory,CLSCTX_LOCAL_SERVER,REGCLS_SINGLEUSE,&registration);factory->Release();}return hr;}
 void stop(){OleFlushClipboard();if(registration)CoRevokeClassObject(registration);registration=0;}
+HRESULT exportEmbedded(const Document& document,const wchar_t* storagePath,const wchar_t* imagePath){
+    ComPtr<IDataObject> data;
+    data.Attach(new Object(document));
+    FORMATETC format{sourceFormat(),nullptr,DVASPECT_CONTENT,-1,TYMED_ISTORAGE};
+    STGMEDIUM medium{};
+    auto hr=data->GetData(&format,&medium);
+    if(FAILED(hr))return hr;
+    ComPtr<IStorage> target;
+    hr=StgCreateDocfile(storagePath,STGM_CREATE|STGM_WRITE|STGM_SHARE_EXCLUSIVE,0,&target);
+    if(SUCCEEDED(hr))hr=medium.pstg->CopyTo(0,nullptr,nullptr,target.Get());
+    if(SUCCEEDED(hr))hr=WriteClassStg(target.Get(),classId);
+    if(SUCCEEDED(hr))hr=target->Commit(STGC_DEFAULT);
+    ReleaseStgMedium(&medium);
+    if(FAILED(hr))return hr;
+    auto image=editor.picture(document);
+    if(!image)return E_FAIL;
+    auto copy=CopyEnhMetaFileW(image,imagePath);
+    DeleteEnhMetaFile(image);
+    if(!copy)return E_FAIL;
+    DeleteEnhMetaFile(copy);
+    return S_OK;
+}
 HRESULT copy(const Document& d){auto object=new(std::nothrow) Object(d);if(!object)return E_OUTOFMEMORY;auto hr=OleSetClipboard(object);object->Release();return hr;}
 bool editing(){return active!=nullptr;}
 HRESULT update(){return active?active->commit():S_FALSE;}

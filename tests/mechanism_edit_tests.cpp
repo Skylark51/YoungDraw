@@ -72,6 +72,25 @@ int main(){try{
         check(r.slots.back().label.empty()&&r.above.back().empty()&&r.below.back().empty(),"new frames contain no invented captions or energies");
     }
     {
+        Document d;
+        for(Vec at:std::vector<Vec>{{0,0},{180,-50},{205,-25},{180,125}}){
+            int a=d.addAtom(at),b=d.addAtom(at+Vec{30,35},8);d.addBond(a,b);
+        }
+        arrow(d,{65,0},{150,0});
+        arrow(d,{205,50},{205,115});
+        text(d,{65,12},"-47.5 / ?.? / ?.?");
+        text(d,{196,40},"-70.1 / ?.? / ?.?");
+        auto owner=arrangeImportedMechanism(d);
+        auto& r=d.reactions.front();
+        check(r.slots.size()==3&&r.slots[1].members.size()==4,"overlapping product fragments stay in one state");
+        check(r.slots[1].energy=="-70.1 / ?.? / ?.?"&&std::all_of(r.below.begin(),r.below.end(),[](const std::string& s){return s.empty();}),
+              "product energy above the outgoing vertical arrow stays with the product");
+        r.below[0]="-47.5 / ?.? / ?.?";
+        check(!attachMechanismEnergy(d,owner,3,0,owner,1),"energy drop preserves an occupied destination");
+        check(attachMechanismEnergy(d,owner,3,0,owner,2)&&r.below[0].empty()&&r.slots[2].energy=="-47.5 / ?.? / ?.?",
+              "energy drop moves the entire spin list to an empty structure caption");
+    }
+    {
         Document d;int id=arrow(d,{0,0},{100,0});d.objects[0].cross={-1,true,5,16,"#cc0033"};auto svg=toSvg(makeScene(d));check(svg.find("#cc0033")!=std::string::npos,"free arrow cross exported as vector ink");
         auto reopened=fromCdxml(toCdxml(d));check(reopened.objects[0].cross.enabled&&reopened.objects[0].id==id,"free arrow cross persists");
         Reaction r;r.id=d.nextId++;r.slots={{"R",{}},{"P",{}}};r.above={""};r.below={""};r.crosses={{0,true,5,16,"#cc0033"}};d.objects.clear();d.reactions={r};

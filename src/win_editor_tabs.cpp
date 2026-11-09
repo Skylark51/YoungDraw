@@ -113,6 +113,7 @@ void refreshDocumentTabs(){
     TabCtrl_SetCurSel(documentTabs,int(activeDocument));
 }
 bool switchDocumentTab(size_t index){
+    cancelStageCopy();
     mechanismConnecting=mechanismConnectionDrag=false;
     if(index>=documents.size())return false;
     if(!finishInline(true)){TabCtrl_SetCurSel(documentTabs,int(activeDocument));return false;}
@@ -124,6 +125,7 @@ bool switchDocumentTab(size_t index){
     title();redraw();return true;
 }
 void newDocumentTab(Document document,std::wstring path,bool fromOffice){
+    cancelStageCopy();
     selectedCycleOwner=0;selectedCycleArrow=-1;
     snapPlot=0;snapStart.reset();
     if(!finishInline(true))return;

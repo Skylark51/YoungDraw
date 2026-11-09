@@ -28,7 +28,7 @@ static bool missingAnchor(const Document& d,const Object& o,const std::set<int>&
     auto missingBond=[&](int id){auto* b=d.bond(id);return id&&(!b||!ids.count(b->a)||!ids.count(b->b));};
     return (o.sourceAtom&&!ids.count(o.sourceAtom))||(o.targetAtom&&!ids.count(o.targetAtom))||missingBond(o.sourceBond)||missingBond(o.targetBond);
 }
-void Document::translate(const std::vector<int>& selection,Vec v){auto ids=editableExpansion(*this,selection);for(auto& o:objects)if(ids.count(o.id)&&o.autoRoute&&missingAnchor(*this,o,ids)){o.points=routeArrow(*this,o);o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;o.autoRoute=false;}for(auto& a:atoms)if(ids.count(a.id))a.p=a.p+v;for(auto& o:objects)if(ids.count(o.id))for(auto& p:o.points)p=p+v;for(auto& r:reactions)if(ids.count(r.id))r.p=r.p+v;for(auto& p:plots)if(ids.count(p.id))p.p=p.p+v;}
+void Document::translate(const std::vector<int>& selection,Vec v){auto ids=editableExpansion(*this,selection);for(auto& o:objects)if(ids.count(o.id)&&o.autoRoute&&o.kind!=ObjectKind::Line&&missingAnchor(*this,o,ids)){o.points=routeArrow(*this,o);o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;o.autoRoute=false;}for(auto& a:atoms)if(ids.count(a.id))a.p=a.p+v;for(auto& o:objects)if(ids.count(o.id))for(auto& p:o.points)p=p+v;for(auto& r:reactions)if(ids.count(r.id))r.p=r.p+v;for(auto& p:plots)if(ids.count(p.id))p.p=p.p+v;}
 std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,double factor,std::optional<Vec> center){
     if(selection.empty())throw std::runtime_error("크기를 조정할 구조·이미지를 먼저 선택하세요.");
     if(!std::isfinite(factor)||factor<.01||factor>10)throw std::runtime_error("배율은 1~1000%로 입력하세요.");
@@ -70,7 +70,7 @@ std::vector<int> transformStructures(Document& d,const std::vector<int>& selecti
     if(!flipX&&!flipY&&std::abs(std::remainder(degrees,360.))<1e-12)return {ids.begin(),ids.end()};
     // Freeze selected curves before moving their anchors, including arrows
     // attached to atoms outside the transformed selection.
-    for(auto& o:d.objects)if(ids.count(o.id)&&o.autoRoute){o.points=routeArrow(d,o);o.autoRoute=false;o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;}
+    for(auto& o:d.objects)if(ids.count(o.id)&&o.autoRoute&&(o.kind!=ObjectKind::Line||missingAnchor(d,o,ids))){o.points=routeArrow(d,o);o.autoRoute=false;o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;}
     for(auto& a:d.atoms)if(ids.count(a.id))a.p=transform(a.p);
     for(auto& o:d.objects)if(ids.count(o.id)){
         if(o.kind==ObjectKind::Ellipse&&o.text.rfind("YoungDraw.Orbital:",0)==0&&o.points.size()==2){
@@ -117,7 +117,22 @@ bool alignObjects(Document& d,const std::vector<int>& selection,AlignMode mode){
 }
 void Document::erase(const std::vector<int>& selection){auto ids=editableExpansion(*this,selection);
     for(auto& b:bonds)if(ids.count(b.a)||ids.count(b.b))ids.insert(b.id);
-    for(auto& o:objects)if(o.autoRoute&&((o.sourceAtom&&ids.count(o.sourceAtom))||(o.targetAtom&&ids.count(o.targetAtom))||(o.sourceBond&&ids.count(o.sourceBond))||(o.targetBond&&ids.count(o.targetBond)))){o.points=routeArrow(*this,o);o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;o.autoRoute=false;}
+    for(auto& o:objects){
+        if(!o.autoRoute)continue;
+        const bool source=ids.count(o.sourceAtom)!=0,target=ids.count(o.targetAtom)!=0;
+        if(!source&&!target&&!ids.count(o.sourceBond)&&!ids.count(o.targetBond))continue;
+        if(o.kind==ObjectKind::Line&&!o.head){
+            if(source&&target){ids.insert(o.id);continue;}
+            o.points=routeArrow(*this,o);
+            if(source)o.sourceAtom=0;
+            if(target)o.targetAtom=0;
+            o.autoRoute=o.sourceAtom||o.targetAtom;
+        }else{
+            o.points=routeArrow(*this,o);
+            o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;
+            o.autoRoute=false;
+        }
+    }
     bonds.erase(std::remove_if(bonds.begin(),bonds.end(),[&](const Bond& b){return ids.count(b.id)||ids.count(b.a)||ids.count(b.b);}),bonds.end());
     auto remove=[&](auto& entries){entries.erase(std::remove_if(entries.begin(),entries.end(),[&](const auto& e){return ids.count(e.id)>0;}),entries.end());};
     remove(atoms);remove(objects);remove(reactions);remove(plots);remove(groups);
@@ -128,7 +143,24 @@ Document Document::subset(const std::vector<int>& selection) const {
     Document out;out.style=style;auto ids=editableExpansion(*this,selection);
     for(auto& a:atoms)if(ids.count(a.id))out.atoms.push_back(a);
     for(auto& b:bonds)if(ids.count(b.a)&&ids.count(b.b))out.bonds.push_back(b);
-    for(auto& o:objects)if(ids.count(o.id)){Object copy=o;if(missingAnchor(*this,copy,ids)){copy.points=routeArrow(*this,o);copy.sourceAtom=copy.targetAtom=copy.sourceBond=copy.targetBond=0;copy.autoRoute=false;}out.objects.push_back(copy);}
+    for(auto& o:objects){
+        const bool includedAnchors=o.kind==ObjectKind::Line&&!o.head&&o.autoRoute&&
+            o.sourceAtom&&o.targetAtom&&ids.count(o.sourceAtom)&&ids.count(o.targetAtom)&&!isLocked(o.id);
+        if(!ids.count(o.id)&&!includedAnchors)continue;
+        Object copy=o;
+        if(missingAnchor(*this,copy,ids)){
+            copy.points=routeArrow(*this,o);
+            if(copy.kind==ObjectKind::Line&&!copy.head){
+                if(!ids.count(copy.sourceAtom))copy.sourceAtom=0;
+                if(!ids.count(copy.targetAtom))copy.targetAtom=0;
+                copy.autoRoute=copy.sourceAtom||copy.targetAtom;
+            }else{
+                copy.sourceAtom=copy.targetAtom=copy.sourceBond=copy.targetBond=0;
+                copy.autoRoute=false;
+            }
+        }
+        out.objects.push_back(std::move(copy));
+    }
     for(auto& r:reactions)if(ids.count(r.id))out.reactions.push_back(r);
     for(auto& p:plots)if(ids.count(p.id))out.plots.push_back(p);
     for(auto& g:groups)if(ids.count(g.id))out.groups.push_back(g);
@@ -190,7 +222,7 @@ void appendMechanismStage(Reaction& r,bool below,size_t source){
         // Preserve existing automatic row breaks before switching to manual rows.
         if(r.wrapColumns>0){for(size_t i=1;i<r.slots.size();i++)r.slots[i].startsRow=i%size_t(r.wrapColumns)==0;r.wrapColumns=0;}
     }
-    if(r.explicitConnections()){r.links.push_back({int(source),int(r.slots.size())});Vec next=r.slotGrid[source]+Vec{1,below?1.:0.};
+    if(r.explicitConnections()){r.links.push_back({int(source),int(r.slots.size())});Vec next=r.slotGrid[source]+Vec{r.circularMerge&&below?0.:1.,below?1.:0.};
         while(std::any_of(r.slotGrid.begin(),r.slotGrid.end(),[&](Vec p){return (p-next).length()<.1;}))next.y++;
         r.slotGrid.push_back(next);}
     r.slots.push_back({"Stage "+std::to_string(r.slots.size()+1),{},"",below&&!r.cyclic&&!r.vertical});
@@ -298,6 +330,7 @@ void optimizeMechanism(Document& d,const std::vector<int>& selection,bool cyclic
         if(r.vertical&&!r.cyclic){
             r.spacing=tallest+mechanismCaptionHeight(r,d.style)+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style);
         }
+        if(r.circularMerge)arrangeCircularMerge(r,d.style);
         for(size_t i=0;i<r.slots.size();i++)if(!r.slots[i].members.empty()){auto b=frameBounds(r.slots[i].members);d.translate(r.slots[i].members,reactionSlot(r,i)-Vec{b.x+b.w/2,b.y+b.h/2});}
         for(size_t e=0;e<r.links.size();e++){auto& l=r.links[e];if(!l.members.empty()){auto b=frameBounds(l.members);Vec mid=mechanismLinkCaption(r,e,d.style);d.translate(l.members,mid-Vec{0,mechanismFontSize(r,d.style)*3+b.h/2}-Vec{b.x+b.w/2,b.y+b.h/2});}}
     }

@@ -8,8 +8,7 @@
 #include <limits>
 #include <stdexcept>
 namespace yd {
-struct ScriptRun {std::string text;int script=0;};
-static std::vector<ScriptRun> scriptRuns(const std::string& input){
+std::vector<ScriptRun> scriptRuns(const std::string& input){
     auto value=chemicalScripts(input);
     std::vector<ScriptRun> runs;std::string normal;
     for(size_t i=0;i<value.size();){
@@ -145,6 +144,13 @@ Scene makeScene(const Document& d,const Measure& measure){
     auto addText=[&](std::string value,Vec p,double size=9,std::string color="#000000",bool center=false,int role=0,int index=-1){Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=value;t.fontSize=size*d.style.fontSize/10.;t.face=d.style.labelFace;t.color=color;for(unsigned char c:value)if(c>=0xe3)t.font="Malgun Gothic";emitText(s.items,t,p,center,measure);};
     for(auto& o:d.objects){owner=o.id;Primitive p;p.owner=o.id;p.points=o.points;p.width=o.width;p.color=o.color;p.filled=o.filled;p.fontSize=o.fontSize;p.font=o.font;p.dash=o.dash;p.face=o.face;p.closed=o.closed;p.text=o.text;
         if(o.points.empty())continue;
+        if(o.kind==ObjectKind::Line&&!o.head&&o.autoRoute&&o.points.size()==2){
+            auto points=routeArrow(d,o);
+            const auto a=clip(o.sourceAtom,points.front(),points.back());
+            const auto b=clip(o.targetAtom,points.back(),points.front());
+            if((a-points.front()).length()+(b-points.back()).length()>=(points.back()-points.front()).length())continue;
+            p.points={a,b};
+        }
         if(o.head&&(o.kind==ObjectKind::Line||o.kind==ObjectKind::Curve)){Object routed=o;routed.points=routeArrow(d,o,boxes);s.arrowPaths[o.id]=routed.points;auto pieces=arrowPrimitives(routed);s.items.insert(s.items.end(),pieces.begin(),pieces.end());appendArrowCross(s.items,pieces,o.cross,o.id);continue;}
         switch(o.kind){case ObjectKind::Line:p.type=Primitive::Line;break;case ObjectKind::Curve:p.type=Primitive::Bezier;break;case ObjectKind::Text:p.type=Primitive::Text;break;case ObjectKind::Ellipse:p.type=Primitive::Ellipse;break;case ObjectKind::Rectangle:p.type=Primitive::Box;break;case ObjectKind::Image:p.type=Primitive::Image;p.imageHex=o.imageHex;p.mime=o.mime;break;}
         if(o.kind==ObjectKind::Text&&!o.runs.empty()){Vec cursor=o.points[0];double baseline=cursor.y+o.fontSize*.91;for(auto& run:o.runs){Primitive t=p;t.text=run.text;t.fontSize=run.size;t.color=run.color;t.font=run.font;t.face=run.face;int script=run.face&96;double offset=script==32?run.size*.45:script==64?-run.size*.4:0;t.points={{cursor.x,baseline-run.size*.91+offset}};s.items.push_back(t);cursor.x+=textWidth(measure,run.text,run.size,run.font,run.face);}}
@@ -152,6 +158,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         else s.items.push_back(p);
         if(o.head&&o.points.size()>=2){Vec z=o.points.back(),a=o.points[o.points.size()-2];Vec v=z-a;double len=v.length();if(len>.001){Vec u=v*(1/len),n{-u.y,u.x};Primitive head;head.owner=o.id;head.type=Primitive::Polygon;head.color=o.color;head.points=o.head==2?std::vector<Vec>{z,z-u*5+n*2}:std::vector<Vec>{z,z-u*5+n*2,z-u*5-n*2};s.items.push_back(head);}}
     }
+    auto spinColor=[](double spin){return spin==0?"#000000":spin==1?"#ff0000":spin==2?"#0000ff":"#555555";};
     auto addEnergy=[&](const std::string& value,Vec at,int role,int index,double available){
         std::vector<SpinEnergy> energies;std::vector<std::string> parts;
         try{energies=reactionEnergies(value);}catch(...){addText(value,at,8,"#000000",true,role,index);return;}
@@ -166,7 +173,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         double cursor=at.x-total/2;
         for(size_t i=0;i<count;i++){
             if(i){cursor+=gap();addText("/",{cursor,at.y},size,"#000000",false,role,index);cursor+=width("/")+gap();}
-            if(!parts[i].empty()){addText(parts[i],{cursor,at.y},size,energies[i].spin==0?"#000000":energies[i].spin==1?"#ff0000":energies[i].spin==2?"#0000ff":"#555555",false,role,index);cursor+=width(parts[i]);}
+            if(!parts[i].empty()){addText(parts[i],{cursor,at.y},size,spinColor(energies[i].spin),false,role,index);cursor+=width(parts[i]);}
         }
     };
     auto transitionLabels=[&](const Reaction& reaction,size_t i,Vec mid,double aboveY,double belowY){
@@ -178,8 +185,14 @@ Scene makeScene(const Document& d,const Measure& measure){
         if(i<reaction.below.size())addEnergy(reaction.below[i],mid+Vec{0,belowY+(caption.name.empty()?0:font*1.5*(1+std::count(caption.name.begin(),caption.name.end(),'\n')))},3,int(i),gap);
     };
     for(auto& r:d.reactions){hiddenArrowIndices=r.hiddenArrows;owner=r.id;double font=mechanismFontSize(r,d.style),factor=font/d.style.fontSize;
+        bool branched=false;
+        std::map<int,int> incoming,outgoing;
+        for(const auto& link:r.links){
+            if(++incoming[link.to]>1)branched=true;
+            if(link.from>=0&&++outgoing[link.from]>1)branched=true;
+        }
         if(r.cyclic)addText(r.centerLabel,r.p+Vec{0,-font*.65},10*factor,"#000000",true,10);
-        if(!r.cyclic&&!r.unit.empty()&&!r.slots.empty()){double right=-1e20,top=1e20;for(size_t j=0;j<r.slots.size();j++){Vec pos=reactionSlot(r,j);right=std::max(right,pos.x);top=std::min(top,pos.y);}addText("("+r.unit+")",{right+r.slotWidth/2,top-r.slotHeight/2-font*2},10*factor,"#000000",true);}
+        if(!branched&&!r.cyclic&&!r.unit.empty()&&!r.slots.empty()){double right=-1e20,top=1e20;for(size_t j=0;j<r.slots.size();j++){Vec pos=reactionSlot(r,j);right=std::max(right,pos.x);top=std::min(top,pos.y);}addText("("+r.unit+")",{right+r.slotWidth/2,top-r.slotHeight/2-font*2},10*factor,"#000000",true);}
         for(size_t i=0;i<r.slots.size();i++){arrowIndex=int(i);Vec c=reactionSlot(r,i);addText(r.slots[i].label,c+Vec{0,r.slotHeight/2+font*.6},10*factor,"#000000",true,1,int(i));
             if(r.cyclic||!r.slots[i].energy.empty())addEnergy(r.slots[i].energy,c+Vec{0,r.slotHeight/2+font*.6+font*1.5*(1+std::count(r.slots[i].label.begin(),r.slots[i].label.end(),'\n'))},9,int(i),r.spacing-20);
             if(r.cyclic){
@@ -231,12 +244,149 @@ Scene makeScene(const Document& d,const Measure& measure){
         if(external){arrowIndex=-1;arrow({stemX,top},{stemX,bottom},"#000000",mechanismArrowWeight(r,d.style),0);}
         for(size_t e=0;e<r.links.size();e++){
             arrowIndex=int(e);auto path=mechanismLinkPath(r,e,d.style);double weight=mechanismArrowWeight(r,d.style),head=mechanismArrowHead(r,d.style);
-            auto draw=[&](std::vector<Vec> points,double offset){for(auto& p:points)p=p+Vec{offset,offset};for(size_t j=1;j<points.size();j++)arrow(points[j-1],points[j],"#000000",weight,j+1==points.size()?1:0,head);};
+            if(auto arc=mechanismLinkArc(r,e,d.style)){
+                const double captionRadius=arc->radius+(r.arrowType==1?2:0);
+                auto drawArc=[&](MechanismArc shape){
+                    const double sweep=shape.end-shape.start,direction=std::copysign(1.,sweep);
+                    const double size=std::min(5*head,std::abs(sweep)*shape.radius*.35);
+                    const Vec tip=shape.point(shape.end);
+                    auto tangent=[](double angle){return Vec{-std::sin(angle),std::cos(angle)};};
+                    const Vec u=tangent(shape.end)*direction,n{-u.y,u.x};
+                    const double shaftEnd=shape.end-direction*size*.96/shape.radius;
+                    const int segments=std::max(1,int(std::ceil(std::abs(shaftEnd-shape.start)/(pi/2))));
+                    const double step=(shaftEnd-shape.start)/segments;
+                    Primitive shaft;
+                    shaft.owner=owner;shaft.reactionArrow=arrowIndex;shaft.type=Primitive::Bezier;shaft.width=weight;
+                    shaft.points.push_back(shape.point(shape.start));
+                    for(int i=0;i<segments;i++){
+                        const double a=shape.start+i*step,b=a+step;
+                        const double control=(4./3)*std::tan(step/4)*shape.radius;
+                        const Vec end=shape.point(b);
+                        shaft.points.push_back(shape.point(a)+tangent(a)*control);
+                        shaft.points.push_back(end-tangent(b)*control);
+                        shaft.points.push_back(end);
+                    }
+                    s.items.push_back(shaft);
+                    Primitive arrowhead;
+                    arrowhead.owner=owner;arrowhead.reactionArrow=arrowIndex;arrowhead.type=Primitive::Polygon;
+                    arrowhead.points={tip,tip-u*size+n*(size*.4),tip-u*size-n*(size*.4)};
+                    s.items.push_back(arrowhead);
+                };
+                if(std::find(r.hiddenArrows.begin(),r.hiddenArrows.end(),int(e))==r.hiddenArrows.end()){
+                    if(r.arrowType==1){auto reverse=*arc;reverse.radius+=2;std::swap(reverse.start,reverse.end);arc->radius-=2;drawArc(*arc);drawArc(reverse);}
+                    else drawArc(*arc);
+                }
+                const size_t firstLabel=s.items.size();
+                transitionLabels(r,e,mechanismLinkCaption(r,e,d.style),-font*1.7,font*.65);
+                const double angle=(arc->start+arc->end)/2;
+                const Vec outward{std::cos(angle),std::sin(angle)};
+                const double clearance=captionRadius+weight/2+font*.65;
+                double shift=0;
+                // Keep every rendered text run outside the tangent at the caption.
+                for(size_t i=firstLabel;i<s.items.size();i++){
+                    const auto& label=s.items[i];
+                    if(label.text.empty())continue;
+                    Vec near=label.points.front()-arc->center;
+                    if(outward.x<0)near.x+=textWidth(measure,label.text,label.fontSize,label.font,label.face);
+                    if(outward.y<0)near.y+=label.fontSize*1.3;
+                    shift=std::max(shift,clearance-(near.x*outward.x+near.y*outward.y));
+                }
+                for(size_t i=firstLabel;i<s.items.size();i++)
+                    s.items[i].points.front()=s.items[i].points.front()+outward*shift;
+                continue;
+            }
+            auto draw=[&](const std::vector<Vec>& points,double offset){
+                const Vec delta{offset,offset};
+                if(points.size()>5){
+                    if(std::find(r.hiddenArrows.begin(),r.hiddenArrows.end(),int(e))!=r.hiddenArrows.end())return;
+                    // The clipped quadratic is determined by its ends and its sampled midpoint.
+                    Vec a=points.front(),b=points.back(),control=points[points.size()/2]*2-(a+b)*.5;
+                    Vec tangent=b-control;
+                    double length=tangent.length();
+                    if(length<1e-6)return;
+                    Vec u=tangent*(1/length),normal{-u.y,u.x};
+                    double size=std::min(5*head,length*.5);
+                    Primitive shaft;
+                    shaft.owner=owner;shaft.reactionArrow=arrowIndex;shaft.type=Primitive::Bezier;shaft.width=weight;
+                    shaft.points={a+delta,a+(control-a)*(2./3)+delta,b+(control-b)*(2./3)+delta,b-u*(size*.96)+delta};
+                    s.items.push_back(shaft);
+                    Primitive tip;
+                    tip.owner=owner;tip.reactionArrow=arrowIndex;tip.type=Primitive::Polygon;
+                    tip.points={b+delta,b-u*size+normal*(size*.4)+delta,b-u*size-normal*(size*.4)+delta};
+                    s.items.push_back(tip);
+                    return;
+                }
+                for(size_t j=1;j<points.size();j++)arrow(points[j-1]+delta,points[j]+delta,"#000000",weight,j+1==points.size()?1:0,head);
+            };
             draw(path,r.arrowType==1?-2:0);if(r.arrowType==1){std::reverse(path.begin(),path.end());draw(path,2);}
             transitionLabels(r,e,mechanismLinkCaption(r,e,d.style),-font*1.7,font*.65);
         }
         arrowIndex=-1;
         for(auto& mark:r.crosses){std::vector<Primitive> shaft;for(auto& p:s.items)if(p.owner==r.id&&p.reactionArrow==mark.index)shaft.push_back(p);if(r.arrowType==1){auto firstHead=std::find_if(shaft.begin(),shaft.end(),[](const Primitive& p){return p.type==Primitive::Polygon;});if(firstHead!=shaft.end())shaft.erase(firstHead+1,shaft.end());}appendArrowCross(s.items,shaft,mark,r.id);}
+        if(branched&&!r.cyclic&&!r.slots.empty()){
+            std::set<int> members{r.id};
+            std::set<double> spins;
+            auto collectSpins=[&](const std::string& value){
+                try{
+                    for(const auto& entry:reactionEnergies(value))
+                        if(!entry.value.empty())spins.insert(entry.spin);
+                }catch(const std::exception&){}
+            };
+            double right=-1e20,top=1e20;
+            for(size_t i=0;i<r.slots.size();++i){
+                const auto pos=reactionSlot(r,i);
+                right=std::max(right,pos.x+r.slotWidth/2);
+                top=std::min(top,pos.y-r.slotHeight/2);
+                const auto& slot=r.slots[i];
+                members.insert(slot.members.begin(),slot.members.end());
+                collectSpins(slot.energy);
+            }
+            for(size_t i=0;i<r.links.size();++i){
+                const auto& link=r.links[i];
+                members.insert(link.members.begin(),link.members.end());
+                if(i<r.below.size())collectSpins(r.below[i]);
+            }
+            for(const auto& item:s.items)if(members.count(item.owner)){
+                const bool text=item.type==Primitive::Text;
+                if(text&&item.text.empty())continue;
+                const double pad=text?0:item.width/2;
+                const double width=text?textWidth(measure,item.text,item.fontSize,item.font,item.face):pad;
+                for(auto p:item.points){
+                    right=std::max(right,p.x+width);
+                    top=std::min(top,p.y-pad);
+                }
+            }
+            auto legendWidth=[&](const std::string& text){
+                return textWidth(measure,text,font,"Arial",d.style.labelFace);
+            };
+            double y=top-font*3;
+            if(!r.unit.empty()&&!spins.empty())y-=font*1.5;
+            if(!r.unit.empty()){
+                const std::string unit="Energy ("+r.unit+")";
+                addText(unit,{right-legendWidth(unit),y},10*factor);
+                y+=font*1.5;
+            }
+            if(!spins.empty()){
+                const std::string title="Multiplicity";
+                double width=legendWidth(title);
+                std::vector<std::pair<std::string,double>> entries;
+                for(double spin:spins){
+                    std::string label="M = "+std::to_string(std::lround(2*spin+1));
+                    if(spin!=0&&spin!=1&&spin!=2){
+                        std::ostringstream value;value<<" (S = "<<spin<<")";label+=value.str();
+                    }
+                    width+=font+legendWidth(label);
+                    entries.emplace_back(std::move(label),spin);
+                }
+                double x=right-width;
+                addText(title,{x,y},10*factor);
+                x+=legendWidth(title)+font;
+                for(const auto& [label,spin]:entries){
+                    addText(label,{x,y},10*factor,spinColor(spin));
+                    x+=legendWidth(label)+font;
+                }
+            }
+        }
         if(r.cyclic&&!r.unit.empty()&&!r.slots.empty()){
             double right=r.p.x,top=r.p.y;
             for(auto& item:s.items)if(item.owner==r.id&&item.type==Primitive::Text&&!item.points.empty()){right=std::max(right,item.points[0].x+textWidth(measure,item.text,item.fontSize,item.font,item.face));top=std::min(top,item.points[0].y);}
@@ -442,6 +592,28 @@ Scene makeScene(const Document& d,const Measure& measure){
             else{double u=(topY-a.y)/dy,v=(y0-a.y)/dy;if(u>v)std::swap(u,v);t0=std::max(0.,u);t1=std::min(1.,v);if(t0>t1)return;}
             Primitive part;part.owner=owner;part.width=path.width*(level&&plot.boldLevels&&plot.thinLines?2.:1.);part.color=path.color;part.dash=dash;part.points={a+(b-a)*t0,a+(b-a)*t1};s.items.push_back(part);
         };
+        std::map<size_t,std::pair<const EnergyCrossing*,Vec>> crossings;
+        for(const auto& crossing:plot.crossings){
+            const auto i=size_t(crossing.segment);
+            if(i>=plot.states.size()||i+1>=plot.states.size()||!hasCrossingEndpoints(plot,crossing))continue;
+            const auto a=pointAt(i,crossing.energy),b=pointAt(i+1,crossing.energy);
+            const double inset=plot.mode>=2?half:0;
+            const auto left=a+Vec{inset,0},right=b-Vec{inset,0};
+            crossings.emplace(i,std::make_pair(&crossing,left+(right-left)*crossing.position));
+        }
+        auto connect=[&](Vec a,Vec b,const EnergySeries& path){
+            if(plot.mode!=0){segment(a,b,path,plot.mode==2?1:path.dash);return;}
+            Vec c1{a.x+(b.x-a.x)*.42,a.y},c2{b.x-(b.x-a.x)*.42,b.y},last=a;
+            const bool inRange=a.y>=topY-1e-9&&a.y<=y0+1e-9&&b.y>=topY-1e-9&&b.y<=y0+1e-9;
+            for(int j=1;j<=60;j++){
+                double t=j/60.,u=1-t;
+                Vec next=a*(u*u*u)+c1*(3*u*u*t)+c2*(3*u*t*t)+b*(t*t*t);
+                remember(last,next);
+                if(!inRange)segment(last,next,path,path.dash);
+                last=next;
+            }
+            if(inRange){Primitive curve;curve.type=Primitive::Bezier;curve.owner=owner;curve.width=path.width;curve.color=path.color;curve.dash=path.dash;curve.points={a,c1,c2,b};s.items.push_back(curve);}
+        };
         for(size_t pathIndex=0;pathIndex<paths.size();pathIndex++){const auto& basePath=paths[pathIndex];if(basePath.values.size()!=plot.states.size())continue;auto path=basePath;
             for(size_t i=0;i<path.values.size();i++){
                 if(!path.hasValue(i))continue;Vec a=pointAt(i,path.values[i]);
@@ -457,11 +629,21 @@ Scene makeScene(const Document& d,const Measure& measure){
                 if(i+1<path.values.size()&&path.hasValue(i+1)){
                     Vec b=pointAt(i+1,path.values[i+1]);
                     path.color=i<basePath.segmentColors.size()&&!basePath.segmentColors[i].empty()?basePath.segmentColors[i]:basePath.color;
-                    if(plot.mode==0){
-                        Vec c1{a.x+(b.x-a.x)*.42,a.y},c2{b.x-(b.x-a.x)*.42,b.y},last=a;
-                        for(int j=1;j<=60;j++){double t=j/60.,u=1-t;Vec next=a*(u*u*u)+c1*(3*u*u*t)+c2*(3*u*t*t)+b*(t*t*t);remember(last,next);if(!visible(path,i)||!visible(path,i+1))segment(last,next,path,path.dash);last=next;}
-                        if(visible(path,i)&&visible(path,i+1)){Primitive curve;curve.type=Primitive::Bezier;curve.owner=owner;curve.width=path.width;curve.color=path.color;curve.dash=path.dash;curve.points={a,c1,c2,b};s.items.push_back(curve);}
-                    }else segment(a+Vec{plot.mode>=2?rightSpan[i]:0,0},b-Vec{plot.mode>=2?leftSpan[i+1]:0,0},path,plot.mode==2?1:path.dash);
+                    const auto left=a+Vec{plot.mode>=2?rightSpan[i]:0,0};
+                    const auto right=b-Vec{plot.mode>=2?leftSpan[i+1]:0,0};
+                    const auto found=crossings.find(i);
+                    if(found!=crossings.end()&&(int(pathIndex)==found->second.first->firstPath||
+                                               int(pathIndex)==found->second.first->secondPath)){
+                        const auto point=found->second.second;
+                        connect(left,point,path);
+                        connect(point,right,path);
+                        if(plot.mode!=0&&(plot.mode==2||path.dash)){
+                            const auto incoming=left-point;
+                            const double length=incoming.length();
+                            if(length>1e-8)
+                                segment(point+incoming*(std::min(16.,length*.65)/length),point,path,0);
+                        }
+                    }else connect(left,right,path);
                 }
                 if(!visible(path,i))continue;
                 path.color=i<basePath.levelColors.size()&&!basePath.levelColors[i].empty()?basePath.levelColors[i]:basePath.color;
@@ -473,6 +655,71 @@ Scene makeScene(const Document& d,const Measure& measure){
                     s.items.push_back(symbol);for(int j=-4;j<=4;j++)obstacles.push_back(a+Vec{j*r/4,0});for(int dx:{-1,0,1})for(int dy:{-1,0,1})levelObstacles.push_back(a+Vec{dx*r,dy*r});
                 }
             }
+        }
+        for(const auto& [index,entry]:crossings){
+            const auto& [crossing,point]=entry;
+            if(point.y<topY||point.y>y0)continue;
+            const double radius=std::clamp(valueFont*.49,4.5,7.5);
+            const double haloRadius=radius+2.4;
+            auto diamondPoints=[&](double r){
+                return std::vector<Vec>{point+Vec{0,-r},point+Vec{r,0},point+Vec{0,r},point+Vec{-r,0}};
+            };
+            Primitive diamond;diamond.type=Primitive::Polygon;diamond.owner=owner;diamond.filled=true;
+            diamond.color="#ffffff";diamond.points=diamondPoints(haloRadius);
+            s.items.push_back(diamond);
+            for(auto corner:diamond.points){obstacles.push_back(corner);levelObstacles.push_back(corner);}
+            diamond.color="#000000";diamond.closed=true;diamond.points=diamondPoints(radius);
+            s.items.push_back(diamond);
+            diamond.color="#ffffff";diamond.closed=false;diamond.points=diamondPoints(radius-1);
+            s.items.push_back(diamond);
+
+            auto pathColor=[&](int path){
+                const auto& series=paths[size_t(path)];
+                return index<series.segmentColors.size()&&!series.segmentColors[index].empty()
+                    ?series.segmentColors[index]:series.color;
+            };
+            const double inset=radius-1.6,separator=.45;
+            Primitive face=diamond;
+            face.color=pathColor(crossing->secondPath);
+            face.points={point+Vec{-inset+separator,-separator},point+Vec{0,-inset},point+Vec{inset-separator,-separator}};
+            s.items.push_back(face);
+            face.color=pathColor(crossing->firstPath);
+            for(auto& vertex:face.points)vertex.y=2*point.y-vertex.y;
+            s.items.push_back(face);
+
+            const double font=std::max(4.,valueFont*.75);
+            const auto lines=1+std::count(crossing->label.begin(),crossing->label.end(),'\n');
+            const double labelHeight=font*(1.1+(lines-1)*1.28);
+            const double numberFont=font*.92;
+            const double height=labelHeight+(plot.showValues?numberFont*1.2:0);
+            const double distance=haloRadius+12;
+            const bool below=point.y+distance+height<=y0||point.y-topY<distance+height;
+            const auto offset=crossing->labelOffset.value_or(Vec{0,below?distance:-distance-height});
+            const auto anchor=point+offset;
+            std::ostringstream value;value.imbue(std::locale::classic());
+            value<<std::fixed<<std::setprecision(2)<<crossing->energy;
+            const double captionWidth=std::max(widthOf(crossing->label,font),
+                                               plot.showValues?widthOf(value.str(),numberFont):0.);
+            const Rect box{anchor.x-captionWidth/2,anchor.y,captionWidth,height};
+            s.crossingCaptions.push_back({owner,size_t(crossing-plot.crossings.data()),box,offset});
+            if(crossing->leaderWidth>0){
+                const Vec edge{std::clamp(point.x,box.x,box.x+box.w),std::clamp(point.y,box.y,box.y+box.h)};
+                const auto toward=edge-point;
+                const double length=toward.length();
+                if(length>0){
+                    const auto unit=toward*(1/length);
+                    const double start=haloRadius/(std::abs(unit.x)+std::abs(unit.y))+1.5;
+                    if(length>start+3){
+                        Primitive leader;leader.owner=owner;leader.color="#606060";
+                        leader.width=crossing->leaderWidth*(plot.thinLines?2:1);
+                        leader.points={point+unit*start,edge-unit*3};
+                        s.items.push_back(leader);
+                    }
+                }
+            }
+            plotText(crossing->label,anchor,font,"#000000",true);
+            if(plot.showValues)
+                plotText(value.str(),anchor+Vec{0,labelHeight},numberFont,"#333333",true);
         }
         // State captions can use separate lanes if long names would touch their neighbors.
         std::vector<Rect> stateBoxes;double stateBottom=axisY+10,stateScriptTop=0;

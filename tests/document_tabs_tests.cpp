@@ -35,11 +35,23 @@ static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(m
 static int formAction=0;static bool formDriven=false,previewObserved=false;static std::string formBefore;
 static bool paletteDriven=false;
 static int mechanismGridAction=0;
+static int mechanismLayoutChoice=0;
 static bool mechanismDraftHidden=false;
 static void CALLBACK driveNewMechanism(HWND parent,UINT,UINT_PTR timer,DWORD){
     HWND dialog=GetLastActivePopup(parent);
     wchar_t name[64]{};
     GetClassNameW(dialog,name,64);
+    if(std::wstring(name)==L"YoungDrawForm"){
+        wchar_t title[64]{};
+        GetWindowTextW(dialog,title,64);
+        if(std::wstring(title)==L"원형 분기·합류 단계 수"){
+            SetDlgItemTextW(dialog,100,L"4");
+            SetDlgItemTextW(dialog,101,L"1");
+            SetDlgItemTextW(dialog,102,L"3");
+        }else SendDlgItemMessageW(dialog,100,CB_SETCURSEL,mechanismLayoutChoice,0);
+        PostMessageW(dialog,WM_COMMAND,IDOK,0);
+        return;
+    }
     if(std::wstring(name)!=L"YoungDrawGrid")return;
     KillTimer(parent,timer);
     mechanismDraftHidden=toNative(doc)==formBefore;
@@ -61,10 +73,30 @@ static void checkNewMechanism(HWND hwnd){
           selection==std::vector<int>{atom}&&tool==Text&&sidebarPage==1,
           "discarding the new mechanism leaves canvas, selection, tool, sidebar and history intact");
     mechanismGridAction=1;
-    SetTimer(hwnd,901,10,driveNewMechanism);
-    command(120);
-    check(doc.reactions.size()==1&&dirty&&sidebarPage==0&&history.undo(doc)&&toNative(doc)==formBefore&&
-          !history.undo(doc),"applying a new mechanism creates exactly one undo step");
+    for(int choice=0;choice<4;choice++){
+        mechanismLayoutChoice=choice;
+        SetTimer(hwnd,901,10,driveNewMechanism);
+        command(120);
+        check(doc.reactions.size()==1&&dirty&&sidebarPage==0,"creation command applies each selected mechanism layout");
+        const auto r=doc.reactions.front();
+        check(r.cyclic==(choice==3)&&r.fixedFrames==(choice==1||choice==2)&&
+              r.slots.size()==std::vector<size_t>{3,6,11,4}[choice],"creation menu selects the intended topology and requested counts");
+        if(choice==2){
+            auto before=toNative(doc);
+            for(size_t edge=0;edge<r.links.size();edge++){
+                fit();
+                auto buttons=mechanismSplitButtons(doc.reactions.front());
+                check(buttons.size()==r.links.size()&&buttons[edge].first==edge,"each connection has an insertion button");
+                mouseDown(buttons[edge].second);
+                const auto& added=doc.reactions.front();
+                check(added.slots.size()==r.slots.size()+1&&added.links[edge].to==int(r.slots.size())&&
+                      added.links.back().to==r.links[edge].to,"clicking a canvas plus splits exactly its connection");
+                check(history.undo(doc)&&toNative(doc)==before,"connection insertion is undone in one step");
+            }
+        }
+        check(history.undo(doc)&&toNative(doc)==formBefore&&!history.undo(doc),
+              "applying a new mechanism creates exactly one undo step");
+    }
     doc={};selection.clear();history.clear();dirty=false;tool=Select;
 }
 static bool recognizedTableOpened=false;
@@ -100,6 +132,8 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==25){
         SetDlgItemTextW(dialog,100,L"4");
+    }else if(formAction==26){
+        SendDlgItemMessageW(dialog,101,CB_SETCURSEL,4,0);
     }else if(formAction==11||formAction==12){
         SetDlgItemTextW(dialog,100,L"4");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==13||formAction==14){
@@ -285,6 +319,24 @@ int main(int argc,char** argv){
             check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow,"graph sidebar puts publication formatting last and shares the structure insertion position");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;
+            const auto interaction=hit(interactionToolCommand);
+            mouseDown({interaction.X+interaction.Width/2,interaction.Y+interaction.Height/2});
+            mouseDown(origin);mouseUp(origin+Vec{60,20});
+            check(tool==Interaction&&doc.atoms.empty()&&doc.bonds.empty()&&doc.objects.size()==1&&
+                  doc.objects.front().kind==ObjectKind::Line&&doc.objects.front().dash==2&&
+                  fromCdxml(toCdxml(doc)).objects.front().dash==2,
+                  "the sidebar interaction tool draws a dotted graphic that survives a CDXML round trip");
+            command(104);check(doc.objects.empty(),"interaction line can be undone");
+            const int donor=doc.addAtom({0,0},8),acceptor=doc.addAtom({45,0},7);
+            mouseDown(screen(doc.atom(donor)->p));mouseUp(screen(doc.atom(acceptor)->p));
+            auto attached=fromCdxml(toCdxml(doc)).subset({donor,acceptor});
+            check(attached.objects.size()==1&&attached.objects.front().sourceAtom==donor&&
+                  attached.objects.front().targetAtom==acceptor,"both atom anchors survive saving and copying the structure");
+            attached.translate({acceptor},{20,15});
+            const auto routed=routeArrow(attached,attached.objects.front());
+            check((routed.front()-attached.atom(donor)->p).length()<1e-9&&
+                  (routed.back()-attached.atom(acceptor)->p).length()<1e-9,"the interaction endpoint follows the moved atom");
+            doc=Document{};selection.clear();history.clear();
             command(218);orbitalKind=OrbitalKind::P;orbitalPhase=2;
             Vec at=origin;mouseDown(at);mouse=at+Vec{60,0};mouseUp(mouse);
             check(doc.objects.size()==2&&doc.groups.size()==1&&selection.size()==2,"orbital tool draws two grouped phase lobes on drag");
@@ -423,6 +475,32 @@ int main(int argc,char** argv){
         }
 
         {
+            doc={};history.clear();selection.clear();tool=Select;
+            EnergyPlot p;
+            p.id=doc.nextId++;
+            p.states={{"A",0,{},{}},{"TS",42.7,{},{}}};
+            p.series={{"S = 0","#000000",{0,42.7}},{"S = 2","#0000ff",{7.4,19.0}}};
+            p.crossings={{"MECP",0,0,1,.44,9.46}};
+            doc.plots={p};
+            zoom=1.25;origin={double(left+25),double(top+20)};
+            redraw();
+            const auto caption=scene().crossingCaptions.at(0);
+            const Vec at=screen({caption.bounds.x+caption.bounds.w/2,caption.bounds.y+5});
+            mouseDown(at);
+            check(dragging,"crossing caption starts a drag in select mode");
+            mouseUp(at+Vec{50,25});
+            const auto& movedPlot=doc.plots.front();
+            check((movedPlot.p-p.p).length()<1e-8&&movedPlot.crossings[0].energy==9.46,
+                  "dragging the crossing caption keeps the graph and crossing fixed");
+            check(movedPlot.crossings[0].labelOffset&&
+                  (*movedPlot.crossings[0].labelOffset-caption.offset-Vec{40,20}).length()<1e-8,
+                  "crossing caption moves by the pointer displacement in plot coordinates");
+            check(history.undo(doc)&&!doc.plots.front().crossings.front().labelOffset,
+                  "crossing caption drag is one undo operation");
+            selection.clear();
+        }
+
+        {
             doc={};history.clear();int a=doc.addAtom({20,20},27),b=doc.addAtom({70,20},8);doc.atom(a)->label="CoIII";selection={a};hoverAtom=hoverBond=0;tool=Select;
             hotkey('-');hotkey('*');check(doc.atom(a)->charge==-1&&doc.atom(a)->radical==2&&doc.atom(a)->label=="CoIII","selected atom accepts radical anion without clearing label");
             hotkey('*');check(!doc.atom(a)->radical&&doc.atom(a)->charge==-1,"radical shortcut toggles independently of charge");
@@ -490,6 +568,18 @@ int main(int argc,char** argv){
             formAction=4;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);reactionSettings(doc.reactions[0].id);
             check(formDriven&&previewObserved&&doc.reactions[0].wrapColumns==2&&doc.reactions[0].rowGap==180,"serpentine settings apply from the real dialog");
             check(history.undo(doc)&&toNative(doc)==formBefore,"serpentine settings undo restores original structures and positions");
+            doc={};history.clear();
+            auto legacy=mechanismTemplate(MechanismTemplate::SplitAndMerge);
+            legacy.id=doc.nextId++;
+            legacy.circularMerge=false;
+            legacy.slotGrid={{-1,0},{0,0},{0,1},{-1.35,1.65},{-1.35,2.55},{1.45,2.1},{0,3.2}};
+            legacy.slots[3].label="Saved intermediate";
+            doc.reactions.push_back(legacy);
+            formBefore=toNative(doc);
+            formAction=26;formDriven=false;SetTimer(hwnd,901,10,driveForm);reactionSettings(legacy.id);
+            check(formDriven&&doc.reactions.front().circularMerge&&doc.reactions.front().slots[3].label=="Saved intermediate"&&
+                  mechanismLinkArc(doc.reactions.front(),2,doc.style).has_value(),"settings convert an existing oval and keep its stage contents");
+            check(history.undo(doc)&&toNative(doc)==formBefore,"converting an existing path is undoable");
             doc=mechanismDemo();for(int i=0;i<4;i++){doc.reactions[0].slots.push_back({"State "+std::to_string(i+4),{},"0.0"});doc.reactions[0].above.push_back("TS / Step");doc.reactions[0].below.push_back("12.3");}
             doc.reactions[0].wrapColumns=3;for(size_t i=0;i<7;i++)if(doc.reactions[0].slots[i].members.empty())fillSlot(doc,demo(),doc.reactions[0].id,i);optimizeMechanism(doc);writePreview(L"mechanism-serpentine.png",doc);
             doc={};EnergyPlot staged;staged.id=doc.nextId++;staged.states={{"A",0},{"B",20},{"C",-10}};staged.series={{"Path 1","#167d9a",{0,20,-10}}};staged.stages=defaultMechanismStages();staged.stages[1].fontSize=24;doc.plots.push_back(staged);

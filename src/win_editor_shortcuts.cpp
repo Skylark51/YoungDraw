@@ -15,8 +15,49 @@
 
 namespace yd::editor {
 
+namespace {
+bool adjustSelectedStrokeWidths(bool increase){
+    if(selection.empty())return false;
+    const auto ids=groupedSelection(selection);
+    const auto adjusted=[increase](double width){
+        constexpr double factor=1.15;
+        if(increase)return width<12. ? std::clamp(width*factor,.1,12.) : width;
+        return width>.1 ? std::max(.1,width/factor) : width;
+    };
+    bool found=false,edited=false;
+    for(auto& bond:doc.bonds){
+        if(!contains(ids,bond.id)&&!(contains(ids,bond.a)&&contains(ids,bond.b)))continue;
+        found=true;
+        const double line=bond.lineWidth.value_or(doc.style.lineWidth);
+        const double bold=bond.boldWidth.value_or(doc.style.boldWidth);
+        const double nextLine=adjusted(line),nextBold=adjusted(bold);
+        if(nextLine==line&&nextBold==bold)continue;
+        if(!edited)history.checkpoint(doc);
+        if(nextLine!=line)bond.lineWidth=nextLine;
+        if(nextBold!=bold)bond.boldWidth=nextBold;
+        edited=true;
+    }
+    for(auto& object:doc.objects){
+        if((object.kind!=ObjectKind::Ellipse&&object.kind!=ObjectKind::Curve)||
+           object.filled||!contains(ids,object.id))continue;
+        found=true;
+        const double nextWidth=adjusted(object.width);
+        if(nextWidth==object.width)continue;
+        if(!edited)history.checkpoint(doc);
+        object.width=nextWidth;
+        edited=true;
+    }
+    if(edited)changed();
+    return found;
+}
+}
+
 void hotkey(char c){
+    if(stageCopyOwner)return;
  if(snapPlot)return;
+ // The main minus key produces '_' with Shift, while the keypad produces '-'.
+ if((c=='+'||c=='-'||c=='_')&&(GetKeyState(VK_SHIFT)&0x8000)&&
+    !mechanismConnectionDrag&&adjustSelectedStrokeWidths(c=='+'))return;
  if(c=='+'||c=='-'||c=='*'){
     int target=doc.atom(hoverAtom)?hoverAtom:selection.size()==1&&doc.atom(selection.front())?selection.front():0;
     if(target){history.checkpoint(doc);auto* a=doc.atom(target);if(c=='*')a->radical=a->radical?0:2;else{a->charge+=c=='+'?1:-1;a->explicitH=-1;}changed();return;}
@@ -104,7 +145,7 @@ void showHelp(){
     entries.push_back({L"편집 · 실행 취소와 다시 실행",
         L"Ctrl+Z 실행 취소 / Ctrl+Shift+Z 다시 실행. Ctrl+Y는 보기 → 단축키 호환에서 작업 반복 또는 다시 실행으로 지정합니다."});
     entries.push_back({L"구조 · 정리, 크기, 회전",
-        L"예: 구조를 선택하고 Ctrl+Shift+K로 정리합니다. Ctrl+K 크기 / Ctrl+R 회전 / Ctrl+G 그룹 / Ctrl+Shift+G 그룹 해제."});
+        L"예: 구조를 선택하고 Ctrl+Shift+K로 정리합니다. Ctrl+K 크기 / Ctrl+R 회전 / Ctrl+G 그룹 / Ctrl+Shift+G 그룹 해제. 결합·타원·곡선을 선택하고 Shift와 + 또는 - 키를 눌러 선 두께를 조정합니다."});
     entries.push_back({L"배치 · 정렬, 이동, 반전",
         L"Ctrl+Shift+Alt+L/C/R 가로 정렬, T/M/B 세로 정렬, H/V 간격 배분. Ctrl+Shift+H/V 반전. 방향키 1 pt, Shift+방향키 10 pt, Alt+방향키 회전, Ctrl+방향키 반응 복제."});
     entries.push_back({L"그리기 · 도구, 첨자, 클립보드",
@@ -135,6 +176,11 @@ void searchCommands(){
     if(auto selected=ui::search(win,L"명령 검색 · Ctrl+Shift+F",entries,L"실행"))command(commands[*selected]);
 }
 void key(WPARAM k){
+    if(stageCopyOwner){
+        if(k==VK_ESCAPE)cancel();
+        else if(k==VK_RETURN||(k=='C'&&(GetKeyState(VK_CONTROL)&0x8000)))finishStageCopy();
+        return;
+    }
     if(mechanismConnectionDrag){if(k==VK_ESCAPE)cancel();return;}
     if(mechanismConnecting&&k==VK_ESCAPE){cancel();return;}
     if(isolatedStructureEditing&&(GetKeyState(VK_CONTROL)&0x8000)){if(k==VK_TAB)return;if(k=='S'){command(186);return;}}

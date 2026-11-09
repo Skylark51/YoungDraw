@@ -39,6 +39,7 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     for(size_t i=0;i<n;i++)if(i<source.levelColors.size())left.levelColors[n-1-i]=source.levelColors[i];
     for(size_t i=0;i+1<n;i++)if(i<source.segmentColors.size())left.segmentColors[n-2-i]=source.segmentColors[i];
     result.series.push_back(std::move(left));
+    for(auto& crossing:result.crossings)crossing.segment+=int(n)-1;
     result.stages.clear();
     auto addStage=[&](MechanismStage stage){
         if(stage.end-stage.start<1){double middle=(stage.start+stage.end)/2;stage.start=std::clamp(middle-.5,0.,99.);stage.end=stage.start+1;}
@@ -75,10 +76,37 @@ EnergyPlot publicationPlot(const EnergyPlot& original){
     for(auto& path:plot.series)path.width=std::max(path.width,3.5);
     return plot;
 }
+void validateEnergyCrossings(const EnergyPlot& plot){
+    std::set<int> segments;
+    for(const auto& crossing:plot.crossings){
+        if(!std::isfinite(crossing.leaderWidth)||crossing.leaderWidth<0||crossing.leaderWidth>6)
+            throw std::runtime_error("Crossing leader width must be between 0 and 6 pt.");
+        if(crossing.labelOffset&&(!std::isfinite(crossing.labelOffset->x)||!std::isfinite(crossing.labelOffset->y)||
+           std::abs(crossing.labelOffset->x)>1e4||std::abs(crossing.labelOffset->y)>1e4))
+            throw std::runtime_error("Invalid crossing label offset.");
+        if(crossing.label.empty()||crossing.segment<0||size_t(crossing.segment)+1>=plot.states.size()||
+           crossing.firstPath<0||size_t(crossing.firstPath)>=plot.series.size()||
+           crossing.secondPath<0||size_t(crossing.secondPath)>=plot.series.size()||
+           crossing.firstPath==crossing.secondPath||!std::isfinite(crossing.position)||
+           crossing.position<=0||crossing.position>=1||!std::isfinite(crossing.energy)||
+           std::abs(crossing.energy)>1e6||!segments.insert(crossing.segment).second)
+            throw std::runtime_error("Invalid crossing point. Use two distinct paths and one point per segment.");
+    }
+}
+bool hasCrossingEndpoints(const EnergyPlot& plot,const EnergyCrossing& crossing){
+    for(int path:{crossing.firstPath,crossing.secondPath}){
+        if(path<0||size_t(path)>=plot.series.size()||crossing.segment<0)return false;
+        const auto& series=plot.series[size_t(path)];
+        const auto start=size_t(crossing.segment);
+        if(!series.hasValue(start)||!series.hasValue(start+1))return false;
+    }
+    return true;
+}
 EnergyAxis energyAxis(const EnergyPlot& plot){
     double low=0,high=0;bool first=true;
     auto include=[&](double v){if(!std::isfinite(v))return;if(first){low=high=v;first=false;}else{low=std::min(low,v);high=std::max(high,v);}};
     if(plot.series.empty()){for(auto& state:plot.states)include(state.energy);}else for(auto& path:plot.series)for(size_t i=0;i<path.values.size();i++)if(path.hasValue(i))include(path.values[i]);
+    for(const auto& crossing:plot.crossings)if(hasCrossingEndpoints(plot,crossing))include(crossing.energy);
     if(high-low<1e-8){high+=1;low-=1;}double margin=(high-low)*.22;low-=margin;high+=margin;
     double autoSpan=high-low;
     if(plot.yMin){if(!std::isfinite(*plot.yMin)||std::abs(*plot.yMin)>1e8)throw std::runtime_error("y축 최솟값이 올바르지 않습니다.");low=*plot.yMin;}
@@ -130,6 +158,15 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
         series[k].levelColors=std::move(levels);series[k].segmentColors=std::move(segments);
         series[k].present=std::move(present);series[k].values=std::move(values);}
     plot.states=std::move(states);plot.series=std::move(series);
+    plot.crossings.clear();
+    for(auto crossing:old.crossings){
+        for(size_t i=0;i+1<mapping.size();i++){
+            if(mapping[i]!=crossing.segment||mapping[i+1]!=crossing.segment+1)continue;
+            crossing.segment=int(i);
+            plot.crossings.push_back(crossing);
+            break;
+        }
+    }
 }
 // Empty cells represent missing points, including in the first pathway.
 static std::optional<double> parseGridEnergy(const std::string& text){

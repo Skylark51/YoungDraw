@@ -16,6 +16,7 @@
 
 namespace yd::editor {
 namespace {
+constexpr int drawingPanelBottom=830;
 int topOffset=0,leftOffset=0,rightOffset=0,topLimit=0;
 std::vector<int> favorites;
 bool favoritesLoaded=false;
@@ -55,7 +56,7 @@ bool pinTool(Vec at){
 bool scrollTools(Vec at,int delta){
     int* offset=nullptr,limit=0;
     if(at.y<89){offset=&topOffset;limit=topLimit;}
-    else if(at.x<left){offset=&leftOffset;limit=std::max(0,786-(wh-bottom));}
+    else if(at.x<left){offset=&leftOffset;limit=std::max(0,drawingPanelBottom-(wh-bottom));}
     else if(at.x>=ww-right){offset=&rightOffset;limit=std::max(0,684-(wh-bottom));}
     if(!offset)return false;
     *offset=std::clamp(*offset+delta,0,limit);
@@ -76,6 +77,18 @@ std::unique_ptr<Bitmap> paintBuffer;
 double bondFraction(int id,Vec p){auto* b=doc.bond(id);if(!b)return .5;Vec a=doc.atom(b->a)->p,v=doc.atom(b->b)->p-a;double ll=v.x*v.x+v.y*v.y;return ll>1e-9?std::clamp(((p-a).x*v.x+(p-a).y*v.y)/ll,0.,1.):.5;}
 Document draftOrbital(Vec pointer){Document preview;preview.style=doc.style;Vec at=startAtom&&doc.atom(startAtom)?doc.atom(startAtom)->p:world(down),tip=world(pointer);if((pointer-down).length()<5||(tip-at).length()<.01)tip=at+Vec{0,-doc.style.bondLength};else if(GetKeyState(VK_SHIFT)&0x8000)tip=snapped(at,tip,(tip-at).length());addOrbital(preview,at,tip,orbitalKind,orbitalPhase);return preview;}
 Object draftArrow(Vec pointer){Object o;o.id=-1;Vec a=world(down),b=world(pointer);o.width=doc.style.lineWidth;o.color="#ff0000";
+    if(tool==Interaction){
+        o.color="#000000";o.dash=2;
+        o.sourceAtom=startAtom;
+        o.targetAtom=doc.atomAt(b,10/zoom);
+        if(o.targetAtom==o.sourceAtom)o.targetAtom=0;
+        o.autoRoute=o.sourceAtom||o.targetAtom;
+        if(auto* atom=doc.atom(o.sourceAtom))a=atom->p;
+        if(auto* atom=doc.atom(o.targetAtom))b=atom->p;
+        else if(GetKeyState(VK_SHIFT)&0x8000){Vec v=b-a;b=std::abs(v.x)>std::abs(v.y)?Vec{b.x,a.y}:Vec{a.x,b.y};}
+        o.points={a,b};
+        return o;
+    }
     if(tool==Straight||tool==Resonance){o.head=tool==Resonance?3:0;if(!o.head)o.color="#000000";if(GetKeyState(VK_SHIFT)&0x8000){Vec v=b-a;b=std::abs(v.x)>std::abs(v.y)?Vec{b.x,a.y}:Vec{a.x,b.y};}o.points={a,b};return o;}
     o.head=tool==Fishhook?2:1;o.sourceAtom=startAtom;o.targetAtom=doc.atomAt(b,10/zoom);
     o.sourceBond=o.sourceAtom?0:startBond;o.targetBond=o.targetAtom?0:doc.bondAt(b,5/zoom);
@@ -104,7 +117,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  float toolbarX=12;
  loadFavorites();
  const int toolbarWidth=isolatedStructureEditing?ww-308:ww;
- topLimit=std::max(0,(isolatedStructureEditing?880:1090+int(favorites.size())*48)-toolbarWidth);
+ topLimit=std::max(0,(isolatedStructureEditing?880:1116+int(favorites.size())*48)-toolbarWidth);
  topOffset=std::min(topOffset,topLimit);
  const auto toolbarClip=RectF(0,0,float(toolbarWidth),63);
  auto toolbarState=g.Save();g.SetClip(toolbarClip);g.TranslateTransform(float(-topOffset),0);
@@ -118,7 +131,13 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
      }
  };
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
- if(!isolatedStructureEditing)group({185,100,101,102});else group({102});separator();group({104,105});separator();group({107,125,155,156});separator();
+ if(isolatedStructureEditing)group({102});
+ else {
+     group({100,101,102});
+     separator();
+     group({185});
+ }
+ separator();group({104,105});separator();group({107,125,155,156});separator();
  group({170,171,172,173,174});separator();group({160,161,162,163,164});
  if(!isolatedStructureEditing){separator();group({bondAnimationCommand});}
  for(int id:favorites)group({id});
@@ -134,19 +153,22 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  if(isolatedStructureEditing)text(g,L"이 창에서는 선택한 단계의 구조만 편집합니다. 적용하면 원래 메커니즘에 반영됩니다.",left+12,96,12,ink,true);
  if(topLimit)text(g,L"↔ 휠로 도구 모음 스크롤",float(left+8),69,11,muted);
  const RectF leftClip(0,89,float(left),float(std::max(0,wh-bottom-89)));
- leftOffset=std::min(leftOffset,std::max(0,786-(wh-bottom)));
+ leftOffset=std::min(leftOffset,std::max(0,drawingPanelBottom-(wh-bottom)));
  const auto leftHits=hits.size();auto leftState=g.Save();g.SetClip(leftClip);g.TranslateTransform(0,float(-leftOffset));
  text(g,L"그리기",16,101,11,muted,true);
- const std::vector<int> drawingTools={200,201,202,217,203,204,205,206,207,208,209,210,211,212,213,214,215,216,218,219};
- for(size_t i=0;i<drawingTools.size();i++)toolButton(g,drawingTools[i],{float(12+(i%2)*82),float(122+(i/2)*44),74,40},int(tool)==drawingTools[i]-200);
- text(g,L"원소",16,576,11,muted,true);std::vector<int> elements={6,7,8,16,15,9,17,35,53,1,5,14};
- for(int i=0;i<int(elements.size());i++)button(g,300+elements[i],ui::wide(symbol(elements[i])),{float(12+i%3*53),float(598+i/3*30),49,26},element==elements[i]);
- int shown=int(tool);for(auto& h:hits)if(h.id>=200&&h.id<=218&&h.box.Contains(float(mouse.x),float(mouse.y)))shown=h.id-200;
- text(g,toolNames[size_t(shown)],12,728,10,muted);
- button(g,150,L"Arial 굵게 / 2 pt",{12,750,156,29});
+ const std::vector<int> drawingTools={200,201,202,217,203,204,205,206,207,208,209,210,211,212,213,214,215,216,218,219,interactionToolCommand};
+ for(size_t i=0;i<drawingTools.size();i++)toolButton(g,drawingTools[i],{float(12+(i%2)*82),float(122+(i/2)*44),74,40},drawingTools[i]==(tool==Interaction?interactionToolCommand:200+int(tool)));
+ text(g,L"원소",16,620,11,muted,true);std::vector<int> elements={6,7,8,16,15,9,17,35,53,1,5,14};
+ for(int i=0;i<int(elements.size());i++)button(g,300+elements[i],ui::wide(symbol(elements[i])),{float(12+i%3*53),float(642+i/3*30),49,26},element==elements[i]);
+ int shown=int(tool);for(auto& h:hits)if(h.box.Contains(float(mouse.x),float(mouse.y))){
+     if(h.id==interactionToolCommand)shown=Interaction;
+     else if(h.id>=200&&h.id<=218)shown=h.id-200;
+ }
+ text(g,toolNames[size_t(shown)],12,772,10,muted);
+ button(g,150,L"Arial 굵게 / 2 pt",{12,794,156,29});
 
  g.Restore(leftState);clipHits(leftHits,leftClip,0,float(-leftOffset));
- if(wh-bottom<786)text(g,L"↕ 휠",float(left-46),89,10,muted);
+ if(wh-bottom<drawingPanelBottom)text(g,L"↕ 휠",float(left-46),89,10,muted);
 
  auto cb=canvasBox();appearance::background(g,cb);auto state=g.Save();g.SetClip(cb);g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));const Scene& sc=sceneForPaint(reuseScene);animationVisible=false;animationDelay=1000;render(g,sc,true,true);auto draggedEnergy=energyDragPreview(sc);if(!draggedEnergy.items.empty())render(g,draggedEnergy,false,true);if(animationVisible)SetTimer(win,912,animationDelay,nullptr);else KillTimer(win,912);g.Restore(state);
  state=g.Save();g.SetClip(cb);auto guide=[&](Vec c,double w,double h,std::wstring label,int owner,size_t index,bool above){Vec p=screen(c);RectF r(float(p.x-w*zoom/2),float(p.y-h*zoom/2),float(w*zoom),float(h*zoom));bool active=targetContainer==owner&&targetSlot==index&&targetAbove==above;Pen pen(active?accent:Color(255,201,215,223),active?1.6f:1);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,r);text(g,label,r.X+3,r.Y+3,10,appearance::palette().canvasInk);};
@@ -157,14 +179,54 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
     if(snapStart)highlight(*snapStart);
     if(hovered){highlight(*hovered);if(auto* graph=plot(snapPlot)){auto label=ui::wide(graph->states[size_t(hovered->state)].label)+L" · "+(hovered->edge<0?L"왼쪽 끝":hovered->edge>0?L"오른쪽 끝":L"중앙");Vec at=screen(hovered->p);text(g,label,float(at.x+10),float(at.y-25),11,accent,true);}}
  }
+ if(auto* r=reaction(stageCopyOwner)){
+    Scene retained;
+    for(auto item:sc.items)if(item.owner==r->id&&item.reactionArrow>=0&&
+        size_t(item.reactionArrow)<r->links.size()&&mechanismLinkSelected(r->links[size_t(item.reactionArrow)],stagesToCopy)){
+        item.color="#008778";
+        item.width+=1;
+        retained.items.push_back(std::move(item));
+    }
+    auto saved=g.Save();
+    g.TranslateTransform(float(origin.x),float(origin.y));
+    g.ScaleTransform(float(zoom),float(zoom));
+    render(g,retained);
+    g.Restore(saved);
+    for(size_t i=0;i<r->slots.size();++i){
+        const bool selected=stagesToCopy.count(i)>0;
+        Vec p=screen(reactionSlot(*r,i)-Vec{r->slotWidth/2,r->slotHeight/2});
+        RectF frame(float(p.x),float(p.y),float(r->slotWidth*zoom),float(r->slotHeight*zoom));
+        Pen outline(selected?accent:appearance::palette().canvasInk,selected?2.5f:1.f);
+        if(!selected)outline.SetDashStyle(DashStyleDash);
+        g.DrawRectangle(&outline,frame);
+        text(g,std::to_wstring(i+1),frame.X+3,frame.Y-17,11,selected?accent:appearance::palette().canvasInk,true);
+    }
+ }
  if(guides&&!snapPlot){for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();i++)guide(reactionSlot(r,i),r.slotWidth,r.slotHeight,(mechanismConnecting?std::to_wstring(i+1)+L" · ":L"")+(r.slots[i].members.empty()?L"구조를 삽입하세요":L""),r.id,i,false);for(auto& p:doc.plots)if(!doc.isLocked(p.id))for(size_t i=0;i<p.states.size();i++){guide(plotAnchor(p,i,true),48,55,p.states[i].above.empty()?L"+ 구조 삽입":L"",p.id,i,true);guide(plotAnchor(p,i,false),48,55,p.states[i].below.empty()?L"+ 구조 삽입":L"",p.id,i,false);}}
- if(tool==Select&&!inlineEdit)for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id)){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=!r.explicitConnections()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});if(!terminal)continue;for(bool below:{false,true}){if(below&&r.vertical)continue;Vec p=mechanismAddPosition(r,below,slot);SolidBrush body(white);Pen outline(accent,1.8f);g.FillEllipse(&body,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawEllipse(&outline,float(p.x-12),float(p.y-12),24.f,24.f);g.DrawLine(&outline,float(p.x-5),float(p.y),float(p.x+5),float(p.y));g.DrawLine(&outline,float(p.x),float(p.y-5),float(p.x),float(p.y+5));}}}
+ if(tool==Select&&!inlineEdit){
+    auto plus=[&](Vec p,float radius){
+        SolidBrush body(white);Pen outline(accent,1.8f);
+        const float x=float(p.x),y=float(p.y);
+        g.FillEllipse(&body,x-radius,y-radius,2*radius,2*radius);
+        g.DrawEllipse(&outline,x-radius,y-radius,2*radius,2*radius);
+        g.DrawLine(&outline,x-5,y,x+5,y);g.DrawLine(&outline,x,y-5,x,y+5);
+    };
+    for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id)){
+        if(!mechanismConnecting&&!mechanismConnectionDrag&&!stageCopyOwner&&!isolatedStructureEditing)
+            for(const auto& button:mechanismSplitButtons(r))plus(button.second,9);
+        for(size_t slot=0;slot<r.slots.size();slot++){
+            bool terminal=!r.explicitConnections()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});
+            if(!terminal)continue;
+            for(bool below:{false,true})if(!below||!r.vertical)plus(mechanismAddPosition(r,below,slot),12);
+        }
+    }
+ }
  if(selectedCycleArrow>=0&&selection==std::vector<int>{selectedCycleOwner}){Scene highlight;for(auto item:sc.items)if(item.owner==selectedCycleOwner&&item.reactionArrow==selectedCycleArrow){item.color="#008778";item.width+=1;highlight.items.push_back(item);}auto saved=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,highlight);g.Restore(saved);}
  if(mechanismConnectionDrag){Vec start=world(down);if(auto* r=reaction(connectionOwner);r&&connectionFrom>=0)start=reactionSlot(*r,size_t(connectionFrom));Object preview;preview.head=1;preview.color="#008778";preview.width=2;preview.points={start,world(mouse)};auto saved=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));Scene outline;outline.items=arrowPrimitives(preview);render(g,outline);g.Restore(saved);}
  if(selectedCycleArrow>=0&&selection==std::vector<int>{selectedCycleOwner}){auto path=mechanismConnectionPath(selectedCycleOwner,selectedCycleArrow);if(!path.empty()){Pen outline(accent,2);SolidBrush body(white);for(auto at:{path.front(),path.back()}){auto p=screen(at);g.FillEllipse(&body,float(p.x-6),float(p.y-6),12.f,12.f);g.DrawEllipse(&outline,float(p.x-6),float(p.y-6),12.f,12.f);}}}
  if(!inlineEdit)for(int id:selection){auto it=sc.objectBounds.find(id);if(it!=sc.objectBounds.end()){auto r=it->second;Vec p=screen({r.x,r.y});Pen pen(Color(150,0,135,120),1.5);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,float(p.x-4),float(p.y-4),float(r.w*zoom+8),float(r.h*zoom+8));}else if(auto a=doc.atom(id)){Vec p=screen(a->p);Pen pen(accent,1.5);g.DrawEllipse(&pen,float(p.x-8),float(p.y-8),16.f,16.f);}}
  if(selection.size()==1){auto found=sc.arrowPaths.find(selection.front());if(found!=sc.arrowPaths.end()&&found->second.size()==4){const auto& path=found->second;Pen guidePen(Color(170,0,135,120),1);guidePen.SetDashStyle(DashStyleDash);for(int i:{0,2}){Vec a=screen(path[i]),b=screen(path[i+1]);g.DrawLine(&guidePen,float(a.x),float(a.y),float(b.x),float(b.y));}Pen outline(accent,1.5);SolidBrush body(white),control(accent);for(int i=0;i<4;i++){Vec p=screen(path[i]);g.FillEllipse(i==1||i==2?&control:&body,float(p.x-5),float(p.y-5),10.f,10.f);g.DrawEllipse(&outline,float(p.x-5),float(p.y-5),10.f,10.f);}}}
- if(hoverAtom){Vec p=screen(doc.atom(hoverAtom)->p);Pen pen(accent,1);g.DrawEllipse(&pen,float(p.x-7),float(p.y-7),14.f,14.f);}if(boxing){Pen p(accent,1);p.SetDashStyle(DashStyleDash);g.DrawRectangle(&p,float(std::min(down.x,mouse.x)),float(std::min(down.y,mouse.y)),float(std::abs(down.x-mouse.x)),float(std::abs(down.y-mouse.y)));}if(drawing){if(tool==Orbital){auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,makeScene(draftOrbital(mouse),measure),false,true);g.Restore(transform);}else if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance){Document preview=doc;preview.objects.push_back(draftArrow(mouse));auto all=makeScene(preview,measure);Scene arrow;for(auto& item:all.items)if(item.owner==-1)arrow.items.push_back(item);auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,arrow,false,true);g.Restore(transform);}else{Pen p(accent,1.5);p.SetDashStyle(DashStyleDash);g.DrawLine(&p,float(down.x),float(down.y),float(mouse.x),float(mouse.y));}}g.Restore(state);
+ if(hoverAtom){Vec p=screen(doc.atom(hoverAtom)->p);Pen pen(accent,1);g.DrawEllipse(&pen,float(p.x-7),float(p.y-7),14.f,14.f);}if(boxing){Pen p(accent,1);p.SetDashStyle(DashStyleDash);g.DrawRectangle(&p,float(std::min(down.x,mouse.x)),float(std::min(down.y,mouse.y)),float(std::abs(down.x-mouse.x)),float(std::abs(down.y-mouse.y)));}if(drawing){if(tool==Orbital){auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,makeScene(draftOrbital(mouse),measure),false,true);g.Restore(transform);}else if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance||tool==Interaction){Document preview=doc;preview.objects.push_back(draftArrow(mouse));auto all=makeScene(preview,measure);Scene arrow;for(auto& item:all.items)if(item.owner==-1)arrow.items.push_back(item);auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,arrow,false,true);g.Restore(transform);}else{Pen p(accent,1.5);p.SetDashStyle(DashStyleDash);g.DrawLine(&p,float(down.x),float(down.y),float(mouse.x),float(mouse.y));}}g.Restore(state);
  float rx=float(ww-right);fill(g,{rx,float(top),float(right),float(wh-top-bottom)},palette.panel);const RectF rightClip(rx,89,float(right),float(std::max(0,wh-bottom-89)));
  rightOffset=std::min(rightOffset,std::max(0,684-(wh-bottom)));
  const auto rightHits=hits.size();auto rightState=g.Save();g.SetClip(rightClip);g.TranslateTransform(0,float(-rightOffset));

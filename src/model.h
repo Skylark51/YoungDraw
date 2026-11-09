@@ -35,7 +35,11 @@ struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; st
 };
 enum class ObjectKind { Line, Curve, Text, Ellipse, Rectangle, Image };
 struct ArrowCross { int index=-1; bool enabled=false; double width=4,size=14; std::string color="#ff0000"; };
-struct MechanismLink { int from=0,to=1; std::vector<int> members; }; // from -1: common external vertical spine.
+struct MechanismLink {
+    int from=0,to=1; // from -1: common external vertical spine.
+    std::vector<int> members;
+    double bend=0; // Signed quadratic control offset as a fraction of the chord length.
+};
 struct Object {
     int id=0; ObjectKind kind=ObjectKind::Line; std::vector<Vec> points;
     std::string text,color="#000000",imageHex,mime="image/png",font="Arial";
@@ -64,12 +68,23 @@ struct Reaction {
     double rowGap=100; // Minimum clear vertical space between structure boxes.
     bool manualConnections=false; // Empty links can intentionally mean no arrows.
     double arrowLength=0; // 0: caption-driven automatic length.
+    bool fixedFrames=false; // Keep the explicit column and row of each stage during sizing.
+    bool circularMerge=false; // Fit both directed branches to a shared circle.
     bool explicitConnections() const {return manualConnections||!links.empty();}
 };
 struct EnergyState { std::string label; double energy=0; std::vector<int> above,below; int marker=-1; };
 struct MechanismStage { std::string label; double start=0,end=100,fontSize=0; }; // Percent span; fontSize 0 matches state captions.
 // Empty color entries inherit the pathway color. Segment i joins states i and i+1.
 struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
+// One shared point between two paths on the same segment. Position is the
+// fraction of the gap between the adjacent plateaus.
+struct EnergyCrossing {
+    std::string label;
+    int segment=0, firstPath=0, secondPath=1;
+    double position=.5, energy=0;
+    std::optional<Vec> labelOffset; // Caption top center relative to the diamond, in plot points.
+    double leaderWidth=.85; // Actual stroke width in points; 0 hides the leader.
+};
 struct EnergyPlot {
     int id=0; Vec p; double width=520,height=320;
     std::string title="Reaction coordinate",unit="kcal/mol";
@@ -82,6 +97,7 @@ struct EnergyPlot {
     std::vector<EnergyState> states; std::vector<EnergySeries> series; int mode=3; bool showValues=true;
     bool thinLines=false; // Display preset; stored path widths remain editable in either mode.
     bool boldLevels=false; // Keep plateau strokes at their original weight in thin mode.
+    std::vector<EnergyCrossing> crossings;
 };
 struct Group { int id=0; std::vector<int> members; };
 struct Document {
