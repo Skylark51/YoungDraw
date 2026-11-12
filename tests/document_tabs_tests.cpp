@@ -417,6 +417,10 @@ int main(int argc,char** argv){
         }
         {
             auto originalDoc=doc;auto originalHistory=history;auto originalSelection=selection;bool originalDirty=dirty;auto originalOrigin=origin;double originalZoom=zoom;
+            // Hosted Windows desktops may cap the native window below the width
+            // required by these full-toolbar layout assertions.
+            const int nativeWidth=ww,nativeHeight=wh;
+            ww=std::max(1440,ww);wh=std::max(900,wh);
             Bitmap snapshot(ww,wh,PixelFormat32bppARGB);Graphics graphics(&snapshot);
             auto repaint=[&](){HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);};
             auto hit=[&](int id)->RectF{for(auto& h:hits)if(h.id==id)return h.box;return {};};
@@ -434,6 +438,7 @@ int main(int argc,char** argv){
                   hit(bondAnimationCommand).Height==hit(164).Height,"GIF icon matches the rotation controls after its separator");
             check(hit(164).GetRight()<1200,"all toolbar groups fit minimum window width");
             check(present(218)&&present(219)&&hit(150).GetBottom()<=wh-bottom,"orbital tools and style button fit the client height");
+            ww=nativeWidth;wh=nativeHeight;repaint();
             auto before=toNative(doc);command(183);repaint();
             check(present(137)&&present(139)&&present(138)&&present(141)&&present(151)&&!present(127)&&!present(126),"graph tab groups graph-only actions, including spin crossings");
             check(hit(151).Y==hit(137).Y&&!helpText(151).empty(),"spin crossing control fits in the graph tools row and has help");
@@ -494,6 +499,7 @@ int main(int argc,char** argv){
         {
             auto originalDoc=doc;auto originalHistory=history;auto originalSelection=selection;bool originalDirty=dirty;auto originalRepeat=repeatAction;
             BYTE originalKeys[256]{};GetKeyboardState(originalKeys);
+            cancel();
             auto press=[&](WPARAM k,bool ctrl,bool shift,bool alt){BYTE keys[256]{};keys[VK_CONTROL]=ctrl?0x80:0;keys[VK_SHIFT]=shift?0x80:0;keys[VK_MENU]=alt?0x80:0;SetKeyboardState(keys);SendMessageW(hwnd,alt?WM_SYSKEYDOWN:WM_KEYDOWN,k,0);SetKeyboardState(originalKeys);};
             doc=Document{};history.clear();int a=doc.addAtom({0,0}),b=doc.addAtom({30,0});doc.addBond(a,b);int c=doc.addAtom({100,80}),d=doc.addAtom({130,80});doc.addBond(c,d);selection={a,c};
             auto before=toNative(doc);press('M',true,true,true);
