@@ -7,6 +7,12 @@ namespace yd::editor {
 extern bool mechanismConnecting, mechanismConnectionDrag;
 extern int connectionOwner, connectionFrom, connectionEdge, connectionHandle;
 extern int selectedCycleOwner, selectedCycleArrow;
+extern int stageCopyOwner;
+extern std::set<size_t> stagesToCopy;
+
+void cancelStageCopy();
+void toggleStageCopy(Vec at);
+void finishStageCopy();
 
 void newReaction();
 void editReaction(int id);
@@ -18,6 +24,8 @@ void insertBranchArrows();
 void arrangeImported(bool editAfter=false);
 void editMechanismControls(int id);
 Vec mechanismAddPosition(const Reaction& r, bool below=false, size_t slot=size_t(-1));
+std::vector<std::pair<size_t,Vec>> mechanismSplitButtons(const Reaction& r);
+void insertMechanismLinkStage(int owner,size_t edge);
 std::optional<size_t> mechanismSlotAt(int owner,Vec p);
 std::vector<Vec> mechanismConnectionPath(int owner,int edge);
 bool beginMechanismConnection(Vec point);

@@ -8,6 +8,7 @@
 #include "win_editor_text.h"
 #include "cdxml.h"
 #include "mechanism_data.h"
+#include "office.h"
 #include "win_dialogs.h"
 #include "win_ui.h"
 #include <sstream>
@@ -17,17 +18,81 @@ namespace yd::editor {
 bool mechanismConnecting=false,mechanismConnectionDrag=false;
 int connectionOwner=0,connectionFrom=-1,connectionEdge=-1,connectionHandle=-1;
 int selectedCycleOwner=0,selectedCycleArrow=-1;
+int stageCopyOwner=0;
+std::set<size_t> stagesToCopy;
 
-void editBranchedReaction(int id){
-    auto* ptr=reaction(id);if(!ptr)return;Document before=doc;Reaction original=*ptr;makeMechanismGraph(original);ui::Table rows;
-    for(size_t i=0;i<original.slots.size();i++)rows.push_back({"구조",std::to_string(i+1),"","",original.slots[i].label,original.slots[i].energy});
-    for(size_t i=0;i<original.links.size();i++)rows.push_back({"화살표",std::to_string(i+1),std::to_string(original.links[i].from+1),std::to_string(original.links[i].to+1),i<original.above.size()?original.above[i]:"",i<original.below.size()?original.below[i]:""});
+void cancelStageCopy(){
+    if(stageCopyOwner)status=L"단계 선택 복사를 취소했습니다.";
+    stageCopyOwner=0;
+    stagesToCopy.clear();
+}
+void toggleStageCopy(Vec at){
+    if(auto stage=mechanismSlotAt(stageCopyOwner,world(at))){
+        if(!stagesToCopy.erase(*stage))stagesToCopy.insert(*stage);
+    }
+    status=std::to_wstring(stagesToCopy.size())+L"단계 선택 · 클릭: 선택/해제 · Ctrl+C 또는 Enter: 복사 · Esc: 취소";
+    redraw();
+}
+void finishStageCopy(){
+    if(stagesToCopy.empty()){
+        status=L"복사할 구조 칸을 하나 이상 클릭하세요.";
+    }else{
+        auto fragment=copyMechanismStages(doc,stageCopyOwner,stagesToCopy);
+        if(FAILED(office::copy(fragment)))throw std::runtime_error("클립보드 복사에 실패했습니다. 잠시 후 다시 시도하세요.");
+        const auto count=stagesToCopy.size();
+        cancelStageCopy();
+        status=std::to_wstring(count)+L"단계를 복사했습니다. 빈 캔버스나 다른 문서에서 Ctrl+V로 붙여넣으세요.";
+    }
+    redraw();
+}
+
+static bool editReactionGraph(const Document& base,Reaction original){
+    const int id=original.id;
+    makeMechanismGraph(original);
+    ui::Table rows;
+    const bool editablePositions=original.fixedFrames&&!original.circularMerge;
+    for(size_t i=0;i<original.slots.size();i++){
+        const auto p=original.slotGrid[i];
+        rows.push_back({"구조",std::to_string(i+1),editablePositions?number(p.x):"",editablePositions?number(p.y):"",original.slots[i].label,original.slots[i].energy});
+        if(editablePositions)rows.back().push_back("");
+    }
+    for(size_t i=0;i<original.links.size();i++){
+        const auto& link=original.links[i];
+        rows.push_back({"화살표",std::to_string(i+1),std::to_string(link.from+1),std::to_string(link.to+1),i<original.above.size()?original.above[i]:"",i<original.below.size()?original.below[i]:""});
+        if(editablePositions)rows.back().push_back(number(link.bend));
+    }
     auto update=[&](const ui::Table& cells)->std::wstring{
-        Reaction edited=mechanismGraphData(original,cells);
-        doc=before;*reaction(id)=edited;optimizeMechanism(doc,{id},false);redraw();UpdateWindow(win);return {};
+        Document candidate=base;
+        auto entry=std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[&](const Reaction& r){return r.id==id;});
+        *entry=mechanismGraphData(original,cells);
+        optimizeMechanism(candidate,{id},false);
+        doc=std::move(candidate);
+        if(original.fixedFrames)fit();else redraw();
+        UpdateWindow(win);
+        return {};
     };
-    auto result=ui::table(win,L"메커니즘 분기·프레임 편집",{L"구분",L"번호",L"시작 구조",L"도착 구조",L"이름 / TS 설명",L"에너지 (S=0 / 1 / 2)"},rows,update,true,L"행 추가·삭제 가능 · 새 행의 번호는 비워 두세요 · 시작 0: 공통 세로선 · 삭제한 단계의 구조는 캔버스에 유지",false,4);
-    if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();}}else{doc=before;redraw();}
+    std::vector<std::wstring> columns={L"구분",L"번호",L"시작 구조",L"도착 구조",L"이름 / TS 설명",L"에너지 (S=0 / 1 / 2)"};
+    std::wstring hint=L"행 추가·삭제 가능 · 새 행의 번호는 비워 두세요 · 시작 0: 공통 세로선 · 삭제한 단계의 구조는 캔버스에 유지";
+    if(editablePositions){
+        columns[2]=L"열 / 시작 구조";
+        columns[3]=L"행 / 도착 구조";
+        columns.push_back(L"곡률 (−2~2)");
+        hint=L"구조 행: 열·행 좌표 (오른쪽·아래가 +) · 화살표 행: 시작·도착 구조 번호 및 곡률 (0: 직선) · 새 행의 번호는 비워 두세요";
+    }
+    if(original.circularMerge)hint=L"원형 경로의 좌표·곡률은 연결에 맞춰 자동 배치됩니다 · 캔버스의 +: 해당 화살표에 중간체 삽입";
+    return ui::table(win,L"메커니즘 분기·프레임 편집",columns,rows,update,true,hint,false,4).has_value();
+}
+void editBranchedReaction(int id){
+    auto* r=reaction(id);if(!r)return;
+    Document before=doc;
+    double previousZoom=zoom;
+    Vec previousOrigin=origin;
+    if(editReactionGraph(before,*r)){
+        if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();}
+    }else{
+        doc=std::move(before);
+        zoom=previousZoom;origin=previousOrigin;redraw();
+    }
 }
 static bool editLinearReaction(const Document& base, const Reaction& original, Document& edited, bool preview){
     auto update=[&](const ui::Table& rows)->std::wstring{
@@ -46,24 +111,49 @@ void editReaction(int id){
     auto* r=reaction(id);
     if(!r)return;
     if(r->explicitConnections()){editBranchedReaction(id);return;}
-    Document before=doc, edited;
+    Document before=doc,edited;
     Reaction original=*r;
     if(editLinearReaction(before,original,edited,true)){
         if(toNative(edited)!=toNative(before)){history.checkpoint(before);changed();fit();}
     }else{doc=std::move(before);redraw();}
 }
 void newReaction(){
-    Document base=doc, edited;
-    Reaction r;
+    auto values=ui::form(win,L"반응 메커니즘 만들기",{{L"경로 양식","0",false,{
+        L"직선",L"가로 → 아래 → 촉매 순환",L"가로 → 아래 → 좌우 분기·합류",L"촉매 순환"}}});
+    if(!values)return;
+    Document before=doc,base=doc,edited;
+    const auto layout=static_cast<MechanismTemplate>(std::stoi(values->front()));
+    int horizontal=1,leftCount=2,rightCount=1;
+    if(layout==MechanismTemplate::SplitAndMerge){
+        auto counts=ui::form(win,L"원형 분기·합류 단계 수",{
+            {L"아래로 꺾이기 전 가로 화살표 수","1"},
+            {L"왼쪽 경로 중간체 수","2"},
+            {L"오른쪽 경로 중간체 수","1"}},[](const std::vector<std::string>& v)->std::wstring{
+                try{
+                    double horizontal=numeric(v[0],1,37),left=numeric(v[1],0,37),right=numeric(v[2],0,37);
+                    if(horizontal!=std::floor(horizontal)||left!=std::floor(left)||right!=std::floor(right))return L"개수는 정수로 입력하세요.";
+                    if(left+right==0)return L"좌우 경로 중 한 곳에 중간체를 한 개 이상 지정하세요.";
+                    if(horizontal+left+right+3>40)return L"반응물·분기점·생성물을 포함해 구조는 최대 40개입니다.";
+                    return {};
+                }catch(const std::exception& error){return ui::wide(error.what());}
+            });
+        if(!counts)return;
+        horizontal=std::stoi((*counts)[0]);leftCount=std::stoi((*counts)[1]);rightCount=std::stoi((*counts)[2]);
+    }
+    Reaction r=mechanismTemplate(layout,horizontal,leftCount,rightCount);
     r.id=base.nextId++;
-    r.p=center()-Vec{120,0};
-    r.slots={{"Reactant",{}},{"Intermediate",{}},{"Product",{}}};
-    r.above={"Step 1","Step 2"};
-    r.below={"",""};
+    r.p=r.cyclic||r.fixedFrames?center():center()-Vec{120,0};
     base.reactions.push_back(r);
-    if(!editLinearReaction(base,r,edited,false))return;
-    history.checkpoint(doc);
-    doc=std::move(edited);
+    double previousZoom=zoom;
+    Vec previousOrigin=origin;
+    bool applied=r.explicitConnections()?editReactionGraph(base,r):editLinearReaction(base,r,edited,false);
+    if(!applied){
+        doc=std::move(before);
+        zoom=previousZoom;origin=previousOrigin;redraw();
+        return;
+    }
+    history.checkpoint(before);
+    if(!r.explicitConnections())doc=std::move(edited);
     sidebarPage=0;
     selection={r.id};
     targetContainer=0;
@@ -73,14 +163,21 @@ void newReaction(){
 }
 void reactionSettings(int id){
     auto* ptr=reaction(id);if(!ptr)throw std::runtime_error("반응 블록을 선택하세요.");Document before=doc;Reaction old=*ptr;
+    std::vector<std::wstring> layouts={old.fixedFrames?L"사용자 지정 경로":L"가로 한 줄",L"촉매 순환",
+        L"ㄹ자 (아래로 이어 그리기)",L"세로 한 줄 (위에서 아래)"};
+    if(old.fixedFrames)layouts.push_back(L"원형 분기·합류");
     auto update=[&](const std::vector<std::string>& v)->std::wstring{try{
-        int mode=std::stoi(v[1]);if(old.explicitConnections()&&mode!=0)return L"분기 연결과 프레임을 유지하려면 가로 배치를 사용하세요.";double columns=numeric(v[3],1,40),gap=numeric(v[4],0,4000);
+        int mode=std::stoi(v[1]);if(old.explicitConnections()&&mode!=0&&mode!=4)return L"분기 연결을 유지하려면 사용자 지정 경로 또는 원형 분기·합류를 선택하세요.";double columns=numeric(v[3],1,40),gap=numeric(v[4],0,4000);
         if(columns!=std::floor(columns))return L"한 줄의 구조 수는 1~40의 정수로 입력하세요.";
         Document candidate=before;for(auto& r:candidate.reactions)if(r.id==id){r.unit=v[0];bool keepManual=mode==2&&!old.cyclic&&!old.vertical&&old.wrapColumns==0&&reactionRow(old,old.slots.empty()?0:old.slots.size()-1)>0&&columns==3;if(!keepManual){for(auto& slot:r.slots)slot.startsRow=false;r.wrapColumns=mode==2?int(columns):0;}r.arrowType=std::stoi(v[2]);r.vertical=mode==3;r.rowGap=gap;r.captionFontSize=numeric(v[5],0,100);if(v[6]=="1")r.hiddenArrows.clear();}
+        auto entry=std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[=](const Reaction& r){return r.id==id;});
+        entry->circularMerge=mode==4;
+        if(mode==4&&!old.circularMerge&&!arrangeCircularMerge(*entry,candidate.style))
+            return L"한 곳에서 좌우로 갈라져 한 곳에서 다시 만나는 경로를 연결하세요.";
         optimizeMechanism(candidate,{id},mode==1);doc=std::move(candidate);redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
     auto result=ui::form(win,L"메커니즘 설정",{{L"단위 (오른쪽 위)",old.unit,false,{},false,4,true},
-        {L"배치",old.cyclic?"1":old.vertical?"3":(old.wrapColumns>0||reactionRow(old,old.slots.empty()?0:old.slots.size()-1)>0)?"2":"0",false,{L"가로 한 줄",L"촉매 순환",L"ㄹ자 (아래로 이어 그리기)",L"세로 한 줄 (위에서 아래)"}},
+        {L"배치",old.circularMerge?"4":old.cyclic?"1":old.vertical?"3":(old.wrapColumns>0||reactionRow(old,old.slots.empty()?0:old.slots.size()-1)>0)?"2":"0",false,layouts},
         {L"화살표",std::to_string(old.arrowType),false,{L"정방향",L"평형"}},
         {L"ㄹ자: 한 줄의 구조 수 (TS 제외)",std::to_string(old.wrapColumns>0?old.wrapColumns:3)},
         {L"ㄹ자: 줄 사이 최소 여백 (pt)",number(old.rowGap)},
@@ -209,22 +306,33 @@ void editMechanismControls(int id){
         g.ScaleTransform(scale,scale);render(g,structure,false,true);
     };
     if(id==143){
+        if(r->circularMerge&&selectedCycleOwner==owner&&selectedCycleArrow>=0){
+            insertMechanismLinkStage(owner,size_t(selectedCycleArrow));
+            return;
+        }
         const size_t end=r->slots.size();
         auto value=ui::form(win,L"단계 추가",{{L"삽입할 위치 (1부터, 마지막 뒤: 단계 수+1)",std::to_string(end+1)}},{},{},stagePreview);
         if(!value)return;
         double n=numeric((*value)[0],1,double(end+1));
         if(n!=std::floor(n))throw std::runtime_error("정수 위치를 입력하세요.");
         const size_t position=size_t(n)-1;
+        size_t newStage=position;
         Document candidate=doc;
         for(auto& row:candidate.reactions)if(row.id==owner){
             if(position==end){
                 if(end>=40)throw std::runtime_error("단계는 최대 40개까지 추가할 수 있습니다.");
                 appendMechanismStage(row);
+            }else if(row.circularMerge){
+                std::vector<size_t> incoming;
+                for(size_t i=0;i<row.links.size();i++)if(row.links[i].to==int(position))incoming.push_back(i);
+                if(incoming.size()>1)throw std::runtime_error("합류점 앞에 삽입할 경로의 + 버튼을 선택하세요.");
+                if(incoming.empty())insertMechanismStage(row,position);
+                else newStage=splitMechanismLink(row,incoming.front());
             }else insertMechanismStage(row,position);
         }
         optimizeMechanism(candidate,{owner},position==end&&r->cyclic);
         history.checkpoint(doc);doc=std::move(candidate);
-        targetContainer=owner;targetSlot=position;selection={owner};changed();fit();return;
+        targetContainer=owner;targetSlot=newStage;selection={owner};changed();fit();return;
     }
     if(id==144||id==146){std::vector<ui::Field> fields={{L"제거하거나 합칠 단계 번호 (1부터)",std::to_string(selected+1)}};
         if(id==146)fields.push_back({L"구조와 연결을 받을 단계 번호 (1부터)",std::to_string(selected?selected:std::min(size_t(2),r->slots.size()))});
@@ -233,7 +341,7 @@ void editMechanismControls(int id){
         double stage=numeric((*value)[0],1,double(r->slots.size()));if(stage!=std::floor(stage))throw std::runtime_error("정수 단계 번호를 입력하세요.");int merge=-1;
         if(id==146){double n=numeric((*value)[1],1,double(r->slots.size()));if(n!=std::floor(n))throw std::runtime_error("정수 단계 번호를 입력하세요.");merge=int(n)-1;}
         Document candidate=doc;removeMechanismStage(candidate,owner,size_t(stage)-1,merge,id==144&&(*value)[1]=="1");
-        if(id==146&&std::any_of(candidate.reactions.begin(),candidate.reactions.end(),[&](const Reaction& row){return row.id==owner;}))optimizeMechanism(candidate,{owner});
+        if((id==146||r->circularMerge)&&std::any_of(candidate.reactions.begin(),candidate.reactions.end(),[&](const Reaction& row){return row.id==owner;}))optimizeMechanism(candidate,{owner});
         history.checkpoint(doc);doc=std::move(candidate);selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;changed();fit();return;}
 }
 Vec mechanismAddPosition(const Reaction& r,bool below,size_t slot){
@@ -241,7 +349,38 @@ Vec mechanismAddPosition(const Reaction& r,bool below,size_t slot){
     Vec last=reactionSlot(r,slot);
     if(below||(r.vertical&&!r.cyclic))return screen(last+Vec{0,r.slotHeight/2+mechanismCaptionHeight(r,doc.style)})+Vec{0,28};
     double direction=!r.explicitConnections()&&reactionRow(r,slot)%2?-1.:1.;
-    return screen(last+Vec{direction*r.slotWidth/2,0})+Vec{direction*28,0};
+    return screen(last+Vec{direction*r.slotWidth/2,0})+Vec{direction*(r.fixedFrames?48:28),0};
+}
+std::vector<std::pair<size_t,Vec>> mechanismSplitButtons(const Reaction& r){
+    std::vector<std::pair<size_t,Vec>> buttons;
+    if(!r.circularMerge||doc.isLocked(r.id)||r.slots.size()>=40||r.links.size()>=100)return buttons;
+    for(size_t i=0;i<r.links.size();i++){
+        if(r.links[i].from<0||contains(r.hiddenArrows,int(i)))continue;
+        if(auto arc=mechanismLinkArc(r,i,doc.style)){
+            const double angle=(arc->start+arc->end)/2;
+            buttons.push_back({i,screen(arc->point(angle))-Vec{std::cos(angle),std::sin(angle)}*20});
+        }else{
+            auto path=mechanismLinkPath(r,i,doc.style);
+            const Vec a=path[path.size()-2],b=path.back(),v=b-a;
+            Vec offset=std::abs(v.x)>std::abs(v.y)?Vec{0,20}:Vec{-20,0};
+            buttons.push_back({i,screen((a+b)*.5)+offset});
+        }
+    }
+    return buttons;
+}
+void insertMechanismLinkStage(int owner,size_t edge){
+    auto* original=reaction(owner);
+    if(!original||doc.isLocked(owner))return;
+    Document candidate=doc;
+    auto edited=std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[=](const Reaction& r){return r.id==owner;});
+    const auto stage=splitMechanismLink(*edited,edge);
+    optimizeMechanism(candidate,{owner});
+    history.checkpoint(doc);
+    doc=std::move(candidate);
+    selection={owner};targetContainer=owner;targetSlot=stage;
+    selectedCycleOwner=0;selectedCycleArrow=-1;
+    status=L"선택한 화살표에 중간체를 삽입했습니다. Ctrl+Z: 되돌리기";
+    changed();fit();
 }
 std::optional<size_t> mechanismSlotAt(int owner,Vec p){
     auto* r=reaction(owner);if(!r||doc.isLocked(owner))return {};std::optional<size_t> best;double distance=1e30;
@@ -275,7 +414,7 @@ std::optional<std::pair<int,int>> cycleArrowAt(Vec p){
     for(auto& item:scene().items){
         if(item.reactionArrow<0||doc.isLocked(item.owner))continue;
         auto closeTo=[&](Vec a,Vec b){Vec v=b-a;double ll=v.x*v.x+v.y*v.y;double t=ll>1e-9?std::clamp(((p-a).x*v.x+(p-a).y*v.y)/ll,0.,1.):0;return (p-a-v*t).length()<=tolerance;};
-        if(item.type==Primitive::Bezier&&item.points.size()==4){Vec a=item.points[0];for(int j=1;j<=64;j++){double t=j/64.,u=1-t;Vec b=item.points[0]*(u*u*u)+item.points[1]*(3*u*u*t)+item.points[2]*(3*u*t*t)+item.points[3]*(t*t*t);if(closeTo(a,b))return std::make_pair(item.owner,item.reactionArrow);a=b;}}
+        if(item.type==Primitive::Bezier)for(size_t i=0;i+3<item.points.size();i+=3){Vec a=item.points[i];for(int j=1;j<=64;j++){double t=j/64.,u=1-t;Vec b=item.points[i]*(u*u*u)+item.points[i+1]*(3*u*u*t)+item.points[i+2]*(3*u*t*t)+item.points[i+3]*(t*t*t);if(closeTo(a,b))return std::make_pair(item.owner,item.reactionArrow);a=b;}}
         if(item.type==Primitive::Line&&item.points.size()>=2)for(size_t j=1;j<item.points.size();j++)if(closeTo(item.points[j-1],item.points[j]))return std::make_pair(item.owner,item.reactionArrow);
         if(item.type==Primitive::Polygon)for(size_t j=0;j<item.points.size();j++)if(closeTo(item.points[j],item.points[(j+1)%item.points.size()]))return std::make_pair(item.owner,item.reactionArrow);
     }
@@ -283,9 +422,35 @@ std::optional<std::pair<int,int>> cycleArrowAt(Vec p){
 }
 void mechanismContextMenu(Vec at){
     HWND hwnd=win;
-    if(!finishInline(true))return;SetFocus(hwnd);if(auto hit=cycleArrowAt(world(at))){selection={hit->first};selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;}
+    if(stageCopyOwner){cancelStageCopy();redraw();return;}
+    if(!finishInline(true))return;
+    constexpr int copyStagesItem=224;
+    int copyOwner=0;
+    const Vec pointInDocument=world(at);
+    for(const auto& r:doc.reactions)
+        if(r.explicitConnections()&&!r.slots.empty()&&!doc.isLocked(r.id)&&mechanismSlotAt(r.id,pointInDocument)){
+            copyOwner=r.id;
+            break;
+        }
+    SetFocus(hwnd);if(auto hit=cycleArrowAt(world(at))){selection={hit->first};selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;if(!copyOwner)copyOwner=hit->first;}
     else if(!pickSlot(world(at))){int objectHit=doc.atomAt(world(at),10/zoom);if(!objectHit)objectHit=doc.bondAt(world(at),5/zoom);if(!objectHit)objectHit=objectAt(world(at));if(objectHit&&!contains(selection,objectHit))selection=groupedSelection({objectHit});}
-    HMENU menu=CreatePopupMenu();AppendMenuW(menu,activeStructureTarget()?MF_STRING:MF_STRING|MF_GRAYED,186,L"구조 고치기 · 독립 창…");for(auto entry:std::initializer_list<std::pair<int,const wchar_t*>>{{143,L"단계 삽입…"},{144,L"단계 제거…"},{146,L"두 단계 합치기…"},{145,L"드래그로 단계 연결"},{148,L"단계·연결 표 편집…"},{149,L"화살표 길이…"},{147,L"선택한 연결 제거"}})AppendMenuW(menu,MF_STRING,entry.first,entry.second);AppendMenuW(menu,MF_STRING,166,L"벤젠을 Ph로 축약 (Ctrl+Shift+P)");AppendMenuW(menu,MF_STRING,167,L"가져온 메커니즘 정리 (구조 보존)");AppendMenuW(menu,MF_STRING,168,L"화살표 중앙 X 설정…");AppendMenuW(menu,MF_STRING,169,L"메커니즘 분기 추가…");AppendMenuW(menu,MF_STRING,220,L"세로선 분기 화살표…");POINT point{LONG(at.x),LONG(at.y)};ClientToScreen(hwnd,&point);int chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,hwnd,nullptr);DestroyMenu(menu);if(chosen)command(chosen);redraw();
+    if(!copyOwner)copyOwner=objectAt(pointInDocument);
+    auto* copyReaction=reaction(copyOwner);
+    HMENU menu=CreatePopupMenu();
+    if(!isolatedStructureEditing&&copyReaction&&copyReaction->explicitConnections()&&!copyReaction->slots.empty()&&!doc.isLocked(copyOwner))
+        AppendMenuW(menu,MF_STRING,copyStagesItem,L"원하는 단계만 복사…");
+    AppendMenuW(menu,activeStructureTarget()?MF_STRING:MF_STRING|MF_GRAYED,186,L"구조 고치기 · 독립 창…");for(auto entry:std::initializer_list<std::pair<int,const wchar_t*>>{{143,L"단계 삽입…"},{144,L"단계 제거…"},{146,L"두 단계 합치기…"},{145,L"드래그로 단계 연결"},{148,L"단계·연결 표 편집…"},{149,L"화살표 길이…"},{147,L"선택한 연결 제거"}})AppendMenuW(menu,MF_STRING,entry.first,entry.second);AppendMenuW(menu,MF_STRING,166,L"벤젠을 Ph로 축약 (Ctrl+Shift+P)");AppendMenuW(menu,MF_STRING,167,L"가져온 메커니즘 정리 (구조 보존)");AppendMenuW(menu,MF_STRING,168,L"화살표 중앙 X 설정…");AppendMenuW(menu,MF_STRING,169,L"메커니즘 분기 추가…");AppendMenuW(menu,MF_STRING,220,L"세로선 분기 화살표…");POINT point{LONG(at.x),LONG(at.y)};ClientToScreen(hwnd,&point);int chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,hwnd,nullptr);DestroyMenu(menu);if(chosen==copyStagesItem){
+        stageCopyOwner=copyOwner;
+        stagesToCopy.clear();
+        selection.clear();
+        targetContainer=0;
+        selectedCycleOwner=0;
+        selectedCycleArrow=-1;
+        mechanismConnecting=false;
+        tool=Select;
+        status=L"복사할 구조 칸을 클릭하세요. Ctrl+C 또는 Enter: 복사 · Esc: 취소";
+    }else if(chosen)command(chosen);
+    redraw();
 
 }
 bool deleteSelectedCycleArrow(){

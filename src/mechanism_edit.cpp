@@ -1,4 +1,5 @@
 #include "model.h"
+#include "structure_templates.h"
 #include "scene.h"
 #include "mechanism_data.h"
 #include <functional>
@@ -89,7 +90,7 @@ int collapsePhenyl(Document& d,const std::vector<int>& selection){
     }
     int count=0;
     for(auto& ring:rings){bool valid=true;int attachment=0,external=0,doubles=0,aromatics=0;std::vector<int> edges;
-        for(int id:ring){auto* a=d.atom(id);if(!a||a->charge||a->isotope||a->radical||!a->label.empty()||!a->labelRuns.empty()){valid=false;break;}}
+        for(int id:ring){auto* a=d.atom(id);if(!a||a->charge||a->isotope||a->radical||a->protect||a->mullikenSpin||!a->label.empty()||!a->labelRuns.empty()){valid=false;break;}}
         if(!valid)continue;
         for(auto& b:d.bonds){bool a=has(ring,b.a),z=has(ring,b.b);if(a&&z){edges.push_back(b.id);doubles+=b.kind==BondKind::Double;aromatics+=b.kind==BondKind::Aromatic;if(b.kind!=BondKind::Single&&b.kind!=BondKind::Double&&b.kind!=BondKind::Aromatic)valid=false;}
             else if(a||z){external++;attachment=a?b.a:b.b;if(b.kind!=BondKind::Single)valid=false;}}
@@ -104,6 +105,69 @@ int collapsePhenyl(Document& d,const std::vector<int>& selection){
         eraseExact(d,removed);auto* a=d.atom(attachment);a->label="Ph";a->labelRuns.clear();a->explicitH=0;count++;
     }return count;
 }
+int collapseFunctionalGroups(Document& d,const std::vector<int>& selection,const std::string& abbreviation){
+    if(selection.empty())return 0;
+    std::vector<const StructureTemplate*> patterns;
+    for(const auto& entry:functionalGroups())
+        if(abbreviation.empty()||abbreviation==entry.abbreviation)patterns.push_back(&entry);
+    std::stable_sort(patterns.begin(),patterns.end(),[](const auto* a,const auto* b){
+        return a->drawing.atoms.size()>b->drawing.atoms.size();
+    });
+    int count=0;
+    for(const auto* pattern:patterns){
+        std::vector<int> atoms;
+        for(const auto& a:d.atoms)atoms.push_back(a.id);
+        std::vector<std::vector<int>> matches;
+        matchTemplate(d,atoms,pattern->drawing,true,[&](const std::vector<int>& ids){
+            if(std::any_of(ids.begin(),ids.end(),[&](int id){return has(selection,id);})||
+               std::any_of(d.bonds.begin(),d.bonds.end(),[&](const Bond& b){
+                   return has(selection,b.id)&&has(ids,b.a)&&has(ids,b.b);
+               }))matches.push_back(ids);
+        });
+        std::set<int> consumed, retainedNeighbors;
+        for(const auto& ids:matches){
+            if(std::any_of(ids.begin(),ids.end(),[&](int id){
+                return consumed.count(id)||retainedNeighbors.count(id)||!d.atom(id);
+            }))continue;
+            std::vector<int> removed(ids.begin()+1,ids.end());
+            const int root=ids.front();
+            int neighbor=0;
+            for(const auto& b:d.bonds){
+                const bool a=has(ids,b.a), z=has(ids,b.b);
+                if(a&&z)removed.push_back(b.id);
+                if(a!=z&&(a?b.a:b.b)==root&&b.kind==BondKind::Single&&b.customOrder.empty()&&b.customDisplay.empty())
+                    neighbor=a?b.b:b.a;
+            }
+            if(!neighbor||consumed.count(neighbor))continue;
+            auto split=[&](const std::vector<int>& members){
+                const bool containsRoot=has(members,root);
+                return std::any_of(ids.begin()+1,ids.end(),[&](int id){return has(members,id)!=containsRoot;});
+            };
+            bool spansSlots=false;
+            for(const auto& r:d.reactions)for(const auto& slot:r.slots)spansSlots|=split(slot.members);
+            for(const auto& p:d.plots)for(const auto& state:p.states)spansSlots|=split(state.above)||split(state.below);
+            if(spansSlots)continue;
+            for(auto& o:d.objects)if(has(removed,o.sourceAtom)||has(removed,o.targetAtom)||has(removed,o.sourceBond)||has(removed,o.targetBond)){
+                o.points=routeArrow(d,o);
+                o.autoRoute=false;
+                o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;
+            }
+            eraseExact(d,removed);
+            auto& a=*d.atom(root);
+            a.label=pattern->abbreviation;
+            const auto digit=a.label.find('2');
+            if(digit!=std::string::npos)a.label.replace(digit,1,"_{2}");
+            if(a.label=="CF3")a.label="CF_{3}";
+            a.charge=0;
+            a.explicitH=0;
+            consumed.insert(ids.begin(),ids.end());
+            retainedNeighbors.insert(neighbor);
+            ++count;
+        }
+    }
+    return count;
+}
+
 void normalizeChemicalLabels(Document& d,const std::vector<int>& selection){
     auto normalize=[](std::string& text,std::vector<TextRun>& runs){
         if(runs.empty()){text=chemicalScripts(text);return;}
@@ -166,7 +230,7 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
     std::vector<const Object*> arrows,stems;
     for(auto& o:d.objects)if(o.kind==ObjectKind::Line&&o.points.size()>=2&&!owned.count(o.id)&&selected({o.id})){
         if(o.head)arrows.push_back(&o);
-        else if(std::abs(o.points.front().x-o.points.back().x)<.1)stems.push_back(&o);
+        else if(!o.dash&&std::abs(o.points.front().x-o.points.back().x)<.1)stems.push_back(&o);
     }
     // A state may contain disconnected molecules/ions. Merge nearby components
     // only inside the same arrow-delimited region; never across a reaction arrow.
@@ -266,6 +330,9 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
             }
             consumed.push_back(o.id);
         }else if(o.kind==ObjectKind::Curve){size_t i=nearest(o.points.front());r.slots[i].members.push_back(o.id);}
+        else if(o.kind==ObjectKind::Ellipse&&!d.isLocked(o.id)){
+            r.slots[nearest(center(bounds(d,{o.id})))].members.push_back(o.id);
+        }
     }
     for(auto& p:notations){size_t edge=0;double best=1e30;for(size_t i=0;i<mids.size();i++){double v=(p.at-mids[i]).length();if(v<best){best=v;edge=i;}}if(best<180)r.links[edge].members.insert(r.links[edge].members.end(),p.ids.begin(),p.ids.end());}
     // Dissolve only grouping that crosses frame boundaries; per-molecule groups survive.

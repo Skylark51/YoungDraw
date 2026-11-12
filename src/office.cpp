@@ -6,6 +6,7 @@
 #include <shlobj.h>
 #include <cstring>
 #include <new>
+#include <stdexcept>
 
 namespace yd::office {
 using Microsoft::WRL::ComPtr;
@@ -122,7 +123,58 @@ public:
 };
 HRESULT start(Editor value,bool embedding,bool registerClass){editor=std::move(value);embeddingServer=embedding;auto hr=registerClass?registerServer():S_OK;if(FAILED(hr))return hr;if(embedding){auto factory=new Factory;hr=CoRegisterClassObject(classId,factory,CLSCTX_LOCAL_SERVER,REGCLS_SINGLEUSE,&registration);factory->Release();}return hr;}
 void stop(){OleFlushClipboard();if(registration)CoRevokeClassObject(registration);registration=0;}
+HRESULT exportEmbedded(const Document& document,const wchar_t* storagePath,const wchar_t* imagePath){
+    ComPtr<IDataObject> data;
+    data.Attach(new Object(document));
+    FORMATETC format{sourceFormat(),nullptr,DVASPECT_CONTENT,-1,TYMED_ISTORAGE};
+    STGMEDIUM medium{};
+    auto hr=data->GetData(&format,&medium);
+    if(FAILED(hr))return hr;
+    ComPtr<IStorage> target;
+    hr=StgCreateDocfile(storagePath,STGM_CREATE|STGM_WRITE|STGM_SHARE_EXCLUSIVE,0,&target);
+    if(SUCCEEDED(hr))hr=medium.pstg->CopyTo(0,nullptr,nullptr,target.Get());
+    if(SUCCEEDED(hr))hr=WriteClassStg(target.Get(),classId);
+    if(SUCCEEDED(hr))hr=target->Commit(STGC_DEFAULT);
+    ReleaseStgMedium(&medium);
+    if(FAILED(hr))return hr;
+    auto image=editor.picture(document);
+    if(!image)return E_FAIL;
+    auto copy=CopyEnhMetaFileW(image,imagePath);
+    DeleteEnhMetaFile(image);
+    if(!copy)return E_FAIL;
+    DeleteEnhMetaFile(copy);
+    return S_OK;
+}
 HRESULT copy(const Document& d){auto object=new(std::nothrow) Object(d);if(!object)return E_OUTOFMEMORY;auto hr=OleSetClipboard(object);object->Release();return hr;}
+Document fromChemDrawEmbedding(const std::string& bytes){
+    constexpr size_t limit=64*1024*1024;
+    if(bytes.empty()||bytes.size()>limit)throw std::runtime_error("ChemDraw 개체는 64 MB까지 열 수 있습니다.");
+
+    auto buffer=memory(bytes.data(),bytes.size());
+    if(!buffer)throw std::bad_alloc();
+    ComPtr<ILockBytes> backing;
+    if(FAILED(CreateILockBytesOnHGlobal(buffer,TRUE,&backing))){
+        GlobalFree(buffer);
+        throw std::runtime_error("ChemDraw 개체를 읽을 수 없습니다.");
+    }
+
+    ComPtr<IStorage> storage;
+    ComPtr<IStream> stream;
+    if(FAILED(StgOpenStorageOnILockBytes(backing.Get(),nullptr,STGM_READ|STGM_SHARE_EXCLUSIVE,nullptr,0,&storage))||
+       FAILED(storage->OpenStream(L"CONTENTS",nullptr,STGM_READ|STGM_SHARE_EXCLUSIVE,0,&stream)))
+        throw std::runtime_error("ChemDraw 개체에서 편집 원본을 찾을 수 없습니다.");
+
+    STATSTG stat{};
+    if(FAILED(stream->Stat(&stat,STATFLAG_NONAME))||stat.cbSize.QuadPart>limit)
+        throw std::runtime_error("ChemDraw 편집 원본의 크기를 읽을 수 없습니다.");
+    std::string cdx(size_t(stat.cbSize.QuadPart),'\0');
+    ULONG read=0;
+    if(FAILED(stream->Read(cdx.data(),ULONG(cdx.size()),&read))||read!=cdx.size())
+        throw std::runtime_error("ChemDraw 편집 원본을 읽을 수 없습니다.");
+    auto document=fromCdx(cdx);
+    if(document.allIds().empty())throw std::runtime_error("이 개체에서 열 수 있는 ChemDraw 구조나 텍스트를 찾지 못했습니다.");
+    return document;
+}
 bool editing(){return active!=nullptr;}
 HRESULT update(){return active?active->commit():S_FALSE;}
 void close(){if(active)active->Close(OLECLOSE_NOSAVE);}

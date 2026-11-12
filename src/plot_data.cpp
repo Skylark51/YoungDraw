@@ -5,6 +5,25 @@
 #include <cctype>
 #include <map>
 namespace yd {
+EnergyPlot spinMultiplicityPlot(){
+    EnergyPlot plot;
+    plot.width=460;
+    plot.height=285;
+    plot.title="Spin-state energies";
+    plot.xLabel="Spin multiplicity (2S + 1)";
+    plot.unit="kcal mol^{-1}";
+    plot.mode=independentEnergyLevels;
+    plot.states={{"S = 0",46.3},{"S = 1",21.1},{"S = 2",0.0}};
+    EnergySeries levels;
+    levels.values={46.3,21.1,0.0};
+    levels.levelColors={"#25282d","#b44758","#167d9a"};
+    levels.marker=3;
+    plot.series.push_back(std::move(levels));
+    return plot;
+}
+double plotStateFraction(const EnergyPlot& plot,size_t index){
+    return plot.states.at(index).position.value_or(double(index)/std::max(size_t(1),plot.states.size()-1));
+}
 EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std::string& leftName){
     const size_t n=original.states.size();
     if(n<2||n>50)throw std::runtime_error("양쪽 분기는 상태가 2~50개인 그래프에서 추가하세요 (분기 후 최대 99개).");
@@ -20,6 +39,11 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     std::vector<EnergyState> states;
     for(size_t i=n-1;i>0;i--){auto state=original.states[i];state.above.clear();state.below.clear();state.energy=left.values[i];states.push_back(state);}
     states.insert(states.end(),original.states.begin(),original.states.end());result.states=std::move(states);
+    for(size_t i=0;i<n;i++){
+        const auto position=i?plotStateFraction(original,i):0.;
+        result.states[n-1+i].position=.5+.5*position;
+        result.states[n-1-i].position=.5-.5*position;
+    }
     for(auto& path:result.series){
         std::vector<double> values(2*n-1,0);std::vector<bool> present(2*n-1,false);
         for(size_t i=0;i<n;i++)if(path.hasValue(i)){values[n-1+i]=path.values[i];present[n-1+i]=true;}
@@ -39,6 +63,7 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     for(size_t i=0;i<n;i++)if(i<source.levelColors.size())left.levelColors[n-1-i]=source.levelColors[i];
     for(size_t i=0;i+1<n;i++)if(i<source.segmentColors.size())left.segmentColors[n-2-i]=source.segmentColors[i];
     result.series.push_back(std::move(left));
+    for(auto& crossing:result.crossings)crossing.segment+=int(n)-1;
     result.stages.clear();
     auto addStage=[&](MechanismStage stage){
         if(stage.end-stage.start<1){double middle=(stage.start+stage.end)/2;stage.start=std::clamp(middle-.5,0.,99.);stage.end=stage.start+1;}
@@ -75,10 +100,40 @@ EnergyPlot publicationPlot(const EnergyPlot& original){
     for(auto& path:plot.series)path.width=std::max(path.width,3.5);
     return plot;
 }
+void validateEnergyCrossings(const EnergyPlot& plot){
+    std::set<int> segments;
+    for(const auto& crossing:plot.crossings){
+        if(!std::isfinite(crossing.leaderWidth)||crossing.leaderWidth<0||crossing.leaderWidth>6)
+            throw std::runtime_error("Crossing leader width must be between 0 and 6 pt.");
+        if(crossing.labelOffset&&(!std::isfinite(crossing.labelOffset->x)||!std::isfinite(crossing.labelOffset->y)||
+           std::abs(crossing.labelOffset->x)>1e4||std::abs(crossing.labelOffset->y)>1e4))
+            throw std::runtime_error("Invalid crossing label offset.");
+        if(crossing.label.empty()||crossing.segment<0||size_t(crossing.segment)+1>=plot.states.size()||
+           crossing.firstPath<0||size_t(crossing.firstPath)>=plot.series.size()||
+           crossing.secondPath<0||size_t(crossing.secondPath)>=plot.series.size()||
+           crossing.firstPath==crossing.secondPath||!std::isfinite(crossing.position)||
+           crossing.position<=0||crossing.position>=1||!std::isfinite(crossing.energy)||
+           std::abs(crossing.energy)>1e6||!segments.insert(crossing.segment).second)
+            throw std::runtime_error("Invalid crossing point. Use two distinct paths and one point per segment.");
+    }
+}
+bool hasCrossingPaths(const EnergyPlot& plot,const EnergyCrossing& crossing){
+    if(crossing.segment<0||size_t(crossing.segment)+1>=plot.states.size())return false;
+    for(int path:{crossing.firstPath,crossing.secondPath}){
+        if(path<0||size_t(path)>=plot.series.size())return false;
+        const auto& series=plot.series[size_t(path)];
+        if(series.values.size()!=plot.states.size())return false;
+        if(!series.present.empty()&&std::none_of(series.present.begin(),series.present.end(),[](bool value){return value;}))
+            return false;
+    }
+    return true;
+}
 EnergyAxis energyAxis(const EnergyPlot& plot){
     double low=0,high=0;bool first=true;
     auto include=[&](double v){if(!std::isfinite(v))return;if(first){low=high=v;first=false;}else{low=std::min(low,v);high=std::max(high,v);}};
     if(plot.series.empty()){for(auto& state:plot.states)include(state.energy);}else for(auto& path:plot.series)for(size_t i=0;i<path.values.size();i++)if(path.hasValue(i))include(path.values[i]);
+    if(plot.mode!=independentEnergyLevels)
+        for(const auto& crossing:plot.crossings)if(hasCrossingPaths(plot,crossing))include(crossing.energy);
     if(high-low<1e-8){high+=1;low-=1;}double margin=(high-low)*.22;low-=margin;high+=margin;
     double autoSpan=high-low;
     if(plot.yMin){if(!std::isfinite(*plot.yMin)||std::abs(*plot.yMin)>1e8)throw std::runtime_error("y축 최솟값이 올바르지 않습니다.");low=*plot.yMin;}
@@ -129,7 +184,19 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
         }
         series[k].levelColors=std::move(levels);series[k].segmentColors=std::move(segments);
         series[k].present=std::move(present);series[k].values=std::move(values);}
+    bool sameOrder=rows.size()==old.states.size();
+    for(size_t i=0;i<mapping.size();++i)sameOrder&=mapping[i]==int(i);
+    if(!sameOrder)for(auto& state:states)state.position.reset();
     plot.states=std::move(states);plot.series=std::move(series);
+    plot.crossings.clear();
+    for(auto crossing:old.crossings){
+        for(size_t i=0;i+1<mapping.size();i++){
+            if(mapping[i]!=crossing.segment||mapping[i+1]!=crossing.segment+1)continue;
+            crossing.segment=int(i);
+            plot.crossings.push_back(crossing);
+            break;
+        }
+    }
 }
 // Empty cells represent missing points, including in the first pathway.
 static std::optional<double> parseGridEnergy(const std::string& text){

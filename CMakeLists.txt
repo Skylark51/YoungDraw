@@ -6,7 +6,7 @@ if(MSVC)
   add_compile_options(/W4 /utf-8 /permissive-)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
-add_library(youngdraw_core src/model.cpp src/layout.cpp src/plot_data.cpp src/mechanism_data.cpp src/mechanism_graph.cpp src/mechanism_edit.cpp src/scene.cpp src/arrows.cpp)
+add_library(youngdraw_core src/model.cpp src/structure_templates.cpp src/layout.cpp src/plot_data.cpp src/mechanism_data.cpp src/mechanism_graph.cpp src/mechanism_edit.cpp src/scene.cpp src/arrows.cpp)
 target_include_directories(youngdraw_core PUBLIC src)
 if(WIN32)
   add_library(youngdraw_storage src/win_storage.cpp src/win_projects.cpp)
@@ -51,7 +51,8 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/youngdraw-icon.png"
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/themes/backrooms.jpg"
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/themes/nostalgia.jpg"
-    "${CMAKE_CURRENT_SOURCE_DIR}/resources/themes/horror.jpg")
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/themes/horror.jpg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/themes/professor-watching.png")
   target_link_libraries(YoungDraw PRIVATE youngdraw_editor)
 endif()
 enable_testing()

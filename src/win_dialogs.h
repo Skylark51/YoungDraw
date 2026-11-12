@@ -14,7 +14,8 @@ struct Field {std::wstring label;std::string value;bool multiline=false;std::vec
 using Table = std::vector<std::vector<std::string>>;
 using TablePreview = std::function<std::wstring(const Table&)>;
 using TableCellError = std::function<std::wstring(size_t column,const std::string& value)>;
-std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview={},bool scripts=false,const std::wstring& hint=L"",bool stages=false,int scriptColumn=-1,const TableCellError& cellError={});
+using TableColumnEdit = std::function<std::optional<std::wstring>(HWND,size_t column)>;
+std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview={},bool scripts=false,const std::wstring& hint=L"",bool stages=false,int scriptColumn=-1,const TableCellError& cellError={},const TableColumnEdit& columnEdit={});
 using Preview = std::function<std::wstring(const std::vector<std::string>&)>;
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& preview={},
     const std::vector<std::pair<std::wstring,std::vector<size_t>>>& tabs={},

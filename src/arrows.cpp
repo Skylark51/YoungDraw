@@ -15,6 +15,12 @@ double bondDistance(const Document& d,int id,Vec p){auto* bond=d.bond(id);if(!bo
 Vec bondPoint(const Document& d,int id,double t,Vec fallback){auto* bond=d.bond(id);if(!bond)return fallback;auto* a=d.atom(bond->a);auto* b=d.atom(bond->b);return a&&b?a->p+(b->p-a->p)*t:fallback;}
 }
 std::vector<Vec> routeArrow(const Document& d,const Object& o,const std::map<int,Rect>& measured){
+    if(o.autoRoute&&o.kind==ObjectKind::Line&&o.points.size()==2){
+        auto points=o.points;
+        if(auto* atom=d.atom(o.sourceAtom))points.front()=atom->p;
+        if(auto* atom=d.atom(o.targetAtom))points.back()=atom->p;
+        return points;
+    }
     if(!o.autoRoute||o.kind!=ObjectKind::Curve||o.points.size()!=4)return o.points;
     Vec a=bondPoint(d,o.sourceBond,o.sourceBondT,o.points.front()),b=bondPoint(d,o.targetBond,o.targetBondT,o.points.back());if(auto* atom=d.atom(o.sourceAtom))a=atom->p;if(auto* atom=d.atom(o.targetAtom))b=atom->p;
     Vec v=b-a;double length=v.length();if(length<.01)return o.points;Vec n{-v.y/length,v.x/length};

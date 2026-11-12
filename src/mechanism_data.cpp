@@ -9,6 +9,11 @@ namespace yd {
 namespace { MechanismMeasure captionMeasure;std::map<std::tuple<std::string,double,int>,double> captionWidths; }
 void setMechanismTextMeasure(MechanismMeasure measure){captionMeasure=std::move(measure);captionWidths.clear();}
 std::vector<Vec> mechanismLinkPath(const Reaction& r,size_t index,const Style& style){
+    if(auto arc=mechanismLinkArc(r,index,style)){
+        std::vector<Vec> path;
+        for(int i=0;i<=24;i++)path.push_back(arc->point(arc->start+(arc->end-arc->start)*i/24.));
+        return path;
+    }
     auto l=r.links.at(index);Vec b=reactionSlot(r,size_t(l.to));
     double edge=r.slotWidth/2+mechanismArrowMargin(r,style),font=mechanismFontSize(r,style);
     if(l.from<0){
@@ -16,6 +21,32 @@ std::vector<Vec> mechanismLinkPath(const Reaction& r,size_t index,const Style& s
         x-=edge+mechanismArrowLength(r,style);b.x-=edge;return {{x,b.y},b};
     }
     Vec source=reactionSlot(r,size_t(l.from));
+    Vec chord=b-source;
+    double margin=mechanismArrowMargin(r,style);
+    double halfHeight=r.slotHeight/2+margin;
+    if((r.fixedFrames||l.bend!=0)&&(std::abs(chord.x)>2*edge||std::abs(chord.y)>2*halfHeight+mechanismCaptionHeight(r,style))){
+        Vec normal{-chord.y,chord.x};
+        auto point=[&](double t){return source+chord*t+normal*(2*l.bend*t*(1-t));};
+        auto exit=[&](Vec center,const Slot& slot,bool reverse){
+            double bottom=halfHeight;
+            if(!slot.label.empty()||!slot.energy.empty())bottom+=mechanismCaptionHeight(r,style);
+            double inside=0,outside=1;
+            for(int i=0;i<24;i++){
+                double t=(inside+outside)/2;
+                Vec delta=point(reverse?1-t:t)-center;
+                if(std::abs(delta.x)<=edge&&delta.y>=-halfHeight&&delta.y<=bottom)inside=t;
+                else outside=t;
+            }
+            return outside;
+        };
+        double start=exit(source,r.slots[size_t(l.from)],false),end=1-exit(b,r.slots[size_t(l.to)],true);
+        if(start<end){
+            if(l.bend==0)return {point(start),point(end)};
+            std::vector<Vec> path;
+            for(int i=0;i<=24;i++)path.push_back(point(start+(end-start)*i/24.));
+            return path;
+        }
+    }
     double direction=b.x>=source.x?1.:-1.;
     if(std::abs(b.x-source.x)<2*edge+font){
         // Overlapping imported frames and same-column branches need an outside
@@ -44,7 +75,32 @@ std::vector<Vec> mechanismLinkPath(const Reaction& r,size_t index,const Style& s
     // Keep the common stem outside both the molecule and the full caption span.
     return {a,{x,a.y},{x,b.y},b};
 }
-Vec mechanismLinkCaption(const Reaction& r,size_t index,const Style& style){auto path=mechanismLinkPath(r,index,style);return (path[path.size()-2]+path.back())*.5;}
+Vec mechanismLinkCaption(const Reaction& r,size_t index,const Style& style){
+    if(auto arc=mechanismLinkArc(r,index,style)){
+        const double angle=(arc->start+arc->end)/2;
+        const double font=mechanismFontSize(r,style);
+        return arc->point(angle)+Vec{std::cos(angle),std::sin(angle)}*(font*3.5);
+    }
+    auto path=mechanismLinkPath(r,index,style);
+    const auto& link=r.links[index];
+    if(link.from>=0&&(path.size()==25||(r.fixedFrames&&path.size()==2))){
+        Vec middle=(path[(path.size()-1)/2]+path[path.size()/2])*.5;
+        Vec chord=reactionSlot(r,size_t(link.to))-reactionSlot(r,size_t(link.from));
+        double font=mechanismFontSize(r,style);
+        if(path.size()>5)middle.y+=std::copysign(1.,link.bend)*chord.x/chord.length()*font*2.5;
+        if(std::abs(chord.y)>std::abs(chord.x)*.45){
+            double direction=link.bend==0?1:(-chord.y*link.bend>=0?1:-1);
+            auto width=[&](const std::string& s){
+                return captionMeasure?captionMeasure(s,font,"Arial",style.labelFace):s.size()*font*.55;
+            };
+            double above=index<r.above.size()?width(r.above[index]):0;
+            double below=index<r.below.size()?width(r.below[index]):0;
+            middle.x+=direction*(std::max(above,below)/2+font);
+        }
+        return middle;
+    }
+    return (path[path.size()-2]+path.back())*.5;
+}
 
 double mechanismFontSize(const Reaction& r,const Style& style){return r.captionFontSize>0?r.captionFontSize:style.fontSize;}
 double mechanismArrowMargin(const Reaction& r,const Style& style){return std::max(14.,mechanismFontSize(r,style)*.8);}
@@ -85,8 +141,12 @@ double mechanismArrowLength(const Reaction& r,const Style& style){
     for(auto& raw:r.below)measureEnergy(raw);
     return std::max(font*3.,widest+font*.6);
 }
-double mechanismArrowWeight(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.1,font*.085)*std::sqrt(std::max(1.,mechanismArrowLength(r,style)/(font*6)));}
-double mechanismArrowHead(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.25,font/10)*std::sqrt(std::max(1.,mechanismArrowLength(r,style)/(font*6)));}
+static double mechanismArrowScale(const Reaction& r,const Style& style){
+    const double relative=std::sqrt(std::max(1.,mechanismArrowLength(r,style)/(mechanismFontSize(r,style)*6)));
+    return 1.+.75*(1.-1./relative);
+}
+double mechanismArrowWeight(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.35,font*.105)*mechanismArrowScale(r,style);}
+double mechanismArrowHead(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.35,font*.106)*mechanismArrowScale(r,style);}
 namespace {
 struct CycleBox {double x,y,w,h;};
 double cycleTextWidth(const std::string& text,double font){
@@ -105,6 +165,9 @@ double mechanismCycleNodeRadius(const Reaction& r,const Style& style){
     double font=mechanismFontSize(r,style),width=r.slotWidth;
     for(auto& slot:r.slots)width=std::max({width,cycleTextWidth(slot.label,font),cycleTextWidth(slot.energy,font)});
     return std::hypot(width/2,r.slotHeight/2+mechanismCaptionHeight(r,style));
+}
+double mechanismStageCaptionWidth(const Slot& slot,double font){
+    return std::max(cycleTextWidth(slot.label,font),cycleTextWidth(slot.energy,font));
 }
 Vec mechanismCycleTransitionPosition(const Reaction& r,size_t i,const Style& style,double radius){
     double font=mechanismFontSize(r,style),angle=-pi/2+2*pi*(i+.5)/std::max(size_t(1),r.slots.size());

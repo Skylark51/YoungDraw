@@ -13,7 +13,9 @@ struct Editor {
 };
 HRESULT start(Editor editor, bool embedding, bool registerClass=true);
 void stop();
+HRESULT exportEmbedded(const Document& document,const wchar_t* storagePath,const wchar_t* imagePath);
 HRESULT copy(const Document& document);
+Document fromChemDrawEmbedding(const std::string& bytes);
 bool editing();
 HRESULT update();
 void close();

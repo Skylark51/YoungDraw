@@ -5,3 +5,5 @@ IDI_YOUNGDRAW ICON "youngdraw.ico"
 201 RCDATA "themes/backrooms.jpg"
 202 RCDATA "themes/nostalgia.jpg"
 203 RCDATA "themes/horror.jpg"
+
+205 RCDATA "themes/professor-watching.png"

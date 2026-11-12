@@ -4,8 +4,11 @@
 
 namespace yd::editor {
 
+std::optional<Document> runStructureEditor(const Document& fragment,HWND owner);
 extern std::function<std::optional<Document>(const Document&)> structureEditor;
 void clean();
+void editMullikenSpin();
+void abbreviateGroups();
 std::vector<int> groupedSelection(std::vector<int> ids);
 bool groupedObject(int id);
 void groupSelected(bool ungroup);

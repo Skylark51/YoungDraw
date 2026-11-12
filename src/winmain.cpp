@@ -17,8 +17,39 @@
 using namespace yd;
 using namespace yd::editor;
 
+namespace {
+std::string readPowerPointEmbedding(){
+    constexpr size_t limit=64*1024*1024;
+    auto input=GetStdHandle(STD_INPUT_HANDLE);
+    if(!input||input==INVALID_HANDLE_VALUE)throw std::runtime_error("PowerPoint에서 개체를 전달하지 않았습니다.");
+    std::string bytes;
+    char buffer[16384];
+    for(;;){
+        DWORD read=0;
+        if(!ReadFile(input,buffer,sizeof(buffer),&read,nullptr)){
+            if(GetLastError()==ERROR_BROKEN_PIPE)break;
+            throw std::runtime_error("PowerPoint에서 개체를 읽을 수 없습니다.");
+        }
+        if(!read)break;
+        if(bytes.size()+read>limit)throw std::runtime_error("ChemDraw 개체는 64 MB까지 열 수 있습니다.");
+        bytes.append(buffer,read);
+    }
+    return bytes;
+}
+}
+
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIAware();int argc=0;LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);OleInitialize(nullptr);bool embedding=argc>1&&(_wcsicmp(argv[1],L"/Embedding")==0||_wcsicmp(argv[1],L"-Embedding")==0);GdiplusStartupInput start;ULONG_PTR token;GdiplusStartup(&token,&start,nullptr);setMechanismTextMeasure(measure);
  if(argc==2&&std::wstring(argv[1])==L"--copy-office-demo"){office::start({nullptr,[](const Document&){},[](){return coordinateDemo();},officePicture},false);auto result=office::copy(coordinateDemo());if(SUCCEEDED(result))result=OleFlushClipboard();LocalFree(argv);imageCache.clear();GdiplusShutdown(token);OleUninitialize();return FAILED(result)?int(result):0;}
+ if(argc==5&&std::wstring(argv[1])==L"--export-office"){
+     HRESULT result=E_FAIL;
+     try{
+         const auto input=fromCdxml(readFile(argv[2]));
+         result=office::start({nullptr,{}, {},officePicture},false,false);
+         if(SUCCEEDED(result))result=office::exportEmbedded(input,argv[3],argv[4]);
+     }catch(...){}
+     LocalFree(argv);imageCache.clear();GdiplusShutdown(token);OleUninitialize();
+     return FAILED(result)?int(result):0;
+ }
  if(argc==2&&std::wstring(argv[1])==L"--test-office"){office::start({nullptr,[](const Document&){},[](){return coordinateDemo();},officePicture},false,false);auto result=office::selfTest();LocalFree(argv);imageCache.clear();GdiplusShutdown(token);OleUninitialize();return FAILED(result)?int(result):0;}
  if(argc==3&&std::wstring(argv[1])==L"--export-lab-templates"){try{fs::create_directories(argv[2]);size_t i=0;for(auto& entry:labTemplates){auto d=fromNative(entry.data);auto path=fs::path(argv[2])/std::to_wstring(i++);writePreview(path.wstring()+L".png",d);writeFile(path.wstring()+L".svg",toSvg(makeScene(d)));writeFile(path.wstring()+L".cdxml",toCdxml(d));}writePreview((fs::path(argv[2])/L"chair.png").wstring(),chairTemplate());writeFile((fs::path(argv[2])/L"chair.svg").wstring(),toSvg(makeScene(chairTemplate())));LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(...){LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
  if(argc==3&&std::wstring(argv[1])==L"--export-demo"){try{writeFile(std::wstring(argv[2])+L".cdxml",toCdxml(doc));writeFile(std::wstring(argv[2])+L".svg",toSvg(makeScene(doc)));writeFile(std::wstring(argv[2])+L"-mechanism.ydraw",toNative(mechanismDemo()));writeFile(std::wstring(argv[2])+L"-mechanism.cdxml",toCdxml(mechanismDemo()));writeFile(std::wstring(argv[2])+L"-mechanism.svg",toSvg(makeScene(mechanismDemo())));writeFile(std::wstring(argv[2])+L"-coordinate.ydraw",toNative(coordinateDemo()));writeFile(std::wstring(argv[2])+L"-coordinate.cdxml",toCdxml(coordinateDemo()));writeFile(std::wstring(argv[2])+L"-coordinate.svg",toSvg(makeScene(coordinateDemo())));Document rigid=coordinateDemo();rigid.plots[0].mode=3;rigid.plots[0].series[0].dash=1;rigid.plots[0].series[0].color="#0e6d89";rigid.plots[0].states[1].marker=3;rigid.plots[0].states[3].marker=4;rigid.plots[0].series.push_back({"Path 2","#b44758",{0,26,10,19,-9.9},0,2,2,2.5});writeFile(std::wstring(argv[2])+L"-rigid.ydraw",toNative(rigid));writeFile(std::wstring(argv[2])+L"-rigid.cdxml",toCdxml(rigid));writeFile(std::wstring(argv[2])+L"-rigid.svg",toSvg(makeScene(rigid)));writePreview(std::wstring(argv[2])+L"-rigid.png",rigid);writePreview(std::wstring(argv[2])+L"-coordinate.png",coordinateDemo());writePreview(std::wstring(argv[2])+L"-mechanism.png",mechanismDemo());Document partial;int pa=partial.addAtom({30,45}),pb=partial.addAtom({56,30}),pc=partial.addAtom({82,45});partial.addBond(pa,pb);partial.addBond(pc,pb);delocalizeBonds(partial,partial.allIds());writeFile(std::wstring(argv[2])+L"-delocalized.ydraw",toNative(partial));writeFile(std::wstring(argv[2])+L"-delocalized.cdxml",toCdxml(partial));writeFile(std::wstring(argv[2])+L"-delocalized.svg",toSvg(makeScene(partial)));writePreview(std::wstring(argv[2])+L"-delocalized.png",partial);Document cyclic=mechanismDemo();optimizeMechanism(cyclic,{},true);writeFile(std::wstring(argv[2])+L"-cycle.ydraw",toNative(cyclic));writePreview(std::wstring(argv[2])+L"-cycle.png",cyclic);LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(...){LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
@@ -42,11 +73,20 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIA
  }
  if(argc==4&&std::wstring(argv[1])==L"--convert"){try{doc=fromCdxml(readFile(argv[2]));writeFile(std::wstring(argv[3])+L".ydraw",toNative(doc));writeFile(std::wstring(argv[3])+L".cdxml",toCdxml(doc));writeFile(std::wstring(argv[3])+L".svg",toSvg(scene()));LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(const std::exception& e){try{writeFile(std::wstring(argv[3])+L".error.txt",e.what());}catch(...){} LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
  isolatedStructureEditing=argc==4&&std::wstring(argv[1])==L"--edit-structure";if(isolatedStructureEditing)isolatedStructureResult=argv[3];
- StartupSplash splash(instance,!embedding && !isolatedStructureEditing && show!=SW_HIDE && show!=SW_SHOWMINIMIZED && show!=SW_SHOWMINNOACTIVE && show!=SW_MINIMIZE);
+ const bool powerPointImport=argc==2&&std::wstring(argv[1])==L"--open-powerpoint-chemdraw";
  std::vector<std::pair<Document,std::wstring>> startupDocuments;
+ if(powerPointImport){
+     try{startupDocuments.emplace_back(office::fromChemDrawEmbedding(readPowerPointEmbedding()),L"");}
+     catch(const std::exception& e){
+         MessageBoxW(nullptr,ui::wide(e.what()).c_str(),L"PowerPoint · YoungDraw",MB_OK|MB_ICONWARNING);
+         LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;
+     }
+ }
+ StartupSplash splash(instance,!embedding && !isolatedStructureEditing && show!=SW_HIDE && show!=SW_SHOWMINIMIZED && show!=SW_SHOWMINNOACTIVE && show!=SW_MINIMIZE);
  if(isolatedStructureEditing){try{startupDocuments.push_back({fromNative(readFile(argv[2])),argv[2]});}catch(const std::exception& e){MessageBoxW(nullptr,ui::wide(e.what()).c_str(),L"구조 편집",MB_OK|MB_ICONWARNING);LocalFree(argv);return 1;}}
- else if(!embedding)for(int i=1;i<argc;i++){try{startupDocuments.push_back({fromCdxml(readFile(argv[i])),argv[i]});}catch(...){}}
+ else if(!embedding&&!powerPointImport)for(int i=1;i<argc;i++){try{startupDocuments.push_back({fromCdxml(readFile(argv[i])),argv[i]});}catch(...){}}
  if(!startupDocuments.empty()){doc=std::move(startupDocuments[0].first);filePath=startupDocuments[0].second;Document beforeUpgrade=doc;if(!isolatedStructureEditing)normalizeChemicalLabels(doc);dirty=!isolatedStructureEditing&&(upgradeBondGeometry(doc)||toNative(doc)!=toNative(beforeUpgrade));if(dirty)history.checkpoint(beforeUpgrade);tool=Select;}
+ if(powerPointImport){dirty=true;status=L"PowerPoint의 ChemDraw 개체를 가져왔습니다. Ctrl+S로 CDXML을 저장할 수 있습니다.";}
 
  RECT work{};
  SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0);

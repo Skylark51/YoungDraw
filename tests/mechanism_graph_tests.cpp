@@ -9,6 +9,199 @@
 using namespace yd;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 int main(){try{
+    for(auto layout:{MechanismTemplate::FeedIntoCycle,MechanismTemplate::SplitAndMerge}){
+        Document d;
+        auto r=mechanismTemplate(layout);
+        r.id=d.nextId++;
+        const bool closed=layout==MechanismTemplate::FeedIntoCycle;
+        check(r.fixedFrames&&!r.cyclic,"mixed paths use editable explicit stage positions");
+        check(r.links[0].from==0&&r.links[0].to==1&&r.links[1].from==1&&r.links[1].to==2,
+              "both mixed paths enter through the same two directed steps");
+        if(closed){
+            check(r.links[5].from==5&&r.links[5].to==2,"mixed cycle closes back to its entry stage");
+        }else{
+            check(r.links[2].from==2&&r.links[5].from==2&&r.links[4].to==6&&r.links[6].to==6,
+                  "left and right branches converge at the same product");
+            for(const auto& link:r.links)check(link.from<link.to,"split/merge has only forward reactions");
+        }
+        d.reactions.push_back(r);
+        optimizeMechanism(d,{r.id});
+        d.reactions.front().unit="kcal/mol";
+        d.reactions.front().slots.front().energy="0 / S=1: 2";
+        const auto& placed=d.reactions.front();
+        for(size_t i=0;!r.circularMerge&&i<r.slotGrid.size();++i)
+            check((r.slotGrid[i]-placed.slotGrid[i]).length()<1e-9,"automatic sizing preserves fixed stage coordinates");
+        auto right=mechanismLinkPath(placed,0,d.style),down=mechanismLinkPath(placed,1,d.style);
+        check(right.size()==2&&right.front().y==right.back().y&&right.front().x<right.back().x,"horizontal entry arrow");
+        check(down.size()==2&&down.front().x==down.back().x&&down.front().y<down.back().y,"direct downward entry arrow");
+        auto restored=fromCdxml(toNative(d));
+        check(toNative(restored)==toNative(d),"fixed stages and curved links round-trip through native storage");
+        const Measure measure=[](const std::string& text,double size,const std::string&,int){
+            return text.size()*size*.6;
+        };
+        auto scene=makeScene(restored,measure);
+        double top=1e20,stageRight=-1e20;
+        for(size_t i=0;i<placed.slots.size();++i){
+            const Vec pos=reactionSlot(placed,i);
+            top=std::min(top,pos.y-placed.slotHeight/2);
+            stageRight=std::max(stageRight,pos.x+placed.slotWidth/2);
+        }
+        auto legend=[&](const std::string& text,const std::string& color)->const Primitive&{
+            auto item=std::find_if(scene.items.begin(),scene.items.end(),[&](const Primitive& p){
+                return p.owner==r.id&&p.text==text&&p.color==color;
+            });
+            check(item!=scene.items.end()&&item->points.front().y+item->fontSize<top,
+                  "branch legend is above all stages");
+            return *item;
+        };
+        const auto& unit=legend("Energy (kcal/mol)","#000000");
+        const auto& singlet=legend("M = 1","#000000");
+        const auto& triplet=legend("M = 3","#ff0000");
+        auto textRight=[&](const Primitive& p){
+            return p.points.front().x+measure(p.text,p.fontSize,p.font,p.face);
+        };
+        check(unit.points.front().y<singlet.points.front().y&&singlet.points.front().y==triplet.points.front().y,
+              "energy unit appears above the multiplicity row");
+        check(textRight(unit)>=stageRight-1e-7&&std::abs(textRight(unit)-textRight(triplet))<1e-7,
+              "both legend rows align at the upper right");
+        for(size_t e=2;e<r.links.size();e++){
+            check(mechanismLinkPath(placed,e,d.style).size()>5,"template branch is curved");
+            check(std::count_if(scene.items.begin(),scene.items.end(),[&](const Primitive& p){
+                return p.owner==r.id&&p.reactionArrow==int(e)&&p.type==Primitive::Bezier;
+            })==1,"each curved link renders as a selectable Bezier");
+        }
+    }
+    {
+        Document d;
+        auto r=mechanismTemplate(MechanismTemplate::SplitAndMerge,3,0,4);
+        r.id=d.nextId++;
+        d.reactions.push_back(r);
+        optimizeMechanism(d,{r.id});
+        auto& placed=d.reactions.front();
+        check(placed.slots.size()==10&&placed.links.size()==10,"independent straight and asymmetric branch counts");
+        check(reactionSlot(placed,0).y==reactionSlot(placed,3).y&&reactionSlot(placed,3).x==reactionSlot(placed,4).x,
+              "three horizontal arrows and a separate downward connector");
+        auto checkCircle=[&](const Reaction& path,size_t curvedLinks){
+            size_t count=0;
+            std::optional<MechanismArc> first;
+            for(size_t e=0;e<path.links.size();e++)if(auto arc=mechanismLinkArc(path,e,d.style)){
+                if(!first)first=arc;
+                check((first->center-arc->center).length()<1e-7&&std::abs(first->radius-arc->radius)<1e-7,
+                      "both branches use a single center and radius");
+                for(int stage:{path.links[e].from,path.links[e].to})
+                    check(std::abs((reactionSlot(path,size_t(stage))-arc->center).length()-arc->radius)<1e-5,
+                          "all branch structures lie on the common circle");
+                for(auto point:mechanismLinkPath(path,e,d.style))
+                    check(std::abs((point-arc->center).length()-arc->radius)<1e-7,"arc samples lie on a circle in world coordinates");
+                count++;
+            }
+            check(count==curvedLinks,"both directed branches are completely covered by circular connectors");
+        };
+        checkCircle(placed,6);
+        checkCircle(fromCdxml(toNative(d)).reactions.front(),6);
+        {
+            Document labeled=d;
+            auto& reaction=labeled.reactions.front();
+            reaction.arrowType=1;
+            reaction.spacing=reaction.slotWidth+1000;
+            const size_t edge=4;
+            reaction.above[edge]="TS /";
+            reaction.below[edge]="12.3 / -2.8 / 11.8";
+            const auto arc=*mechanismLinkArc(reaction,edge,labeled.style);
+            const double angle=(arc.start+arc.end)/2;
+            const Vec outward{std::cos(angle),std::sin(angle)};
+            const double font=mechanismFontSize(reaction,labeled.style);
+            const double clearance=arc.radius+2+mechanismArrowWeight(reaction,labeled.style)/2+font*.65;
+            const Measure measure=[](const std::string& text,double size,const std::string&,int){
+                return text.size()*size;
+            };
+            size_t energyRuns=0;
+            for(const auto& item:makeScene(labeled,measure).items){
+                if(item.owner!=reaction.id||item.textRole!=3||item.textIndex!=int(edge))continue;
+                ++energyRuns;
+                const Vec origin=item.points.front()-arc.center;
+                const double width=measure(item.text,item.fontSize,item.font,item.face);
+                for(double x:{0.,width})for(double y:{0.,item.fontSize*1.3})
+                    check((origin.x+x)*outward.x+(origin.y+y)*outward.y>=clearance-1e-7,
+                          "TS energy runs clear the outer circular branch");
+            }
+            check(energyRuns==5,"all three TS energies and their separators are rendered");
+        }
+        placed.above[4]="Existing transition";
+        placed.crosses={{4,true,2,12,"#ff0000"}};
+        auto stage=splitMechanismLink(placed,4);
+        optimizeMechanism(d,{r.id});
+        check(placed.above[4]=="Existing transition"&&placed.crosses.front().index==4&&placed.links[4].to==int(stage),
+              "adding a stage preserves the original transition metadata on the first segment");
+        checkCircle(placed,7);
+        removeMechanismStage(d,r.id,stage);
+        optimizeMechanism(d,{r.id});
+        checkCircle(placed,6);
+        auto vertical=splitMechanismLink(placed,3);
+        optimizeMechanism(d,{r.id});
+        check(reactionSlot(placed,vertical).x==reactionSlot(placed,4).x&&
+              reactionSlot(placed,3).y<reactionSlot(placed,vertical).y&&reactionSlot(placed,vertical).y<reactionSlot(placed,4).y,
+              "inserting into the downward feed keeps both new connectors vertical");
+        checkCircle(placed,6);
+        appendMechanismStage(placed,true,9);
+        optimizeMechanism(d,{r.id});
+        const auto outlet=splitMechanismLink(placed,placed.links.size()-1);
+        optimizeMechanism(d,{r.id});
+        check(reactionSlot(placed,outlet).x==reactionSlot(placed,9).x&&reactionSlot(placed,outlet).y>reactionSlot(placed,9).y,
+              "the outlet accepts an additional stage without changing the circle");
+        checkCircle(placed,6);
+    }
+    {
+        auto r=mechanismTemplate(MechanismTemplate::SplitAndMerge);
+        auto edited=mechanismGraphData(r,{{"구조","1","-2","1","A","",""},
+            {"구조","2","0","0","B","",""},{"화살표","1","1","2","TS","","0.4"}});
+        check(edited.slotGrid[0].x==-2&&edited.slotGrid[0].y==1&&edited.links[0].bend==.4,
+              "stage and connection table applies signed coordinates and curvature");
+        Document d;
+        r=mechanismTemplate(MechanismTemplate::CatalyticCycle);
+        r.id=d.nextId++;
+        d.reactions.push_back(mechanismGridData(r,mechanismRows(r)));
+        optimizeMechanism(d,{r.id},true);
+        auto scene=makeScene(d);
+        check(std::count_if(scene.items.begin(),scene.items.end(),[](const Primitive& p){
+            return p.reactionArrow>=0&&p.type==Primitive::Bezier;
+        })==4,"catalytic template renders the closing arrow after editing");
+    }
+    {
+        auto d=parallelMechanismFixture(true);
+        auto& r=d.reactions.front();
+        const auto note=d.addAtom({720,130},8);
+        r.links[4].members={note};
+        r.slots[2].label="Omitted\nlong\ncaption\nwith\nseveral\nlines";
+        r.crosses={{4,true,4,14,"#ff0000"}};
+        r.captionColors={{1,11,"#111111"},{2,4,"#222222"},{9,2,"#333333"}};
+        auto before=toNative(d);
+        auto fragment=copyMechanismStages(d,r.id,{1,11});
+        const auto& copy=fragment.reactions.front();
+        check(toNative(d)==before,"copy leaves the original mechanism intact");
+        check(copy.slots.size()==2&&copy.links.size()==1&&copy.links[0].from==0&&copy.links[0].to==1,
+              "copy keeps only the selected branch and remaps its connection");
+        check(copy.above[0]==r.above[4]&&copy.below[0]==r.below[4]&&copy.slots[1].energy==r.slots[11].energy,
+              "copy keeps stage and arrow captions and energies");
+        check(copy.links[0].members==std::vector<int>{note}&&fragment.atom(note)&&copy.crosses[0].index==0&&
+              copy.captionColors.size()==2&&copy.captionColors[0].index==1&&copy.captionColors[1].index==0,
+              "copy preserves arrow members and remaps the marks and colors");
+        check((reactionSlot(copy,1)-reactionSlot(r,11)).length()<1e-9&&fragment.groups.empty(),
+              "copy keeps frame positions and excludes groups spanning omitted branches");
+        check(!fragment.atom(r.slots[2].members.front()),"copy excludes sibling branch atoms");
+        const auto incoming=copyMechanismStages(d,r.id,{4});
+        check(incoming.reactions.front().links.size()==1&&incoming.reactions.front().links[0].from==-1,
+              "copy preserves an incoming connector from a common stem");
+        auto disconnected=copyMechanismStages(d,r.id,{1,7});
+        check(disconnected.reactions.front().explicitConnections()&&disconnected.reactions.front().links.empty(),
+              "disconnected selected stages do not gain an implicit arrow");
+        auto restored=fromCdxml(toNative(fragment));
+        Document pasted=d;
+        pasted.append(restored,{120,80});
+        const auto& appended=pasted.reactions.back();
+        check(appended.id!=r.id&&appended.slots[0].members!=r.slots[1].members&&
+              appended.links[0].members!=r.links[4].members,"paste creates independent stage and arrow members");
+    }
     {
         auto d=parallelMechanismFixture();auto original=d;int owner=d.reactions[0].id;optimizeMechanism(d,{owner});auto& r=d.reactions[0];
         double upper=r.slotGrid[0].y,lower=r.slotGrid[4].y;

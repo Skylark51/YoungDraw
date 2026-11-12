@@ -16,6 +16,210 @@ static bool overlaps(Rect a,Rect b){return a.x<b.x+b.w-0.01&&a.x+a.w>b.x+0.01&&a
 static EnergyPlot sample(){EnergyPlot p;p.id=1;p.p={30,90};p.width=760;p.height=400;p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#167d9a",{0,37.2,17.7,27.3,-9.9},0,2},{"Path 2","#b44758",{0,37.2,17.7,27.3,-9.9},1,2}};return p;}
 int main(){try{
     {
+        check(EnergyPlot{}.unit=="kcal mol^{-1}","new graphs default to inverse mole units");
+        Document d;auto p=sample();d.plots={p};const auto baseline=makeScene(d,measure);
+        d.plots[0].showYTicks=false;d.plots[0].energyAtTop=true;d.plots[0].legendOffset={47,63};
+        const auto edited=makeScene(d,measure);int e=0,vertical=0,marks=0;
+        for(const auto& item:edited.items){
+            if(item.type==Primitive::Text&&item.text=="E")++e;
+            if(item.rotation==-90)++vertical;
+            if(item.type==Primitive::Line&&item.points.size()==2&&item.points[0].x<80&&item.points[1].x==80&&item.points[0].y==item.points[1].y)++marks;
+            if(item.textRole==7){
+                auto old=std::find_if(baseline.items.begin(),baseline.items.end(),[&](const Primitive& b){return b.textRole==7&&b.type==item.type&&b.textIndex==item.textIndex;});
+                check(old!=baseline.items.end()&&std::abs(item.points[0].x-old->points[0].x-47)<1e-6&&std::abs(item.points[0].y-old->points[0].y-63)<1e-6,"legend offsets move labels and samples together");
+            }
+        }
+        check(e==1&&vertical==0&&marks==0,"E replaces the vertical header and hidden ticks leave no marks");
+        const auto spin=spinMultiplicityPlot();d.plots={spin};int italic=0;
+        for(const auto& item:makeScene(d,measure).items)if(item.type==Primitive::Text&&item.textRole==6&&(item.face&2))++italic;
+        check(spin.states[0].label=="S = 0"&&italic==3,"default spin states use italic S notation");
+#ifdef TEST_CDXML
+        d.plots={p};d.plots[0].showYTicks=false;d.plots[0].energyAtTop=true;d.plots[0].legendOffset={47,63};
+        for(const auto& copy:{fromNative(toNative(d)),fromCdxml(toCdxml(d))})check(toNative(copy)==toNative(d),"axis and legend options survive saving");
+#endif
+    }
+
+    {
+        for(double width:{320.,520.,760.})for(bool thin:{false,true}){
+            Document d;auto p=sample();p.width=width;p.height=320;p.energyAtTop=true;p.thinLines=thin;
+            p.yMin=-10;p.yMax=50;p.series[0].values[1]=50;d.plots={p};
+            auto scene=makeScene(d,measure);std::vector<Rect> header;double baseline=0;
+            for(const auto& item:scene.items)if(item.type==Primitive::Text&&item.textRole==0&&
+                (item.text=="E"||item.text=="(kcal mol"||item.text=="-1"||item.text==")")){
+                header.push_back(bounds(item));if(item.text=="E")baseline=item.points[0].y;
+                if(item.text=="(kcal mol"||item.text==")")check(std::abs(item.points[0].y-baseline)<1e-6,"E and unit share a single baseline");
+            }
+            check(header.size()==4,"top energy header preserves superscript unit runs");
+            for(const auto& item:scene.items)if(item.type==Primitive::Text&&(item.textRole==7||item.textRole==8||item.textRole==4))
+                for(auto box:header)check(!overlaps(box,bounds(item)),"top header stays clear of legends, title and energy values");
+            for(bool x:{false,true})for(bool y:{false,true}){
+                d.plots[0].showXAxis=x;d.plots[0].showYAxis=y;auto hidden=makeScene(d,measure);int e=0,xc=0;bool xs=false,ys=false;
+                for(const auto& item:hidden.items){
+                    if(item.type==Primitive::Text){e+=item.text=="E";xc+=item.text==p.xLabel;}
+                    if(item.type==Primitive::Line&&item.points.size()==2){auto a=item.points[0],b=item.points[1];
+                        xs|=a.y==b.y&&std::abs(a.y-hidden.plotBaselines.at(p.id))<1e-6&&std::abs(a.x-(p.p.x+50))<1e-6&&b.x-a.x>100;
+                        ys|=a.x==b.x&&std::abs(a.x-(p.p.x+50))<1e-6&&std::abs(a.y-hidden.plotBaselines.at(p.id))<1e-6&&a.y-b.y>100;
+                    }
+                }
+                check(e==int(y)&&xc==int(x)&&xs==x&&ys==y,"axis visibility removes each axis line and caption independently");
+#ifdef TEST_CDXML
+                for(const auto& copy:{fromNative(toNative(d)),fromCdxml(toCdxml(d))})check(toNative(copy)==toNative(d),"axis visibility survives native and CDXML roundtrips");
+#endif
+            }
+        }
+    }
+    {
+        Document d;
+        auto plot=spinMultiplicityPlot();
+        plot.id=d.nextId++;
+        d.plots.push_back(plot);
+        auto graph=makeScene(d,measure);
+        size_t plateaus=0,markers=0,labels=0,values=0,references=0;
+        for(const auto& item:graph.items){
+            if(item.color=="#b6bac0"&&item.type==Primitive::Line)++references;
+            if(item.type==Primitive::Text&&item.textRole==6)++labels;
+            if(item.type==Primitive::Text&&item.textRole==8)++values;
+            if(std::find(plot.series.front().levelColors.begin(),plot.series.front().levelColors.end(),item.color)==plot.series.front().levelColors.end())continue;
+            if(item.type==Primitive::Line){
+                check(item.points.size()==2&&item.points.front().y==item.points.back().y,
+                      "multiplicity levels have no connecting segments");
+                ++plateaus;
+            }
+            if(item.type==Primitive::Polygon&&item.filled)++markers;
+        }
+        check(plateaus==3&&markers==3&&labels==3&&values==3&&references==1,
+              "three spin multiplicities render as labeled independent levels with a zero reference");
+        check(graph.plotSnapPoints.at(plot.id).size()==9,"each independent level has three edit anchors");
+        d.plots.front()=energyGridData(plot,{{"Doublet (2)","-5.2"},{"Quartet (4)",""},{"Sextet (6)","10.4"}});
+        check(!d.plots.front().series.front().hasValue(1)&&makeScene(d,measure).plotSnapPoints.at(plot.id).size()==6,
+              "blank energies omit the level while leaving the multiplicity category");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(d)),fromCdxml(toCdxml(d))})
+            check(toNative(restored)==toNative(d),"independent energy levels and their edited data round-trip");
+#endif
+    }
+    {
+        Document d;
+        auto p=sample();
+        d.nextId=p.id+1;
+        p.states[1].position=.18;
+        d.plots={p};
+        const auto picture=makeScene(d,measure);
+        const auto& levels=picture.plotSnapPoints.at(p.id);
+        const auto level=std::find_if(levels.begin(),levels.end(),[](const auto& s){return s.state==1&&s.edge==0;});
+        check(level!=levels.end()&&std::abs(level->p.x-plotAnchor(p,1,true).x)<1e-8,
+              "custom horizontal level position and structure slot share the same anchor");
+        auto rows=parseEnergyTable(energyTable(p));
+        setEnergyData(p,rows);
+        check(p.states[1].position==.18,"energy edits preserve horizontal spacing");
+        std::swap(rows[1],rows[2]);
+        setEnergyData(p,rows);
+        check(!p.states[1].position&&!p.states[2].position,"reordering states safely rebalances horizontal positions");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(d)),fromCdxml(toCdxml(d))})
+            check(restored.plots.front().states[1].position==.18,"manual plot spacing round-trips");
+#endif
+    }
+    {
+        auto p=sample();
+        p.crossings={{"MECP",0,0,1,.42,9.458344}};
+        validateEnergyCrossings(p);
+        Document d;
+        d.plots={p};
+        const auto scene=makeScene(d,measure);
+        const Primitive* diamond=nullptr;
+        for(const auto& item:scene.items)
+            if(item.type==Primitive::Polygon&&item.closed&&item.points.size()==4)diamond=&item;
+        check(diamond!=nullptr,"crossing emits one outlined diamond");
+        const Vec crossing=(diamond->points[0]+diamond->points[2])*.5;
+        const bool halo=std::any_of(scene.items.begin(),scene.items.end(),[&](const Primitive& item){
+            return item.type==Primitive::Polygon&&item.color=="#ffffff"&&item.points.size()==4&&
+                   (item.points[0]+item.points[2]-crossing*2).length()<1e-8&&
+                   item.points[0].y<diamond->points[0].y;
+        });
+        check(halo,"crossing has a white knockout around its two-color diamond");
+        for(const auto& series:p.series){
+            const bool coloredFace=std::any_of(scene.items.begin(),scene.items.end(),[&](const Primitive& item){
+                return item.type==Primitive::Polygon&&item.color==series.color&&item.points.size()==3&&
+                       std::abs((item.points[0].x+item.points[2].x)*.5-crossing.x)<1e-8&&
+                       std::abs((item.points[0].y+item.points[2].y)*.5-crossing.y)<1.;
+            });
+            check(coloredFace,"crossing diamond has a face in each path color");
+            int incident=0;
+            for(const auto& item:scene.items)
+                if(item.type==Primitive::Line&&item.color==series.color&&item.dash==series.dash&&item.points.size()==2&&
+                   ((item.points[0]-crossing).length()<1e-8||(item.points[1]-crossing).length()<1e-8))incident++;
+            check(incident==2,"both paths meet exactly at the crossing");
+        }
+        check(bilateralPlot(p).crossings.front().segment==4,"branch insertion remaps crossing to original segment");
+        auto& styled=d.plots.front().crossings.front();
+        styled.labelOffset=Vec{26,46};
+        styled.leaderWidth=0;
+        auto shifted=makeScene(d,measure);
+        check((shifted.crossingCaptions.at(0).offset-Vec{26,46}).length()<1e-8,"caption offset moves the label alone");
+        auto isLeader=[](const Primitive& item){return item.type==Primitive::Line&&item.color=="#606060";};
+        check(std::none_of(shifted.items.begin(),shifted.items.end(),isLeader),"zero width hides the crossing leader");
+        styled.leaderWidth=2.25;
+        d.plots.front().thinLines=true;
+        shifted=makeScene(d,measure);
+        const auto leader=std::find_if(shifted.items.begin(),shifted.items.end(),isLeader);
+        check(leader!=shifted.items.end()&&std::abs(leader->width-2.25)<1e-8,"leader retains its chosen width in thin-plot mode");
+#ifdef TEST_CDXML
+        check(toNative(fromCdxml(toCdxml(d)))==toNative(d),"crossing survives CDXML and Office native state");
+#endif
+        auto invalid=p;
+        invalid.crossings.front().secondPath=0;
+        bool rejected=false;
+        try{validateEnergyCrossings(invalid);}catch(const std::runtime_error&){rejected=true;}
+        check(rejected,"crossing requires distinct paths");
+    }
+    {
+        EnergyPlot p=sample();
+        p.series={{"S = 0","#000000"},{"S = 1","#b44758"},{"S = 2","#167d9a"}};
+        p=energyGridData(p,{{"Reactant","-19.52","-20.41",""},
+                            {"TS","43.40","7.79",""},
+                            {"Product","3.59","0.00","-5.33"}});
+        p.crossings={{"S0-S1 MECP",1,0,1,.5,6.57},{"S1-S2 MECP",0,1,2,.5,6.92}};
+        validateEnergyCrossings(p);
+        Document d;
+        d.plots={p};
+        for(int mode:{0,1,2,3}){
+            d.plots[0].mode=mode;
+            const auto scene=makeScene(d,measure);
+            std::vector<Vec> diamonds;
+            for(const auto& item:scene.items)
+                if(item.type==Primitive::Polygon&&item.closed&&item.points.size()==4)
+                    diamonds.push_back((item.points[0]+item.points[2])*.5);
+            check(diamonds.size()==2&&diamonds[0].x<diamonds[1].x,
+                  "crossings render on both sides of the TS even with a missing pathway");
+            auto level=[&](int state,int path,int edge){
+                for(const auto& snap:scene.plotSnapPoints.at(p.id))
+                    if(snap.state==state&&snap.path==path&&snap.edge==(mode>=2?edge:0))return snap.p;
+                throw std::runtime_error("expected energy level is missing");
+            };
+            auto connected=[&](int path,Vec a,Vec b){
+                return std::any_of(scene.items.begin(),scene.items.end(),[&](const Primitive& item){
+                    return item.type==(mode==0?Primitive::Bezier:Primitive::Line)&&item.color==p.series[path].color&&
+                           (item.points.front()-a).length()<1e-8&&(item.points.back()-b).length()<1e-8;
+                });
+            };
+            check(connected(1,level(0,1,1),diamonds[0])&&connected(1,diamonds[0],level(1,1,-1))&&
+                  connected(1,level(1,1,1),diamonds[1])&&connected(1,diamonds[1],level(2,1,-1)),
+                  "one spin pathway participates in both crossings");
+            check(connected(2,diamonds[0],level(2,2,-1)),
+                  "the S = 2 path starts at the left crossing and skips the missing TS");
+            check(connected(0,level(0,0,1),level(1,0,-1))&&
+                  connected(0,level(1,0,1),diamonds[1])&&connected(0,diamonds[1],level(2,0,-1)),
+                  "the S = 0 path crosses only on the product side");
+        }
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(d)),fromCdxml(toCdxml(d))}){
+            check(!restored.plots.front().series[2].hasValue(1),"missing TS stays absent after saving");
+            check(makeScene(restored,measure).crossingCaptions.size()==2,"both crossings survive saving");
+        }
+#endif
+    }
+    {
         auto p=sample();p.series.resize(1);p.series[0].values={0,0,10,5,5};p.series[0].dash=1;p.thinLines=true;
         Document d;d.plots={p};
         for(int mode:{0,1,2,3}){
@@ -279,7 +483,7 @@ int main(){try{
         for(auto& item:scene.items)if(item.type==Primitive::Text){
             if(item.textRole==6)stateSize=item.fontSize;
             if(item.text==fitted.xLabel)xCaptionSize=item.fontSize;
-            if(item.text==fitted.yLabel+" ( "+fitted.unit+" )")yCaptionSize=item.fontSize;
+            if(item.rotation==-90&&item.text.rfind(fitted.yLabel+" ( ",0)==0)yCaptionSize=item.fontSize;
             if(item.text=="0")tickSize=item.fontSize;
         }
         check(stateSize>0&&std::abs(xCaptionSize-stateSize)<1e-6&&std::abs(yCaptionSize-stateSize)<1e-6&&std::abs(tickSize-stateSize)<1e-6,"automatic axis captions match tick and state-name sizes");

@@ -11,6 +11,8 @@
 #include "win_ui.h"
 #include <commdlg.h>
 #include <commctrl.h>
+#include <shobjidl.h>
+#include <wrl/client.h>
 #include <array>
 #include <deque>
 #include <tuple>
@@ -21,6 +23,7 @@ namespace yd::editor {
 namespace {
 
 constexpr int transitionSteps=36;
+constexpr int arrowSteps=transitionSteps/2;
 constexpr int maxStages=40;
 constexpr int frameDelay=4, stageDelay=38;
 constexpr int maxAtoms=300;
@@ -28,7 +31,12 @@ constexpr int maxAtoms=300;
 void keepStructure(Document& structure){
     if(structure.atoms.empty()||structure.atoms.size()>maxAtoms||structure.bonds.size()>maxAtoms*4)
         throw std::runtime_error("원자가 1~300개인 구조를 선택하세요.");
-    structure.objects.clear();
+    structure.objects.erase(std::remove_if(structure.objects.begin(),structure.objects.end(),
+        [](const Object& object){
+            return object.kind!=ObjectKind::Ellipse&&object.kind!=ObjectKind::Curve&&
+                !(object.kind==ObjectKind::Line&&(object.head||object.dash==2||object.autoRoute));
+        }),
+        structure.objects.end());
     structure.reactions.clear();
     structure.plots.clear();
     structure.groups.clear();
@@ -49,6 +57,8 @@ void keepStructure(Document& structure){
             throw std::runtime_error("구조에 잘못된 결합이 있습니다.");
     center=center*(1./structure.atoms.size());
     for(auto& atom:structure.atoms)atom.p=atom.p-center;
+    for(auto& object:structure.objects)
+        for(auto& point:object.points)point=point-center;
 }
 
 using AtomKey=std::tuple<int,int,std::string>;
@@ -84,26 +94,51 @@ bool sameDrawing(const Primitive& a,const Primitive& b){
                [](Vec x,Vec y){return (x-y).length()<1e-7;});
 }
 
+// Keep completed segments and split the segment containing the growing tip.
+std::vector<Vec> arrowPrefix(const std::vector<Vec>& points,bool cubic,double progress){
+    const size_t stride=cubic?3:1;
+    const double position=progress*((points.size()-1)/stride);
+    const size_t first=size_t(position)*stride;
+    const double t=position-size_t(position);
+    std::vector<Vec> result(points.begin(),points.begin()+first+1);
+    if(t==0)return result;
+    auto mix=[t](Vec a,Vec b){return a+(b-a)*t;};
+    const Vec a=mix(points[first],points[first+1]);
+    if(!cubic){result.push_back(a);return result;}
+    const Vec b=mix(points[first+1],points[first+2]),c=mix(points[first+2],points[first+3]);
+    const Vec d=mix(a,b),e=mix(b,c);
+    result.insert(result.end(),{a,d,mix(d,e)});
+    return result;
+}
+
 class Transition {
     Document start_,end_;
     std::vector<Vec> origins_,destinations_;
+    std::vector<std::optional<double>> startSpin_,endSpin_;
     std::map<int,int> owners_;
     std::map<int,size_t> matchedPositions_;
+    bool growsArrows_;
 public:
-    Transition(const Document& start,const Document& end):start_(start),end_(end){
+    Transition(const Document& start,const Document& end):start_(start),end_(end),
+        growsArrows_(std::any_of(start.objects.begin(),start.objects.end(),[](const Object& o){
+            return o.head&&(o.kind==ObjectKind::Line||o.kind==ObjectKind::Curve)&&o.points.size()>=2;
+        })){
         owners_=matchAtoms(start_,end_);
         if(owners_.empty())throw std::runtime_error("인접한 두 단계에 대응할 원자가 하나 이상 있어야 합니다.");
         std::map<int,size_t> indices;
         for(const auto& atom:start_.atoms){
             indices.emplace(atom.id,origins_.size());
             origins_.push_back(atom.p);
+            startSpin_.push_back(atom.mullikenSpin);
         }
         destinations_=origins_;
+        endSpin_.resize(origins_.size());
         for(const auto& atom:end_.atoms){
             auto found=owners_.find(atom.id);
             if(found==owners_.end())continue;
             auto index=indices.at(found->second);
             destinations_[index]=atom.p;
+            endSpin_[index]=atom.mullikenSpin;
             matchedPositions_.emplace(atom.id,index);
         }
         std::map<BondKey,int> bonds;
@@ -114,16 +149,80 @@ public:
             auto found=bonds.find(bondKey(b,a->second,z->second));
             if(found!=bonds.end())owners_.emplace(b.id,found->second);
         }
+        std::map<std::pair<int,int>,std::deque<int>> contacts;
+        for(const auto& o:start_.objects)
+            if(o.kind==ObjectKind::Line&&!o.head&&o.autoRoute&&o.sourceAtom&&o.targetAtom)
+                contacts[{o.sourceAtom,o.targetAtom}].push_back(o.id);
+        for(const auto& o:end_.objects){
+            if(o.kind!=ObjectKind::Line||o.head||!o.autoRoute)continue;
+            auto a=owners_.find(o.sourceAtom),b=owners_.find(o.targetAtom);
+            if(a==owners_.end()||b==owners_.end())continue;
+            auto& matches=contacts[{a->second,b->second}];
+            if(matches.empty())continue;
+            owners_.emplace(o.id,matches.front());
+            matches.pop_front();
+        }
     }
 
-    Scene sceneAt(double t){
-        for(size_t i=0;i<start_.atoms.size();++i)start_.atoms[i].p=origins_[i]*(1-t)+destinations_[i]*t;
+    double structureProgress(double progress) const {
+        return growsArrows_?std::max(0.,progress*2-1):progress;
+    }
+    bool hasGrowingArrows() const {return growsArrows_;}
+
+    Document intermediate(double t,bool useEnd) const {
+        Document structure=useEnd?end_:start_;
+        for(size_t i=0;i<structure.atoms.size();++i){
+            auto& atom=structure.atoms[i];
+            const auto matched=matchedPositions_.find(atom.id);
+            if(useEnd&&matched==matchedPositions_.end())continue;
+            const size_t index=useEnd?matched->second:i;
+            atom.p=origins_[index]*(1-t)+destinations_[index]*t;
+            if(startSpin_[index]&&endSpin_[index])atom.mullikenSpin=spinAt(index,t);
+        }
+        structure.objects.erase(std::remove_if(structure.objects.begin(),structure.objects.end(),
+            [](const Object& o){return o.head!=0;}),structure.objects.end());
+        return structure;
+    }
+    double spinAt(size_t index,double t) const {
+        return *startSpin_[index]*(1-t)+*endSpin_[index]*t;
+    }
+
+    Scene sceneAt(double progress,bool animateSpin=true){
+        const double t=structureProgress(progress);
+        for(size_t i=0;i<start_.atoms.size();++i){
+            auto& atom=start_.atoms[i];
+            atom.p=origins_[i]*(1-t)+destinations_[i]*t;
+            atom.mullikenSpin=animateSpin&&startSpin_[i]&&endSpin_[i]?
+                std::optional<double>(spinAt(i,t)):startSpin_[i];
+        }
         for(auto& atom:end_.atoms){
             auto it=matchedPositions_.find(atom.id);
-            if(it!=matchedPositions_.end())atom.p=start_.atoms[it->second].p;
+            if(it==matchedPositions_.end())continue;
+            const auto i=it->second;
+            atom.p=start_.atoms[i].p;
+            atom.mullikenSpin=animateSpin&&startSpin_[i]&&endSpin_[i]?
+                std::optional<double>(spinAt(i,t)):endSpin_[i];
         }
-        auto before=makeScene(start_,measure), after=makeScene(end_,measure);
+        auto before=makeScene(start_,measure);
+        auto removeArrows=[](Scene& scene){
+            scene.items.erase(std::remove_if(scene.items.begin(),scene.items.end(),
+                [&](const Primitive& item){return scene.arrowPaths.count(item.owner)!=0;}),scene.items.end());
+        };
+        if(growsArrows_&&progress==.5)return before;
+        removeArrows(before);
+        if(growsArrows_&&progress>0&&progress<.5){
+            for(auto object:start_.objects){
+                auto path=before.arrowPaths.find(object.id);
+                if(path==before.arrowPaths.end()||path->second.size()<2)continue;
+                const bool cubic=object.kind==ObjectKind::Curve&&path->second.size()>=4&&(path->second.size()-1)%3==0;
+                object.points=arrowPrefix(path->second,cubic,progress*2);
+                auto pieces=arrowPrimitives(object);
+                before.items.insert(before.items.end(),pieces.begin(),pieces.end());
+            }
+        }
         if(t==0)return before;
+        auto after=makeScene(end_,measure);
+        removeArrows(after);
         if(t==1)return after;
 
         std::map<int,std::vector<size_t>> byOwner;
@@ -232,19 +331,58 @@ void gifFrame(std::string& bytes,Bitmap& bitmap,int width,int height,int delay,b
     bytes+='\0';
 }
 
-std::optional<std::wstring> animationFile(const wchar_t* title,bool save=false,HWND owner=nullptr){
+constexpr auto animationPreferences=L"Software\\YoungDraw\\Animation";
+constexpr auto gifFolderPreference=L"LastGifFolder";
+
+void rememberGifFolder(const std::wstring& path){
+    const auto folder=fs::path(path).parent_path().wstring();
+    RegSetKeyValueW(HKEY_CURRENT_USER,animationPreferences,gifFolderPreference,REG_SZ,
+        folder.c_str(),DWORD((folder.size()+1)*sizeof(wchar_t)));
+}
+
+std::optional<std::wstring> gifSaveFile(HWND owner){
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IFileSaveDialog> picker;
+    if(FAILED(CoCreateInstance(CLSID_FileSaveDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&picker))))
+        throw std::runtime_error("GIF 저장 창을 열 수 없습니다.");
+    const COMDLG_FILTERSPEC filter={L"Animated GIF",L"*.gif"};
+    picker->SetFileTypes(1,&filter);
+    picker->SetDefaultExtension(L"gif");
+    picker->SetFileName(L"bond-animation.gif");
+    picker->SetTitle(L"결합 애니메이션 GIF 저장");
+    picker->SetOptions(FOS_FORCEFILESYSTEM|FOS_NOCHANGEDIR|FOS_PATHMUSTEXIST|FOS_OVERWRITEPROMPT);
+
+    wchar_t folder[32768]{};
+    DWORD bytes=sizeof(folder);
+    std::error_code error;
+    if(RegGetValueW(HKEY_CURRENT_USER,animationPreferences,gifFolderPreference,RRF_RT_REG_SZ,
+        nullptr,folder,&bytes)==ERROR_SUCCESS&&fs::is_directory(folder,error)){
+        ComPtr<IShellItem> item;
+        if(SUCCEEDED(SHCreateItemFromParsingName(folder,nullptr,IID_PPV_ARGS(&item))))
+            picker->SetFolder(item.Get());
+    }
+
+    const auto result=picker->Show(owner);
+    if(result==HRESULT_FROM_WIN32(ERROR_CANCELLED))return {};
+    ComPtr<IShellItem> file;
+    PWSTR path=nullptr;
+    if(FAILED(result)||FAILED(picker->GetResult(&file))||FAILED(file->GetDisplayName(SIGDN_FILESYSPATH,&path)))
+        throw std::runtime_error("GIF 저장 위치를 가져올 수 없습니다.");
+    const std::unique_ptr<wchar_t,decltype(&CoTaskMemFree)> selected(path,CoTaskMemFree);
+    return std::wstring(selected.get());
+}
+
+std::optional<std::wstring> animationFile(const wchar_t* title,HWND owner=nullptr){
     wchar_t path[32768]={};
-    if(save)wcscpy_s(path,L"bond-animation.gif");
     OPENFILENAMEW picker{};
     picker.lStructSize=sizeof(picker);
     picker.hwndOwner=owner?owner:win;
     picker.lpstrTitle=title;
     picker.lpstrFile=path;
     picker.nMaxFile=DWORD(std::size(path));
-    picker.lpstrFilter=save?L"Animated GIF\0*.gif\0\0":L"ChemDraw / YoungDraw\0*.cdx;*.cdxml;*.ydraw\0\0";
-    picker.lpstrDefExt=save?L"gif":nullptr;
-    picker.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(save?OFN_OVERWRITEPROMPT:OFN_FILEMUSTEXIST);
-    if(save?GetSaveFileNameW(&picker):GetOpenFileNameW(&picker))return std::wstring(path);
+    picker.lpstrFilter=L"ChemDraw / YoungDraw\0*.cdx;*.cdxml;*.ydraw\0\0";
+    picker.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|OFN_FILEMUSTEXIST;
+    if(GetOpenFileNameW(&picker))return std::wstring(path);
     return {};
 }
 
@@ -291,23 +429,59 @@ std::vector<size_t> defaultRoute(const Reaction& mechanism){
 }
 
 void drawCaption(Graphics& g,const std::string& first,const std::string& second,double t,
-                 int width,int y,int height,int size,bool bold,Color color){
+                 float width,float y,float height,float size,bool bold,Color color,float x=0,float padding=12){
     if(first.empty()&&second.empty())return;
     const bool same=first==second;
     const auto& value=same||t<.5?first:second;
     double opacity=same?1.:std::abs(2*t-1);
     if(value.empty()||opacity<.01)return;
-    auto text=ui::wide(value);
-    for(auto& ch:text)if(ch==L'\r'||ch==L'\n')ch=L' ';
+    std::string caption=value;
+    for(size_t i=0;i+2<caption.size();++i)
+        if(caption[i]=='\\'&&(caption[i+1]=='_'||caption[i+1]=='^')&&caption[i+2]=='{')caption.erase(i,1);
+    for(auto& ch:caption)if(ch=='\r'||ch=='\n')ch=' ';
+    const auto runs=scriptRuns(caption);
     FontFamily family(ui::interfaceFont());
-    Font font(&family,float(size),bold?FontStyleBold:FontStyleRegular,UnitPixel);
+    const auto style=bold?FontStyleBold:FontStyleRegular;
+    Font font(&family,size,style,UnitPixel);
     SolidBrush brush(Color(BYTE(std::lround(opacity*255)),color.GetR(),color.GetG(),color.GetB()));
+    if(std::any_of(runs.begin(),runs.end(),[](const ScriptRun& run){return run.script!=0;})){
+        StringFormat format(StringFormat::GenericTypographic());
+        auto runSize=[size](const ScriptRun& run){
+            return size*float(run.script>0?chemicalScriptScale(run.text):run.script<0?.7:1.);
+        };
+        std::vector<float> widths;
+        float total=0;
+        for(const auto& run:runs){
+            auto text=ui::wide(run.text);
+            Font scriptFont(&family,runSize(run),style,UnitPixel);
+            RectF bounds;
+            g.MeasureString(text.c_str(),int(text.size()),&scriptFont,PointF{},&format,&bounds);
+            widths.push_back(bounds.Width);
+            total+=bounds.Width;
+        }
+        const float fit=std::min(1.f,(width-2*padding)/std::max(1.f,total));
+        const auto saved=g.Save();
+        g.TranslateTransform(x+(width-total*fit)/2,y+(height-size*fit)/2);
+        g.ScaleTransform(fit,fit);
+        float cursor=0;
+        for(size_t i=0;i<runs.size();++i){
+            const auto& run=runs[i];
+            auto text=ui::wide(run.text);
+            Font scriptFont(&family,runSize(run),style,UnitPixel);
+            const float offset=run.script>0?-size*.23f:run.script<0?size*.46f:0.f;
+            g.DrawString(text.c_str(),int(text.size()),&scriptFont,PointF(cursor,offset),&format,&brush);
+            cursor+=widths[i];
+        }
+        g.Restore(saved);
+        return;
+    }
+    auto text=ui::wide(caption);
     StringFormat format;
     format.SetAlignment(StringAlignmentCenter);
     format.SetLineAlignment(StringAlignmentCenter);
     format.SetFormatFlags(StringFormatFlagsNoWrap);
     format.SetTrimming(StringTrimmingEllipsisCharacter);
-    g.DrawString(text.c_str(),-1,&font,RectF(12,float(y),float(width-24),float(height)),&format,&brush);
+    g.DrawString(text.c_str(),-1,&font,RectF(x+padding,y,width-2*padding,height),&format,&brush);
 }
 
 } // namespace
@@ -346,6 +520,7 @@ std::vector<AnimationStage> animationMechanismStages(const Document& source,cons
 namespace {
 struct Playback {
     double speed=1.;
+    bool animateSpin=true;
     int hold=stageDelay; // Centiseconds, like GIF frame delays.
     enum Loop {Once,Forward,PingPong};
     Loop loop=PingPong;
@@ -393,17 +568,39 @@ public:
         width=std::max(structureWidth,(energies||transitionEnergies)?480:(titles||names)?320:0);
         height=header+structureHeight+footer;
     }
+    Document intermediate(size_t segment,double t,bool useEnd) const {
+        return transitions.at(segment).intermediate(t,useEnd);
+    }
     int lastFrame() const {return int(transitions.size())*transitionSteps;}
     int frameCount() const {return 2*lastFrame();}
+    bool hasArrows(size_t segment) const {return transitions.at(segment).hasGrowingArrows();}
+    int morphDuration(size_t segment) const {
+        return stages.at(segment).morphTime.value_or((hasArrows(segment)?arrowSteps:transitionSteps)*frameDelay);
+    }
     int delay(int frame,const Playback& playback) const {
-        return std::max(2,int(std::lround((frame%transitionSteps==0?playback.hold:frameDelay)/playback.speed)));
+        auto scaled=[&](double time){return int(std::lround(time/playback.speed));};
+        if(frame==lastFrame())return std::max(2,scaled(playback.hold));
+        const size_t segment=size_t(frame/transitionSteps);
+        const int local=frame%transitionSteps;
+        const bool arrows=hasArrows(segment);
+        const bool growing=arrows&&local<arrowSteps;
+        const int steps=arrows?arrowSteps:transitionSteps;
+        const int index=arrows&&!growing?local-arrowSteps:local;
+        const int duration=growing?stages[segment].arrowGrowth:morphDuration(segment);
+        const int motion=scaled(double(duration)*(index+1)/steps)-scaled(double(duration)*index/steps);
+        const int hold=local==0&&!stages[segment].intermediate?playback.hold:arrows&&local==arrowSteps?stages[segment].arrowHold:0;
+        return std::max(2,motion)+scaled(hold);
     }
     int forwardFrame(int frame) const {return std::min(frame,frameCount()-frame);}
-    void draw(Graphics& g,int frame,bool themed){
+    void draw(Graphics& g,int frame,bool themed,bool animateSpin){
         const size_t segment=std::min(size_t(frame/transitionSteps),transitions.size()-1);
         double t=double(frame-int(segment)*transitionSteps)/transitionSteps;
+        const double linear=t,u=1-t;
         t=t*t*(3-2*t);
-        auto scene=transitions[segment].sceneAt(t);
+        if(stages[segment].intermediate)t+=linear*u*u;
+        if(stages[segment+1].intermediate)t-=linear*linear*u;
+        auto scene=transitions[segment].sceneAt(t,animateSpin);
+        t=transitions[segment].structureProgress(t);
         const auto& from=stages[segment];
         const auto& to=stages[segment+1];
         const auto textColor=themed?appearance::palette().canvasInk:Color(27,39,51);
@@ -453,10 +650,13 @@ std::string encodeAnimation(AnimationTimeline& timeline,const Playback& playback
             g.SetSmoothingMode(SmoothingModeAntiAlias);
             g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
             g.ScaleTransform(float(width)/timeline.width,float(height)/timeline.height);
-            timeline.draw(g,frame,themed);
+            timeline.draw(g,frame,themed,playback.animateSpin);
         }
         frameOffsets.push_back(bytes.size());
-        gifFrame(bytes,bitmap,width,height,timeline.delay(frame,playback)+(frame<timeline.lastFrame()?(playback.stride-1)*std::max(2,int(std::lround(frameDelay/playback.speed))):0),transparent);
+        int duration=0;
+        for(int offset=0;offset<playback.stride&&frame+offset<=timeline.lastFrame();++offset)
+            duration+=timeline.delay(frame+offset,playback);
+        gifFrame(bytes,bitmap,width,height,duration,transparent);
     }
     frameOffsets.push_back(bytes.size());
     // Replay the same frames in reverse, so the loop also has a continuous transition.
@@ -491,7 +691,8 @@ bool editAnimationCaptions(HWND owner,std::vector<AnimationStage>& stages){
 }
 enum PreviewControl {
     PreviewPlay=101,PreviewRestart,PreviewPrevious,PreviewNext,PreviewTiming,
-    PreviewCaptions,PreviewReplace,PreviewSave,PreviewClose,PreviewReadout,PreviewRepeat,PreviewBackground,PreviewAdd,PreviewRemove
+    PreviewCaptions,PreviewReplace,PreviewSave,PreviewClose,PreviewReadout,PreviewRepeat,PreviewBackground,PreviewAdd,PreviewRemove,
+    PreviewSegmentTiming,PreviewKeyframe
 };
 constexpr int previewSidebar=252;
 const std::vector<std::wstring> loopModes={L"1회 재생",L"정방향 반복",L"왕복 반복"};
@@ -499,6 +700,7 @@ const std::vector<std::wstring> loopModes={L"1회 재생",L"정방향 반복",L"
 struct AnimationPreview {
     ui::DialogColors colors;
     AnimationTimeline timeline;
+    Document selectedStructure;
     Playback playback;
     std::vector<ULONGLONG> frameEnds;
     ULONGLONG started=0, position=0;
@@ -509,7 +711,8 @@ struct AnimationPreview {
     HFONT font=nullptr;
     std::unique_ptr<Bitmap> buffer;
 
-    explicit AnimationPreview(std::vector<AnimationStage> stages):timeline(std::move(stages)){
+    AnimationPreview(std::vector<AnimationStage> stages,Document selected):
+        timeline(std::move(stages)),selectedStructure(std::move(selected)){
         rebuildThumbs();updateTiming(0);
     }
     void rebuildThumbs(){
@@ -528,7 +731,7 @@ struct AnimationPreview {
         frameEnds.clear();
         ULONGLONG total=0;
         for(int i=0;i<(playback.loop==Playback::PingPong?timeline.frameCount():timeline.lastFrame()+1);++i){
-            total+=10*timeline.delay(i,playback);
+            total+=10*timeline.delay(timeline.forwardFrame(i),playback);
             frameEnds.push_back(total);
         }
         seek(selected);
@@ -577,7 +780,8 @@ void previewButtons(HWND hwnd){
     const int w=previewSidebar-32;
     MoveWindow(GetDlgItem(hwnd,PreviewReadout),x+2,47,w-4,24,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewPlay),x,110,w,34,TRUE);
-    MoveWindow(GetDlgItem(hwnd,PreviewRestart),x,151,w,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewRestart),x,151,(w-8)/2,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewSegmentTiming),x+(w+8)/2,151,(w-8)/2,32,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewPrevious),x,190,(w-8)/2,32,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewNext),x+(w+8)/2,190,(w-8)/2,32,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewTiming),x,229,(w-8)/2,32,TRUE);
@@ -587,6 +791,7 @@ void previewButtons(HWND hwnd){
     MoveWindow(GetDlgItem(hwnd,PreviewReplace),x,376,w,30,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewAdd),x,412,(w-8)/2,28,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewRemove),x+(w+8)/2,412,(w-8)/2,28,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewKeyframe),x,445,w,30,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewSave),x,rc.bottom-83,w,35,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewClose),x,rc.bottom-41,w,29,TRUE);
 }
@@ -625,7 +830,7 @@ void paintPreview(HWND hwnd,HDC dc,AnimationPreview& preview){
                     if((x/12+y/12)%2)g.FillRectangle(&tile,x,y,std::min(12,timeline.width-x),std::min(12,timeline.height-y));
             }
         }
-        preview.timeline.draw(g,preview.timeline.forwardFrame(preview.frame),themed);
+        preview.timeline.draw(g,preview.timeline.forwardFrame(preview.frame),themed,preview.playback.animateSpin);
         g.Restore(saved);
 
         saved=g.Save();g.SetClip(RectF(0,float(h-83),sidebar,83));
@@ -640,7 +845,8 @@ void paintPreview(HWND hwnd,HDC dc,AnimationPreview& preview){
             auto thumbState=g.Save();
             g.TranslateTransform(x+43-float(b.x+b.w/2)*fit,float(h-53)-float(b.y+b.h/2)*fit);
             g.ScaleTransform(fit,fit);render(g,scene,false,true);g.Restore(thumbState);
-            ui::drawLabel(g,std::to_wstring(i+1)+L" "+ui::wide(timeline.stages[i].structureName),RectF(x+3,float(h-26),80,17),11,palette.text,false,true);
+            const auto title=std::to_string(i+1)+(timeline.stages[i].intermediate?" · 중간":" "+timeline.stages[i].structureName);
+            drawCaption(g,title,title,0,80,float(h-26),17,11,false,palette.text,x+3,3);
         }
         g.Restore(saved);
         Pen divider(palette.edge,1);
@@ -722,17 +928,57 @@ void previewAction(HWND hwnd,AnimationPreview& preview,int id){
         int stage=id==PreviewPrevious?(std::max(0,current-1)/transitionSteps):(current/transitionSteps+1);
         preview.seek(std::min(stage*transitionSteps,preview.timeline.lastFrame()));
         setPlaying(hwnd,preview,false);
+    }else if(id==PreviewSegmentTiming){
+        auto& timeline=preview.timeline;
+        ui::Table rows;
+        for(size_t i=0;i+1<timeline.stages.size();++i){
+            const auto& stage=timeline.stages[i];
+            const bool arrows=timeline.hasArrows(i);
+            rows.push_back({arrows?number(stage.arrowGrowth/100.):"-",
+                            arrows?number(stage.arrowHold/100.):"-",number(timeline.morphDuration(i)/100.)});
+        }
+        auto parseTimes=[&](const ui::Table& values){
+            if(values.size()!=rows.size())throw std::runtime_error("구간 수를 유지하세요.");
+            std::vector<std::array<int,3>> times;
+            auto read=[](const std::string& value,double minimum){return int(std::lround(numeric(value,minimum,30)*100));};
+            for(size_t i=0;i<values.size();++i){
+                const auto& row=values[i];
+                const bool arrows=timeline.hasArrows(i);
+                times.push_back({arrows?read(row[0],.36):timeline.stages[i].arrowGrowth,
+                                 arrows?read(row[1],0):timeline.stages[i].arrowHold,
+                                 read(row[2],arrows?.36:.72)});
+            }
+            return times;
+        };
+        auto result=ui::table(hwnd,L"결합 애니메이션 · 구간별 시간",
+            {L"화살표 그리기 (초)",L"완성된 화살표 유지 (초)",L"다음 구조로 전환 (초)"},rows,
+            [&](const ui::Table& values)->std::wstring{
+                try{parseTimes(values);return {};}
+                catch(const std::exception&){return L"시간은 30초 이하로 입력하세요. 그리기는 0.36초 이상, 구조 전환은 화살표가 있으면 0.36초, 없으면 0.72초 이상입니다.";}
+            },false,L"1행은 1 → 2단계입니다. 시간은 1× 기준이며, 화살표가 없는 구간은 구조 전환 시간만 적용됩니다.");
+        if(result){
+            auto times=parseTimes(*result);
+            for(size_t i=0;i<times.size();++i){
+                auto& stage=timeline.stages[i];
+                stage.arrowGrowth=times[i][0];
+                stage.arrowHold=times[i][1];
+                stage.morphTime=times[i][2];
+            }
+            preview.updateTiming(preview.frame);
+        }
     }else if(id==PreviewTiming){
         static const std::array<double,5> speeds={.5,.75,1.,1.5,2.};
         const auto selected=std::find(speeds.begin(),speeds.end(),preview.playback.speed)-speeds.begin();
         auto result=ui::form(hwnd,L"애니메이션 재생 설정",
             {{L"재생 속도",std::to_string(selected),false,{L"0.5×",L"0.75×",L"1×",L"1.5×",L"2×"}},
-             {L"단계에서 정지 (초)",std::to_string(preview.playback.hold/100.)}});
+             {L"단계에서 정지 (초)",std::to_string(preview.playback.hold/100.)},
+             {L"Mulliken 스핀 값 전환",preview.playback.animateSpin?"0":"1",false,{L"숫자를 연속 변경",L"시작·끝 숫자를 교차 표시"}}});
         if(result){
             auto speed=speeds.at(size_t(std::stoi((*result)[0])));
             auto hold=int(std::lround(numeric((*result)[1],0,10)*100));
             preview.playback.speed=speed;
             preview.playback.hold=hold;
+            preview.playback.animateSpin=(*result)[2]=="0";
             preview.updateTiming(preview.frame);
         }
     }else if(id==PreviewRepeat){
@@ -770,6 +1016,43 @@ void previewAction(HWND hwnd,AnimationPreview& preview,int id){
             preview.playback.background=AnimationBackground(std::stoi(result->front()));
             preview.playback.stride=1+std::stoi((*result)[3]);
         }
+    }else if(id==PreviewKeyframe){
+        const int frame=preview.timeline.forwardFrame(preview.frame);
+        auto stages=preview.timeline.stages;
+        const int last=int(stages.size())-1;
+        const int segment=std::min(frame/transitionSteps,last-1);
+        const int local=frame-segment*transitionSteps;
+        const int percent=local==0||local==transitionSteps?50:std::clamp(int(std::lround(100.*local/transitionSteps)),5,95);
+        std::vector<std::wstring> segments;
+        for(int i=0;i<last;++i)segments.push_back(std::to_wstring(i+1)+L" → "+std::to_wstring(i+2));
+        auto choice=ui::form(hwnd,L"중간 프레임 설계",{
+            {L"작업","0",false,{L"중간 구조 만들고 편집",L"현재 단계 구조 직접 편집"}},
+            {L"삽입할 구간",std::to_string(segment),false,segments},
+            {L"구간 내 원자 위치 (%)",std::to_string(percent)},
+            {L"새 프레임의 시작 결합 상태","0",false,{L"구간 앞 구조의 결합",L"구간 뒤 구조의 결합"}}
+        });
+        if(!choice)return;
+        if(choice->front()=="1"){
+            const int index=preview.stage();
+            auto edited=runStructureEditor(stages[index].structure,hwnd);
+            if(!edited)return;
+            stages[index].structure=std::move(*edited);
+            preview.replace(std::move(stages),index);
+        }else{
+            if(stages.size()>=maxStages)throw std::runtime_error("애니메이션은 중간 프레임을 포함해 최대 40단계입니다.");
+            const int from=std::stoi((*choice)[1]);
+            const double t=numeric((*choice)[2],1,99)/100.;
+            auto structure=preview.timeline.intermediate(from,t,(*choice)[3]=="1");
+            auto edited=runStructureEditor(structure,hwnd);
+            if(!edited)return;
+            AnimationStage inserted=stages[from];
+            inserted.structure=std::move(*edited);
+            inserted.transitionEnergies.clear();
+            inserted.morphTime.reset();
+            inserted.intermediate=true;
+            stages.insert(stages.begin()+from+1,std::move(inserted));
+            preview.replace(std::move(stages),from+1);
+        }
     }else if(id==PreviewCaptions||id==PreviewReplace||id==PreviewAdd||id==PreviewRemove){
         auto stages=preview.timeline.stages;
         int index=preview.stage();
@@ -780,9 +1063,22 @@ void previewAction(HWND hwnd,AnimationPreview& preview,int id){
             stages.erase(stages.begin()+index);
             index=std::min(index,int(stages.size())-1);
         }else{
-            auto path=animationFile(L"단계에 넣을 구조 열기",false,hwnd);
-            if(!path)return;
-            auto structure=readStructure(*path);
+            Document structure;
+            bool useSelection=false;
+            if(!preview.selectedStructure.atoms.empty()&&preview.selectedStructure.reactions.empty()&&
+               preview.selectedStructure.plots.empty()){
+                auto choice=ui::form(hwnd,L"단계에 넣을 구조",{
+                    {L"구조 가져오기","0",false,{L"문서에서 선택한 구조",L"파일에서 열기"}}
+                });
+                if(!choice)return;
+                useSelection=choice->front()=="0";
+            }
+            if(useSelection)structure=preview.selectedStructure;
+            else{
+                auto path=animationFile(L"단계에 넣을 구조 열기",hwnd);
+                if(!path)return;
+                structure=readStructure(*path);
+            }
             if(id==PreviewAdd){
                 ++index;
                 stages.insert(stages.begin()+index,{std::move(structure),"","단계 "+std::to_string(index+1),"",""});
@@ -790,7 +1086,7 @@ void previewAction(HWND hwnd,AnimationPreview& preview,int id){
         }
         preview.replace(std::move(stages),index);
     }else if(id==PreviewSave){
-        auto path=animationFile(L"결합 애니메이션 GIF 저장",true,hwnd);
+        auto path=gifSaveFile(hwnd);
         if(!path)return;
         std::string bytes;
         {
@@ -801,6 +1097,7 @@ void previewAction(HWND hwnd,AnimationPreview& preview,int id){
         }
         if(bytes.empty())return;
         writeFile(*path,bytes);
+        rememberGifFolder(*path);
         status=L"결합 애니메이션 GIF를 저장했습니다.";
         redraw();
         MessageBoxW(hwnd,L"GIF를 저장했습니다.",L"결합 애니메이션",MB_OK|MB_ICONINFORMATION);
@@ -832,8 +1129,9 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         SendMessageW(repeat,WM_SETFONT,WPARAM(preview->font),FALSE);
         for(const auto& mode:loopModes)SendMessageW(repeat,CB_ADDSTRING,0,LPARAM(mode.c_str()));
         SendMessageW(repeat,CB_SETCURSEL,Playback::PingPong,0);
-        for(auto id:{PreviewBackground,PreviewAdd,PreviewRemove}){
-            auto control=CreateWindowW(L"BUTTON",id==PreviewAdd?L"단계 추가…":id==PreviewRemove?L"단계 삭제":L"출력 설정…",
+        for(auto id:{PreviewBackground,PreviewAdd,PreviewRemove,PreviewSegmentTiming,PreviewKeyframe}){
+            auto control=CreateWindowW(L"BUTTON",id==PreviewAdd?L"단계 추가…":id==PreviewRemove?L"단계 삭제":
+                id==PreviewSegmentTiming?L"구간별 시간…":id==PreviewKeyframe?L"중간 프레임 설계…":L"출력 설정…",
                 WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,0,0,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);
             SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(preview->font),FALSE);
         }
@@ -848,7 +1146,7 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(!preview)return DefWindowProcW(hwnd,msg,wp,lp);
     switch(msg){
     case WM_GETMINMAXINFO:
-        reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={680,580};return 0;
+        reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={680,600};return 0;
     case WM_SIZE:
         previewButtons(hwnd);InvalidateRect(hwnd,nullptr,FALSE);return 0;
     case WM_ERASEBKGND:return 1;
@@ -924,7 +1222,7 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         const int id=LOWORD(wp);
         if(id==PreviewClose||id==IDCANCEL){SendMessageW(hwnd,WM_CLOSE,0,0);return 0;}
         if(id==PreviewRepeat&&HIWORD(wp)!=CBN_SELCHANGE)return 0;
-        if((id>=PreviewPlay&&id<=PreviewSave)||id==PreviewRepeat||id==PreviewBackground||id==PreviewAdd||id==PreviewRemove){
+        if((id>=PreviewPlay&&id<=PreviewSave)||id==PreviewRepeat||id==PreviewBackground||id==PreviewAdd||id==PreviewRemove||id==PreviewSegmentTiming||id==PreviewKeyframe){
             // Pause while editing or choosing an export destination.
             if(id>=PreviewTiming)setPlaying(hwnd,*preview,false);
             try{previewAction(hwnd,*preview,id);}
@@ -1060,7 +1358,7 @@ std::optional<std::vector<size_t>> pickRoute(const Document& source,const Reacti
     return {};
 }
 
-void previewAnimation(std::vector<AnimationStage> stages){
+void previewAnimation(std::vector<AnimationStage> stages,Document selected){
     static constexpr wchar_t windowClass[]=L"YoungDrawAnimationPreview";
     static const ATOM registered=[](){
         WNDCLASSW wc{};
@@ -1071,7 +1369,7 @@ void previewAnimation(std::vector<AnimationStage> stages){
         return RegisterClassW(&wc);
     }();
     if(!registered)throw std::runtime_error("애니메이션 미리보기 창을 등록할 수 없습니다.");
-    AnimationPreview preview(std::move(stages));
+    AnimationPreview preview(std::move(stages),std::move(selected));
     MONITORINFO monitor{sizeof(monitor)};
     GetMonitorInfoW(MonitorFromWindow(win,MONITOR_DEFAULTTONEAREST),&monitor);
     const auto rect=ui::ownedWindowRect(win,std::min(1050,int(monitor.rcWork.right-monitor.rcWork.left)),
@@ -1177,7 +1475,7 @@ void createBondAnimation(){
             auto path=animationFile(L"시작 구조 열기");
             if(!path)return;
             start=readStructure(*path);
-        }else start=std::move(selected);
+        }else start=selected;
         if(external==2){
             auto copied=clipboardDocument();
             if(!copied||copied->atoms.empty())throw std::runtime_error("ChemDraw 또는 YoungDraw의 끝 구조를 먼저 복사하세요.");
@@ -1190,7 +1488,7 @@ void createBondAnimation(){
         stages={{std::move(start),"","단계 1","",""},{std::move(end),"","단계 2","",""}};
     }
 
-    previewAnimation(std::move(stages));
+    previewAnimation(std::move(stages),std::move(selected));
 
 }
 

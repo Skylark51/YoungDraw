@@ -24,17 +24,31 @@ void relocatePlot(const EnergyPlot& before,const EnergyPlot& after){
     }
 }
 void editPlot(int id){auto* ptr=plot(id);if(!ptr)return;Document before=doc;EnergyPlot original=*ptr;if(original.series.empty()){EnergySeries path;path.name="Path 1";for(auto& state:original.states)path.values.push_back(state.energy);original.series.push_back(path);}
-    std::vector<std::wstring> columns={L"단계명"};for(auto& path:original.series)columns.push_back(ui::wide(path.name));ui::Table rows;
+    const bool independent=original.mode==independentEnergyLevels;
+    std::vector<std::wstring> columns={independent?L"다중도 / 상태":L"단계명"};
+    for(auto& path:original.series)
+        columns.push_back(independent&&original.series.size()==1&&path.name=="Path 1"?L"에너지":ui::wide(path.name));
+    ui::Table rows;
     for(size_t i=0;i<original.states.size();i++){std::vector<std::string> row={original.states[i].label};for(auto& path:original.series)row.push_back(path.hasValue(i)?number(path.values[i]):"");rows.push_back(row);}
     auto update=[&](const ui::Table& data)->std::wstring{
-        try{auto p=energyGridData(original,data);doc=before;relocatePlot(original,p);*plot(id)=std::move(p);redraw();UpdateWindow(win);return {};}
+        try{auto p=data==rows?original:energyGridData(original,data);doc=before;relocatePlot(original,p);*plot(id)=std::move(p);redraw();UpdateWindow(win);return {};}
         catch(const std::exception& e){return ui::wide(e.what());}
     };
     auto cellError=[](size_t column,const std::string& value)->std::wstring{
         if(column==0||validEnergyGridValue(value))return {};
         return L"에너지를 숫자로 입력하세요 (−1000000~1000000). 빈칸은 그래프에서 생략됩니다.";
     };
-    auto result=ui::table(win,L"에너지 그래프 — 데이터 표",columns,rows,update,true,L"",false,0,cellError);
+    auto columnEdit=[&](HWND parent,size_t column)->std::optional<std::wstring>{
+        if(column==0)return {};
+        auto& name=original.series[column-1].name;
+        auto result=ui::form(parent,L"경로 이름 변경",{{L"경로 이름",name,false,{},false,4,true}});
+        if(!result)return {};
+        name=std::move(result->front());
+        return ui::wide(name);
+    };
+    auto result=ui::table(win,independent?L"스핀 다중도 비교 — 에너지 표":L"에너지 그래프 — 데이터 표",columns,rows,update,true,
+        independent?L"다중도 = 2S + 1 · 한 행에 한 상태 · 여러 셀에 붙여넣기 가능":
+        L"경로 열 제목 더블클릭: 이름 변경 · 여러 셀에 붙여넣기 가능 · 캔버스에서 Alt+드래그: 준위 가로 이동",false,0,cellError,columnEdit);
     if(result){
         // Apply the returned table explicitly; committing must not depend on a prior preview.
         update(*result);
@@ -89,17 +103,155 @@ void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에�
      if(!from||!to)return L"수치 변환은 kcal/mol, kJ/mol, eV 사이에서 사용할 수 있습니다.";
      const double factor=*from / *to;
      for(auto& state:p.states)state.energy*=factor;
+     for(auto& crossing:p.crossings)crossing.energy*=factor;
      for(auto& series:p.series)for(auto& value:series.values)value*=factor;
      if(p.yMin)*p.yMin*=factor;
      if(p.yMax)*p.yMax*=factor;
      p.yTickStep*=factor;
  }
+ p.showXAxis=v[23]=="1";p.showYAxis=v[24]=="1";p.showYTicks=v[19]=="1";p.energyAtTop=v[20]=="1";p.legendOffset={numeric(v[21],-10000,10000),numeric(v[22],-10000,10000)};
  energyAxis(p);if(p.yTickStep>0&&(p.yTickStep<1e-9||energyAxis(p).step>p.yTickStep*1.001))return L"y축 눈금이 너무 촘촘합니다. 더 큰 간격을 입력하세요.";doc=before;relocatePlot(original,p);*plot(id)=p;redraw();UpdateWindow(win);return {};}catch(const std::exception& e){return ui::wide(e.what());}};
-    auto r=ui::form(win,L"그래프·축 설정",{{L"제목",p->title,false,{},false,4,true},{L"에너지 단위 (선택 / 직접 입력)",p->unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):p->unit,false,{L"kcal/mol",L"kcal mol⁻¹",L"kJ/mol",L"eV"},false,4,true,true},{L"x축 (위·아래첨자 버튼)",p->xLabel,false,{},false,4,true},{L"y축 (위·아래첨자 버튼)",p->yLabel,false,{},false,4,true},{L"x축 글자색",p->xColor,false,{},true},{L"y축 글자색",p->yColor,false,{},true},{L"너비 / 높이 (pt)",number(p->width)+" "+number(p->height)},{L"그래프 형태",std::to_string(p->mode),false,{L"부드러운 곡선",L"직선",L"에너지 준위 (점선 연결)",L"평평한 준위와 직선"}},{L"에너지 값 표시",p->showValues?"1":"0",false,{L"아니요",L"예"}},{L"y축 눈금 간격 (0: 자동)",number(p->yTickStep)},
+    auto r=ui::form(win,L"그래프·축 설정",{{L"제목",p->title,false,{},false,4,true},{L"에너지 단위 (선택 / 직접 입력)",p->unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):p->unit,false,{L"kcal/mol",L"kcal mol⁻¹",L"kJ/mol",L"eV"},false,4,true,true},{L"x축 (위·아래첨자 버튼)",p->xLabel,false,{},false,4,true},{L"y축 (위·아래첨자 버튼)",p->yLabel,false,{},false,4,true},{L"x축 글자색",p->xColor,false,{},true},{L"y축 글자색",p->yColor,false,{},true},{L"너비 / 높이 (pt)",number(p->width)+" "+number(p->height)},{L"그래프 형태",std::to_string(p->mode),false,{L"부드러운 곡선",L"직선",L"에너지 준위 (점선 연결)",L"평평한 준위와 직선",L"독립 에너지 준위"}},{L"에너지 값 표시",p->showValues?"1":"0",false,{L"아니요",L"예"}},{L"y축 눈금 간격 (0: 자동)",number(p->yTickStep)},
  {L"y축 최솟값 (빈칸: 자동)",p->yMin?number(*p->yMin):""},{L"y축 최댓값 (빈칸: 자동)",p->yMax?number(*p->yMax):""},
  {L"x축·그래프 제목 (pt, 0: 자동)",number(p->axisFontSize)},{L"눈금·상태 이름 (pt, 0: 자동)",number(p->tickFontSize)},{L"데이터 값 크기 (pt, 0: 자동)",number(p->valueFontSize)},{L"에너지 축 제목 (pt, 0: 자동)",number(p->energyLabelFontSize)},{L"그래프 두께",p->thinLines?"1":"0",false,{L"굵게 (기존)",L"얇게 (선·축·글자)"}},{L"평평한 준위선만 굵게",p->boldLevels?"1":"0",false,{L"아니요 (그래프 두께에 맞춤)",L"예 (기존 굵은 두께 유지)"}},
- {L"단위를 바꿀 때","0",false,{L"단위 표시만 변경",L"에너지와 축 수치도 변환"}}},update,
- {{L"기본",{0,1,18,6}},{L"축",{2,3,9,10,11}},{L"글자",{4,5,8,12,13,14,15}},{L"선 스타일",{7,16,17}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
+ {L"단위를 바꿀 때","0",false,{L"단위 표시만 변경",L"에너지와 축 수치도 변환"}},
+ {L"y축 눈금·숫자 표시",p->showYTicks?"1":"0",false,{L"숨김",L"표시"}},
+ {L"에너지 축 제목 배치",p->energyAtTop?"1":"0",false,{L"세로 축 제목",L"축 위에 E (세로 제목 숨김)"}},
+ {L"범례 X 이동 (pt, 오른쪽 +)",number(p->legendOffset.x)},
+ {L"범례 Y 이동 (pt, 아래 +)",number(p->legendOffset.y)},
+ {L"x축 (선·제목) 표시",p->showXAxis?"1":"0",false,{L"숨김",L"표시"}},
+ {L"y축 (선·눈금·제목) 표시",p->showYAxis?"1":"0",false,{L"숨김",L"표시"}}},update,
+ {{L"기본",{0,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{23,24,19,20}},{L"글자",{4,5,8,12,13,14,15}},{L"선 스타일",{7,16,17}},{L"범례 위치",{21,22}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
+}
+void editPlotCrossings(int id){
+    auto* p=plot(id);
+    if(p&&p->mode==independentEnergyLevels)
+        throw std::runtime_error("스핀 교차점은 경로가 연결된 그래프 형태에서 편집할 수 있습니다.");
+    if(!p||doc.isLocked(id)||p->states.size()<2||p->series.size()<2)
+        throw std::runtime_error("두 경로와 두 상태 이상이 있는 에너지 그래프를 선택하세요.");
+    const Document before=doc;
+    const auto original=*p;
+    auto stateName=[&](size_t i){
+        const auto& label=original.states[i].label;
+        return label.empty()?L"상태 "+std::to_wstring(i+1):ui::wide(label);
+    };
+    std::vector<std::wstring> segments,paths;
+    for(size_t i=0;i+1<original.states.size();++i)
+        segments.push_back(stateName(i)+L" → "+stateName(i+1));
+    for(const auto& path:original.series)
+        paths.push_back(path.name.empty()?L"경로 "+std::to_wstring(paths.size()+1):ui::wide(path.name));
+    auto distinguishDuplicates=[](std::vector<std::wstring>& names){
+        const auto labels=names;
+        for(size_t i=0;i<names.size();++i)
+            if(std::count(labels.begin(),labels.end(),labels[i])>1)
+                names[i]+=L" ("+std::to_wstring(i+1)+L")";
+    };
+    distinguishDuplicates(segments);
+    distinguishDuplicates(paths);
+
+    const auto unit=ui::wide(original.unit=="kcal mol^{-1}"?"kcal mol⁻¹":original.unit);
+    const auto count=original.crossings.size();
+    size_t index=count;
+    if(count){
+        std::vector<ui::SearchItem> entries;
+        for(const auto& crossing:original.crossings){
+            const auto& range=segments[crossing.segment];
+            auto detail=paths[crossing.firstPath]+L" / "+paths[crossing.secondPath]+
+                        L"   ·   "+ui::wide(number(crossing.energy))+L" "+unit;
+            entries.push_back({range+L"   ·   "+ui::wide(crossing.label),std::move(detail)});
+        }
+        const bool canAdd=count<segments.size();
+        auto choices=entries;
+        if(canAdd)choices.insert(choices.begin(),{L"새 교차점 추가",L"구간과 두 스핀 경로를 고르고 에너지를 입력합니다."});
+        choices.push_back({L"교차점 삭제…",L"그래프에서 제거할 교차점을 선택합니다."});
+        const auto choice=ui::search(win,L"스핀 교차점 관리",choices,L"선택",true);
+        if(!choice)return;
+        if(*choice==choices.size()-1){
+            if(auto remove=ui::search(win,L"삭제할 스핀 교차점",entries,L"삭제",true)){
+                history.checkpoint(before);
+                auto& crossings=plot(id)->crossings;
+                crossings.erase(crossings.begin()+*remove);
+                changed();
+            }
+            return;
+        }
+        if(!canAdd||*choice!=0)index=*choice-size_t(canAdd);
+    }
+
+    const bool adding=index==count;
+    const auto current=adding?EnergyCrossing{}:original.crossings[index];
+    std::vector<int> available;
+    std::vector<std::wstring> segmentChoices;
+    for(size_t i=0;i<segments.size();++i){
+        if((adding||int(i)!=current.segment)&&std::any_of(original.crossings.begin(),original.crossings.end(),[&](const EnergyCrossing& crossing){
+            return crossing.segment==int(i);
+        }))continue;
+        available.push_back(int(i));
+        segmentChoices.push_back(segments[i]);
+    }
+    const auto selectedSegment=adding?0:std::find(available.begin(),available.end(),current.segment)-available.begin();
+    std::vector<ui::Field> fields={
+        {L"교차 구간",std::to_string(selectedSegment),false,segmentChoices},
+        {L"첫 번째 스핀 경로",std::to_string(current.firstPath),false,paths},
+        {L"두 번째 스핀 경로",std::to_string(current.secondPath),false,paths},
+        {unit.empty()?L"교차 에너지":L"교차 에너지 ("+unit+L")",adding?"":number(current.energy)},
+        {L"구간 내 가로 위치 (%)\n0 왼쪽 · 50 중앙 · 100 오른쪽",number(current.position*100)},
+        {L"교차점 이름 (빈칸: 경로 이름)",current.label,true,{},false,2,true},
+        {L"라벨 X (pt, 오른쪽 +)",current.labelOffset?number(current.labelOffset->x):""},
+        {L"라벨 Y (pt, 아래 +)\nX와 Y 모두 빈칸이면 자동",current.labelOffset?number(current.labelOffset->y):""},
+        {L"지시선 굵기 (pt, 0: 숨김)",number(current.leaderWidth)}
+    };
+    auto update=[&](const std::vector<std::string>& input)->std::wstring{
+        try{
+            auto crossing=current;
+            crossing.segment=available.at(size_t(std::stoi(input[0])));
+            crossing.firstPath=std::stoi(input[1]);
+            crossing.secondPath=std::stoi(input[2]);
+            if(crossing.firstPath==crossing.secondPath)return L"서로 다른 두 스핀 경로를 선택하세요.";
+            if(input[3].empty())return L"교차점의 에너지를 입력하세요.";
+            if(adding||input[3]!=fields[3].value){
+                try{crossing.energy=numeric(input[3],-1e6,1e6);}
+                catch(const std::exception&){return L"교차 에너지를 −1000000~1000000 사이 숫자로 입력하세요.";}
+            }
+            if(input[4]!=fields[4].value){
+                try{crossing.position=numeric(input[4],0,100)/100;}
+                catch(const std::exception&){return L"가로 위치를 0보다 크고 100보다 작은 숫자로 입력하세요.";}
+                if(crossing.position<=0||crossing.position>=1)
+                    return L"가로 위치를 0보다 크고 100보다 작은 숫자로 입력하세요.";
+            }
+            crossing.label=input[5].find_first_not_of(" \t\r\n")==std::string::npos
+                ?ui::utf8(paths.at(size_t(crossing.firstPath))+L" / "+paths.at(size_t(crossing.secondPath)))
+                :input[5];
+            if(input[6]!=fields[6].value||input[7]!=fields[7].value){
+                if(input[6].empty()!=input[7].empty())return L"라벨 X와 Y를 모두 입력하거나 둘 다 비워 두세요.";
+                try{
+                    if(input[6].empty())crossing.labelOffset.reset();
+                    else{
+                        auto offset=current.labelOffset.value_or(Vec{});
+                        if(input[6]!=fields[6].value)offset.x=numeric(input[6],-1e4,1e4);
+                        if(input[7]!=fields[7].value)offset.y=numeric(input[7],-1e4,1e4);
+                        crossing.labelOffset=offset;
+                    }
+                }catch(const std::exception&){return L"라벨 X와 Y를 −10000~10000 사이 숫자로 입력하세요.";}
+            }
+            if(input[8]!=fields[8].value){
+                try{crossing.leaderWidth=numeric(input[8],0,6);}
+                catch(const std::exception&){return L"지시선 굵기를 0~6 pt 사이 숫자로 입력하세요.";}
+            }
+            auto candidate=original;
+            if(adding)candidate.crossings.push_back(std::move(crossing));
+            else candidate.crossings[index]=std::move(crossing);
+            validateEnergyCrossings(candidate);
+            *plot(id)=std::move(candidate);
+            redraw();UpdateWindow(win);
+            return {};
+        }catch(const std::exception& e){return ui::wide(e.what());}
+    };
+    const auto result=ui::form(win,adding?L"스핀 교차점 추가":L"스핀 교차점 편집",fields,update,
+        {{L"교차점",{0,1,2,3,4,5}},{L"라벨 위치·지시선",{6,7,8}}});
+    if(result){
+        if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}
+    }else{*plot(id)=original;redraw();}
 }
 void editPlotStages(int id){
     auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");Document before=doc;

@@ -8,5 +8,6 @@ std::string readFile(const std::wstring& path);
 void writeFile(const std::wstring& path,const std::string& data);
 std::optional<std::wstring> fileDialog(bool save,int type=0,std::wstring initial=L"");
 std::vector<std::wstring> openDocumentFiles();
+void openDocuments(const std::vector<std::wstring>& paths);
 
 } // namespace yd::editor

@@ -2,6 +2,7 @@
 #include "scene.h"
 #include "mechanism_data.h"
 #include "cdxml.h"
+#include "structure_templates.h"
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -11,6 +12,32 @@ static int text(Document& d,Vec p,std::string value){Object o;o.id=d.nextId++;o.
 static int arrow(Document& d,Vec a,Vec b){Object o;o.id=d.nextId++;o.points={a,b};o.head=1;d.objects.push_back(o);return o.id;}
 static void rigid(const Document& before,const Document& after){for(auto& b:before.bonds){auto* now=after.bond(b.id);check(now&&now->kind==b.kind&&now->a==b.a&&now->b==b.b,"chemical bond identity preserved");check(((before.atom(b.b)->p-before.atom(b.a)->p)-(after.atom(b.b)->p-after.atom(b.a)->p)).length()<1e-7,"bond vectors preserved without rotation or scaling");}for(auto a:before.atoms){auto* b=after.atom(a.id);check(b&&b->charge==a.charge&&b->label==a.label&&b->element==a.element&&b->isotope==a.isotope,"chemical labels and properties preserved");}}
 int main(){try{
+    {
+        for(const auto& group:functionalGroups()){
+            Document d=group.drawing;
+            const int root=d.atoms.front().id, marker=d.atoms.back().id, connector=d.bonds.back().id;
+            check(d.validate().empty(),"functional-group template has valid valence");
+            check(collapseFunctionalGroups(d,{root},group.abbreviation)==1&&d.atoms.size()==2&&d.bonds.size()==1,
+                  "selected group matches its structural template");
+            check(d.atom(marker)->label=="R"&&d.bond(connector)&&!d.atom(root)->label.empty(),
+                  "abbreviation preserves the external attachment");
+        }
+        Document d;
+        d.ring({},6,true);
+        d.atoms.front().p.y-=6;
+        const int atom=d.atoms.front().id;
+        d.atom(atom)->mullikenSpin=-.314;
+        check(cleanStructure(d,{atom},false,true).referenceComponents==1,"matching distorted ring uses a reference drawing");
+        auto sc=makeScene(d);
+        const auto label=std::find_if(sc.items.begin(),sc.items.end(),[](const auto& p){return p.textRole==mullikenSpinTextRole;});
+        check(label!=sc.items.end()&&label->owner==atom&&label->text=="-0.314"&&label->points.front().y<d.atom(atom)->p.y,
+              "Mulliken label belongs to the chosen atom and sits above it");
+        for(const auto& restored:{fromNative(toNative(d)),fromCdxml(toCdxml(d))})
+            check(restored.atom(atom)->mullikenSpin==d.atom(atom)->mullikenSpin&&!restored.atoms.back().mullikenSpin,
+                  "Mulliken values round-trip on annotated atoms only");
+        auto protectedRing=chairTemplate();
+        check(cleanStructure(protectedRing,{},false,true).referenceComponents==0,"protected projections bypass template fitting");
+    }
     {
         Document d;Reaction r;r.id=d.nextId++;r.slots={{"R",{}},{"P",{}}};r.spacing=300;r.slotHeight=80;r.slotGrid={{0,0},{1,.06}};r.links={{0,1}};r.above={"O-O bond cleavage"};r.below={"13.5 / 9.5 / 9.5"};d.reactions.push_back(r);
         auto original=toNative(d);
@@ -70,6 +97,25 @@ int main(){try{
         std::ofstream("mechanism-import-arranged.svg")<<toSvg(picture);std::ofstream("mechanism-import-arranged.ydraw")<<toNative(d);
         auto size=r.slots.size();addMechanismBranch(r,1);check(r.slots.size()==size+1&&r.links.back().from==1,"new branch starts from chosen structure");
         check(r.slots.back().label.empty()&&r.above.back().empty()&&r.below.back().empty(),"new frames contain no invented captions or energies");
+    }
+    {
+        Document d;
+        for(Vec at:std::vector<Vec>{{0,0},{180,-50},{205,-25},{180,125}}){
+            int a=d.addAtom(at),b=d.addAtom(at+Vec{30,35},8);d.addBond(a,b);
+        }
+        arrow(d,{65,0},{150,0});
+        arrow(d,{205,50},{205,115});
+        text(d,{65,12},"-47.5 / ?.? / ?.?");
+        text(d,{196,40},"-70.1 / ?.? / ?.?");
+        auto owner=arrangeImportedMechanism(d);
+        auto& r=d.reactions.front();
+        check(r.slots.size()==3&&r.slots[1].members.size()==4,"overlapping product fragments stay in one state");
+        check(r.slots[1].energy=="-70.1 / ?.? / ?.?"&&std::all_of(r.below.begin(),r.below.end(),[](const std::string& s){return s.empty();}),
+              "product energy above the outgoing vertical arrow stays with the product");
+        r.below[0]="-47.5 / ?.? / ?.?";
+        check(!attachMechanismEnergy(d,owner,3,0,owner,1),"energy drop preserves an occupied destination");
+        check(attachMechanismEnergy(d,owner,3,0,owner,2)&&r.below[0].empty()&&r.slots[2].energy=="-47.5 / ?.? / ?.?",
+              "energy drop moves the entire spin list to an empty structure caption");
     }
     {
         Document d;int id=arrow(d,{0,0},{100,0});d.objects[0].cross={-1,true,5,16,"#cc0033"};auto svg=toSvg(makeScene(d));check(svg.find("#cc0033")!=std::string::npos,"free arrow cross exported as vector ink");

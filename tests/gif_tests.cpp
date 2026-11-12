@@ -57,6 +57,34 @@ static void checkBondAnimation(){
         check(redAt(54)==middle&&redAt(71)==redAt(1),"the reverse leg and loop seam reuse the forward frames");
     }
 }
+static void checkSpinKeyframes(){
+    Document start;
+    const int atom=start.addAtom({0,0},8);
+    start.atom(atom)->mullikenSpin=.1;
+    Document end=start, midpoint=start;
+    end.atom(atom)->mullikenSpin=.9;
+    midpoint.atom(atom)->mullikenSpin=.5;
+    AnimationStage middle{midpoint};
+    middle.intermediate=true;
+    auto gif=imageDocument(bondAnimationGif({{start},middle,{end}},false));
+    const auto& hex=gif.objects.front().imageHex;
+    const auto& ends=imageCache.at(hex).ends;
+    check(ends.size()==73&&ends[36]-ends[35]==40,"an inserted keyframe exports without the regular stage pause");
+
+    auto direct=imageDocument(bondAnimationGif({{start},{end}},false));
+    auto* interpolated=decode(direct.objects.front().imageHex);
+    auto* explicitFrame=decode(hex);
+    check(interpolated->SelectActiveFrame(&FrameDimensionTime,18)==Ok&&
+          explicitFrame->SelectActiveFrame(&FrameDimensionTime,36)==Ok,"read interpolated and explicit spin frames");
+    check(interpolated->GetWidth()==explicitFrame->GetWidth()&&interpolated->GetHeight()==explicitFrame->GetHeight(),
+          "spin labels keep a common GIF viewport");
+    bool equal=true;
+    for(UINT y=0;y<interpolated->GetHeight()&&equal;++y)for(UINT x=0;x<interpolated->GetWidth()&&equal;++x){
+        Color a,b;
+        equal=interpolated->GetPixel(x,y,&a)==Ok&&explicitFrame->GetPixel(x,y,&b)==Ok&&a.GetValue()==b.GetValue();
+    }
+    check(equal,"the interpolated spin is rendered as one intermediate numeric label");
+}
 static void checkAnimationExportOptions(){
     Document bound;
     int a=bound.addAtom({-30,0},17), b=bound.addAtom({30,0},35);
@@ -97,6 +125,51 @@ static void checkAnimationExportOptions(){
     check(theme!=whiteGif&&theme!=transparent,"the current theme has its own GIF background");
 }
 
+static void checkGrowingArrowAndInteraction(){
+    Document start;
+    const int donor=start.addAtom({-40,0},8),acceptor=start.addAtom({40,0},7);
+    Object contact;
+    contact.id=start.nextId++;contact.dash=2;contact.color="#0000ff";
+    contact.points={{-40,0},{40,0}};contact.sourceAtom=donor;contact.targetAtom=acceptor;contact.autoRoute=true;
+    start.objects.push_back(contact);
+    Document end=start;
+    end.atom(acceptor)->p.y=20;
+    Object arrow;
+    arrow.id=start.nextId++;arrow.kind=ObjectKind::Curve;arrow.head=1;arrow.color="#ff0000";
+    arrow.points={{-32,-24},{-12,-50},{12,-50},{32,-24}};
+    start.objects.push_back(arrow);
+    auto gif=imageDocument(bondAnimationGif({{start},{end}},false));
+    const auto& defaultEnds=imageCache.at(gif.objects.front().imageHex).ends;
+    check(defaultEnds[18]-defaultEnds[17]==690,"the completed arrow has a default 650 ms hold before the structure changes");
+    auto* bitmap=decode(gif.objects.front().imageHex);
+    auto ink=[&](UINT frame){
+        if(bitmap->SelectActiveFrame(&FrameDimensionTime,frame)!=Ok)throw std::runtime_error("could not select growth frame");
+        int redRight=-1,blueBottom=-1;
+        for(UINT y=0;y<bitmap->GetHeight();++y)for(UINT x=0;x<bitmap->GetWidth();++x){
+            Color pixel;
+            if(bitmap->GetPixel(x,y,&pixel)!=Ok)continue;
+            if(pixel.GetR()>200&&pixel.GetG()<100&&pixel.GetB()<100)redRight=std::max(redRight,int(x));
+            if(pixel.GetB()>200&&pixel.GetR()<100&&pixel.GetG()<100)blueBottom=int(y);
+        }
+        return std::pair{redRight,blueBottom};
+    };
+    const auto first=ink(0),growing=ink(9),complete=ink(18),last=ink(36);
+    check(first.first<0&&growing.first>=0&&complete.first>growing.first&&last.first<0&&
+          first.second>=0&&first.second==complete.second&&last.second>complete.second,
+          "the GIF grows the arrow on the stationary structure before morphing, and the dotted contact follows the atom");
+    std::vector<AnimationStage> timed={{start,"H_{2}O"},{end,"H_{2}O"}};
+    timed[0].arrowGrowth=108;timed[0].arrowHold=120;timed[0].morphTime=90;
+    auto scripted=bondAnimationGif(timed,false);
+    auto timedGif=imageDocument(scripted);
+    const auto& ends=imageCache.at(timedGif.objects.front().imageHex).ends;
+    check(ends[17]==1460&&ends[18]-ends[17]==1250&&ends[35]-ends[17]==2100,
+          "GIF frame timing includes custom arrow growth, completed-arrow hold and structure transition");
+    timed[0].structureName=timed[1].structureName="H\\_{2}O";
+    check(bondAnimationGif(timed,false)==scripted,"escaped subscript markup renders exactly like regular subscript markup");
+    timed[0].structureName=timed[1].structureName="H2O";
+    check(bondAnimationGif(timed,false)!=scripted,"subscript captions differ visually from baseline text");
+}
+
 static void checkMechanismAnimation(){
     Document source;
     Reaction r;
@@ -109,6 +182,14 @@ static void checkMechanismAnimation(){
         int a=fragment.addAtom({-28,0},17);
         int b=fragment.addAtom({28,0},35);
         if(i!=1)fragment.addBond(a,b);
+        if(i==0){
+            Object oval;oval.id=fragment.nextId++;oval.kind=ObjectKind::Ellipse;
+            oval.points={{-20,12},{20,28}};oval.color="#ff0000";
+            fragment.objects.push_back(oval);
+            Object arc;arc.id=fragment.nextId++;arc.kind=ObjectKind::Curve;
+            arc.points={{-20,32},{-20,46},{20,46},{20,32}};arc.color="#0000ff";
+            fragment.objects.push_back(arc);
+        }
         replaceSlotStructure(source,fragment,r.id,i);
     }
     auto stages=animationMechanismStages(source,source.reactions.front());
@@ -134,6 +215,19 @@ static void checkMechanismAnimation(){
     const UINT height=bitmap->GetHeight();
     check(inkIn(0,37)&&inkIn(height-52,height-25)&&inkIn(height-25,height),
           "GIF renders the structure name above and the stage name and energy below");
+    auto hasStrokes=[&](UINT frame){
+        if(bitmap->SelectActiveFrame(&FrameDimensionTime,frame)!=Ok)throw std::runtime_error("could not select stage frame");
+        bool red=false,blue=false;
+        for(UINT y=0;y<height;++y)for(UINT x=0;x<bitmap->GetWidth();++x){
+            Color pixel;
+            if(bitmap->GetPixel(x,y,&pixel)!=Ok)continue;
+            red|=pixel.GetR()>200&&pixel.GetG()<100&&pixel.GetB()<100;
+            blue|=pixel.GetB()>200&&pixel.GetR()<100&&pixel.GetG()<100;
+        }
+        return std::pair{red,blue};
+    };
+    check(hasStrokes(0)==std::pair{true,true}&&hasStrokes(36)==std::pair{false,false},
+          "mechanism GIF renders the ellipse and open arc only in their stage");
 }
 static bool autoCaptionsObserved=false, previewPlaying=false, previewThemed=false;
 static HWND activePreview=nullptr;
@@ -214,6 +308,49 @@ static void checkOpenDrawingAnimation(HWND hwnd){
     check(autoCaptionsObserved,"the active CDXML drawing follows the leftward arrow and prefills structure names and both energies");
     check(toNative(doc)==before&&!dirty&&!history.undo(doc),"recognition and cancellation leave the open document intact");
 }
+
+static void checkSelectedAnimationStage(HWND hwnd){
+    doc=Document{};
+    Reaction mechanism;
+    mechanism.id=doc.nextId++;
+    mechanism.slots={{"Start",{}},{"End",{}}};
+    doc.reactions.push_back(mechanism);
+    for(size_t i=0;i<2;++i){
+        Document structure;
+        structure.addAtom({0,0},17);
+        replaceSlotStructure(doc,structure,mechanism.id,i);
+    }
+    selection={doc.addAtom({400,100},17)};
+    targetContainer=0;
+    const auto before=toNative(doc);
+    static int step=0;
+    static bool added=false;
+    SetTimer(hwnd,941,15,[](HWND owner,UINT,UINT_PTR timer,DWORD){
+        auto preview=FindWindowW(L"YoungDrawAnimationPreview",nullptr);
+        if(!preview){
+            auto form=FindWindowW(L"YoungDrawForm",L"결합 애니메이션 GIF");
+            if(form&&GetWindow(form,GW_OWNER)==owner)PostMessageW(form,WM_COMMAND,IDOK,0);
+        }else if(step==0){
+            step=1;
+            PostMessageW(preview,WM_COMMAND,113,0);
+        }else if(step==1){
+            auto form=FindWindowW(L"YoungDrawForm",L"단계에 넣을 구조");
+            if(form&&GetWindow(form,GW_OWNER)==preview){
+                step=2;
+                PostMessageW(form,WM_COMMAND,IDOK,0);
+            }
+        }else if(IsWindowEnabled(preview)){
+            wchar_t text[96]{};
+            GetDlgItemTextW(preview,110,text,96);
+            added=std::wstring(text).find(L" / 3")!=std::wstring::npos;
+            KillTimer(owner,timer);
+            PostMessageW(preview,WM_CLOSE,0,0);
+        }
+    });
+    command(bondAnimationCommand);
+    KillTimer(hwnd,941);
+    check(added&&toNative(doc)==before,"an off-mechanism canvas selection can be added as a third GIF stage");
+}
 int main(){
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
     Microsoft::WRL::ComPtr<IDataObject> previous;OleGetClipboard(&previous);
@@ -223,9 +360,12 @@ int main(){
         auto hwnd=CreateWindowW(wc.lpszClassName,L"GIF test",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);check(hwnd!=nullptr,"create canvas window");
         check(SUCCEEDED(office::start({hwnd,[](const Document&){},[](){return doc;},officePicture},false,false)),"initialize native clipboard rendering callbacks");
         checkBondAnimation();
+        checkSpinKeyframes();
         checkAnimationExportOptions();
+        checkGrowingArrowAndInteraction();
         checkMechanismAnimation();
         checkOpenDrawingAnimation(hwnd);
+        checkSelectedAnimationStage(hwnd);
         auto bytes=readFile(L"animated.gif");auto fragment=imageDocument(bytes);auto hex=fragment.objects[0].imageHex;
         check(fragment.objects[0].mime=="image/gif"&&fragment.objects[0].points[1].y==80.*2/3,"detect GIF and preserve aspect ratio");
         auto& cache=imageCache.at(hex);check(cache.ends==std::vector<ULONGLONG>{70,200}&&cache.infinite,"read GIF frame delays and infinite loop metadata");

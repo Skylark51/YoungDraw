@@ -25,21 +25,144 @@
 #include "office.h"
 #include "plot_data.h"
 #include "mechanism_data.h"
+#include "structure_templates.h"
 #include <commctrl.h>
+#include <shellapi.h>
+#include <shlobj.h>
 
 using namespace yd;
 using namespace yd::editor;
 #include <iostream>
 #include "mechanism_layout_fixture.h"
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+static void dropFiles(HWND hwnd,std::initializer_list<std::wstring> paths){
+    size_t characters=1;
+    for(const auto& path:paths)characters+=path.size()+1;
+    auto handle=GlobalAlloc(GHND,sizeof(DROPFILES)+characters*sizeof(wchar_t));
+    check(handle!=nullptr,"allocate file drop");
+    auto* drop=static_cast<DROPFILES*>(GlobalLock(handle));
+    if(!drop)GlobalFree(handle);
+    check(drop!=nullptr,"lock file drop");
+    drop->pFiles=sizeof(DROPFILES);
+    drop->fWide=TRUE;
+    auto* name=reinterpret_cast<wchar_t*>(drop+1);
+    for(const auto& path:paths)name=std::copy_n(path.c_str(),path.size()+1,name);
+    GlobalUnlock(handle);
+    SendMessageW(hwnd,WM_DROPFILES,reinterpret_cast<WPARAM>(handle),0);
+}
 static int formAction=0;static bool formDriven=false,previewObserved=false;static std::string formBefore;
 static bool paletteDriven=false;
+static int pathNameStep=0,pathNameTicks=0;
+static bool pathNameHeaderUpdated=false;
+static void CALLBACK drivePathName(HWND parent,UINT,UINT_PTR timer,DWORD){
+    const auto grid=FindWindowW(L"YoungDrawGrid",L"에너지 그래프 — 데이터 표");
+    if(!grid||GetWindow(grid,GW_OWNER)!=parent)return;
+    const auto header=ListView_GetHeader(GetDlgItem(grid,10));
+    if(pathNameStep==0){
+        RECT rect{};Header_GetItemRect(header,2,&rect);
+        const auto point=MAKELPARAM((rect.left+rect.right)/2,(rect.top+rect.bottom)/2);
+        PostMessageW(header,WM_LBUTTONDOWN,MK_LBUTTON,point);
+        PostMessageW(header,WM_LBUTTONUP,0,point);
+        PostMessageW(header,WM_LBUTTONDBLCLK,MK_LBUTTON,point);
+        PostMessageW(header,WM_LBUTTONUP,0,point);
+        pathNameStep=1;
+        return;
+    }
+    if(pathNameStep==1){
+        const auto dialog=FindWindowW(L"YoungDrawForm",L"경로 이름 변경");
+        if(dialog&&GetWindow(dialog,GW_OWNER)==grid){
+            SetDlgItemTextW(dialog,100,L"S = 1");
+            PostMessageW(dialog,WM_COMMAND,IDOK,0);
+            pathNameStep=2;
+            return;
+        }
+        if(++pathNameTicks<100)return;
+    }
+    wchar_t title[64]{};
+    HDITEMW item{};item.mask=HDI_TEXT;item.pszText=title;item.cchTextMax=64;
+    Header_GetItem(header,2,&item);
+    pathNameHeaderUpdated=pathNameStep==2&&std::wstring(title)==L"S = 1";
+    KillTimer(parent,timer);
+    PostMessageW(grid,WM_COMMAND,22,0);
+}
+static bool chemistryMenuOpened=false;
+enum class CrossingAction { AddLeft,AddRight,CancelEdit,DeleteLeft };
+static CrossingAction crossingAction;
+static bool crossingPreviewSeen=false;
+static void CALLBACK driveCrossing(HWND parent,UINT,UINT_PTR timer,DWORD){
+    const auto dialog=GetLastActivePopup(parent);
+    if(dialog==parent)return;
+    wchar_t title[80]{};
+    GetWindowTextW(dialog,title,80);
+    const std::wstring name=title;
+    if(name==L"스핀 교차점 관리"||name==L"삭제할 스핀 교차점"){
+        const auto list=GetDlgItem(dialog,11);
+        const auto entry=name==L"스핀 교차점 관리"&&crossingAction==CrossingAction::DeleteLeft
+            ?SendMessageW(list,LB_GETCOUNT,0,0)-1:0;
+        SendMessageW(list,LB_SETCURSEL,entry,0);
+        PostMessageW(dialog,WM_COMMAND,IDOK,0);
+        if(name==L"삭제할 스핀 교차점")KillTimer(parent,timer);
+        return;
+    }
+    if(name!=L"스핀 교차점 추가"&&name!=L"스핀 교차점 편집")return;
+    KillTimer(parent,timer);
+    if(crossingAction==CrossingAction::AddLeft){
+        SendDlgItemMessageW(dialog,101,CB_SETCURSEL,1,0);
+        SendDlgItemMessageW(dialog,102,CB_SETCURSEL,2,0);
+    }
+    if(crossingAction==CrossingAction::AddRight)SetDlgItemTextW(dialog,104,L"35");
+    SetDlgItemTextW(dialog,103,crossingAction==CrossingAction::AddLeft?L"6.92":
+        crossingAction==CrossingAction::AddRight?L"6.57":L"7.1");
+    if(crossingAction==CrossingAction::CancelEdit)
+        crossingPreviewSeen=doc.plots.front().crossings.front().energy==7.1;
+    else{
+        wchar_t segment[64]{};
+        SendDlgItemMessageW(dialog,100,CB_GETLBTEXT,0,reinterpret_cast<LPARAM>(segment));
+        crossingPreviewSeen=std::wstring(segment)==(crossingAction==CrossingAction::AddLeft?L"R → TS":L"TS → P")&&
+            scene().crossingCaptions.size()==(crossingAction==CrossingAction::AddLeft?1:2);
+    }
+    PostMessageW(dialog,WM_COMMAND,IsWindowEnabled(GetDlgItem(dialog,IDOK))&&
+        crossingAction!=CrossingAction::CancelEdit?IDOK:IDCANCEL,0);
+}
+static void CALLBACK driveChemistryMenu(HWND parent,UINT,UINT_PTR timer,DWORD){
+    HWND dialog=GetLastActivePopup(parent);
+    wchar_t name[64]{};
+    GetClassNameW(dialog,name,64);
+    if(std::wstring(name)==L"YoungDrawGrid"){
+        KillTimer(parent,timer);
+        const auto list=GetDlgItem(dialog,10);
+        SendMessageW(list,WM_KEYDOWN,VK_RIGHT,0);
+        SendMessageW(list,WM_KEYDOWN,VK_RIGHT,0);
+        SendMessageW(list,WM_KEYDOWN,VK_F2,0);
+        if(auto editor=FindWindowExW(list,nullptr,L"EDIT",nullptr)){
+            SetWindowTextW(editor,L"-0.314");
+            chemistryMenuOpened=true;
+            PostMessageW(dialog,WM_COMMAND,22,0);
+        }else PostMessageW(dialog,WM_CLOSE,0,0);
+    }else if(std::wstring(name)==L"YoungDrawForm"){
+        KillTimer(parent,timer);
+        chemistryMenuOpened=true;
+        PostMessageW(dialog,WM_COMMAND,IDOK,0);
+    }
+}
 static int mechanismGridAction=0;
+static int mechanismLayoutChoice=0;
 static bool mechanismDraftHidden=false;
 static void CALLBACK driveNewMechanism(HWND parent,UINT,UINT_PTR timer,DWORD){
     HWND dialog=GetLastActivePopup(parent);
     wchar_t name[64]{};
     GetClassNameW(dialog,name,64);
+    if(std::wstring(name)==L"YoungDrawForm"){
+        wchar_t title[64]{};
+        GetWindowTextW(dialog,title,64);
+        if(std::wstring(title)==L"원형 분기·합류 단계 수"){
+            SetDlgItemTextW(dialog,100,L"4");
+            SetDlgItemTextW(dialog,101,L"1");
+            SetDlgItemTextW(dialog,102,L"3");
+        }else SendDlgItemMessageW(dialog,100,CB_SETCURSEL,mechanismLayoutChoice,0);
+        PostMessageW(dialog,WM_COMMAND,IDOK,0);
+        return;
+    }
     if(std::wstring(name)!=L"YoungDrawGrid")return;
     KillTimer(parent,timer);
     mechanismDraftHidden=toNative(doc)==formBefore;
@@ -61,10 +184,30 @@ static void checkNewMechanism(HWND hwnd){
           selection==std::vector<int>{atom}&&tool==Text&&sidebarPage==1,
           "discarding the new mechanism leaves canvas, selection, tool, sidebar and history intact");
     mechanismGridAction=1;
-    SetTimer(hwnd,901,10,driveNewMechanism);
-    command(120);
-    check(doc.reactions.size()==1&&dirty&&sidebarPage==0&&history.undo(doc)&&toNative(doc)==formBefore&&
-          !history.undo(doc),"applying a new mechanism creates exactly one undo step");
+    for(int choice=0;choice<4;choice++){
+        mechanismLayoutChoice=choice;
+        SetTimer(hwnd,901,10,driveNewMechanism);
+        command(120);
+        check(doc.reactions.size()==1&&dirty&&sidebarPage==0,"creation command applies each selected mechanism layout");
+        const auto r=doc.reactions.front();
+        check(r.cyclic==(choice==3)&&r.fixedFrames==(choice==1||choice==2)&&
+              r.slots.size()==std::vector<size_t>{3,6,11,4}[choice],"creation menu selects the intended topology and requested counts");
+        if(choice==2){
+            auto before=toNative(doc);
+            for(size_t edge=0;edge<r.links.size();edge++){
+                fit();
+                auto buttons=mechanismSplitButtons(doc.reactions.front());
+                check(buttons.size()==r.links.size()&&buttons[edge].first==edge,"each connection has an insertion button");
+                mouseDown(buttons[edge].second);
+                const auto& added=doc.reactions.front();
+                check(added.slots.size()==r.slots.size()+1&&added.links[edge].to==int(r.slots.size())&&
+                      added.links.back().to==r.links[edge].to,"clicking a canvas plus splits exactly its connection");
+                check(history.undo(doc)&&toNative(doc)==before,"connection insertion is undone in one step");
+            }
+        }
+        check(history.undo(doc)&&toNative(doc)==formBefore&&!history.undo(doc),
+              "applying a new mechanism creates exactly one undo step");
+    }
     doc={};selection.clear();history.clear();dirty=false;tool=Select;
 }
 static bool recognizedTableOpened=false;
@@ -100,6 +243,8 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==25){
         SetDlgItemTextW(dialog,100,L"4");
+    }else if(formAction==26){
+        SendDlgItemMessageW(dialog,101,CB_SETCURSEL,4,0);
     }else if(formAction==11||formAction==12){
         SetDlgItemTextW(dialog,100,L"4");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==13||formAction==14){
@@ -138,7 +283,7 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20)?IDCANCEL:IDOK,0);
 }
 static void graphUnitChecks(HWND hwnd){
-    doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;int owner=selection[0];
+    doc=coordinateDemo();doc.plots[0].unit="kcal/mol";history.clear();selection={doc.plots[0].id};dirty=false;int owner=selection[0];
     auto before=toNative(doc);formBefore=before;formAction=20;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
     check(formDriven&&previewObserved&&toNative(doc)==before,"unit selection previews immediately and Cancel restores the graph");
     formAction=21;formDriven=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
@@ -148,6 +293,14 @@ static void graphUnitChecks(HWND hwnd){
     for(auto copy:{fromNative(toNative(doc)),fromCdxml(toCdxml(doc))})check(copy.plots[0].unit=="kcal mol^{-1}","unit survives native and CDXML roundtrips");
     check(toSvg(makeScene(doc,measure)).find("kcal mol")!=std::string::npos,"SVG contains the selected unit");
     writePreview(L"graph-inverse-mole-unit.png",doc);
+    {
+        auto preview=doc;auto& graph=preview.plots[0];graph.energyAtTop=true;
+        graph.series.push_back({"S = 1","#b44758",{0,26,10,19,-9.9},1,2});graph.series[0].name="S = 0";
+        writePreview(L"graph-top-energy-header.png",preview);
+        graph.showYTicks=false;writePreview(L"graph-top-energy-no-ticks.png",preview);
+        graph.showXAxis=false;graph.showYAxis=false;writePreview(L"graph-no-axes.png",preview);
+    }
+
     check(history.undo(doc)&&doc.plots[0].unit=="kcal/mol","unit choice is undoable");
     check(history.redo(doc)&&doc.plots[0].unit=="kcal mol^{-1}","unit choice is redoable");
     formAction=24;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(doc.plots[0].unit=="kcal mol^{-1}","reopening settings preserves selected notation");
@@ -247,9 +400,10 @@ int main(int argc,char** argv){
             BYTE previous[256]{};GetKeyboardState(previous);BYTE keys[256];memcpy(keys,previous,sizeof(keys));keys[VK_CONTROL]=0x80;keys[VK_SHIFT]=0;SetKeyboardState(keys);key('G');SetKeyboardState(previous);
             check(doc.groups.size()==1&&contains(selection,a)&&contains(selection,b),"Ctrl+G groups bonds with endpoints, text and arrows");
             auto grouped=toNative(doc);command(198);check(doc.groups.size()==1&&toNative(doc)==grouped,"repeated grouping creates no duplicate group");
+            BYTE dragKeys[256]{};SetKeyboardState(dragKeys);
             selection.clear();Vec at=screen({0,50});mouseDown(at);mouseUp(at);
             check(contains(selection,a)&&contains(selection,label.id)&&contains(selection,arrow.id)&&!contains(selection,outsider),"clicking grouped text selects the entire group");
-            mouseDown(at);check(!inlineEdit&&dragging,"grouped text starts a group drag instead of inline editing");mouse=at+Vec{40,20};updateDrag();mouseUp(mouse);
+            mouseDown(at);check(!inlineEdit&&dragging,"grouped text starts a group drag instead of inline editing");mouse=at+Vec{40,20};updateDrag();mouseUp(mouse);SetKeyboardState(previous);
             check((doc.atom(a)->p-Vec{20,10}).length()<.001&&(doc.atom(outsider)->p-Vec{170,100}).length()<.001,"dragging a group moves all members and leaves other objects fixed");
             check((doc.objects[0].points[0]-Vec{20,60}).length()<.001&&(doc.objects[1].points[0]-Vec{90,10}).length()<.001,"group drag preserves relative text and arrow positions");
             check(history.undo(doc)&&toNative(doc)==grouped,"group movement can be undone");
@@ -281,10 +435,45 @@ int main(int argc,char** argv){
             check(hit(164).GetRight()<1200,"all toolbar groups fit minimum window width");
             check(present(218)&&present(219)&&hit(150).GetBottom()<=wh-bottom,"orbital tools and style button fit the client height");
             auto before=toNative(doc);command(183);repaint();
-            check(present(137)&&present(139)&&present(138)&&present(141)&&!present(127)&&!present(126),"graph tab groups graph-only actions");
+            check(present(137)&&present(139)&&present(138)&&present(141)&&present(151)&&!present(127)&&!present(126),"graph tab groups graph-only actions, including spin crossings");
+            check(hit(151).Y==hit(137).Y&&!helpText(151).empty(),"spin crossing control fits in the graph tools row and has help");
             check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow,"graph sidebar puts publication formatting last and shares the structure insertion position");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;
+            check(present(dottedBondCommand)&&!helpText(dottedBondCommand).empty(),"dotted single bond tool is available in the sidebar with help");
+            const auto dotted=hit(dottedBondCommand);
+            mouseDown({dotted.X+dotted.Width/2,dotted.Y+dotted.Height/2});
+            mouseDown(origin);mouseUp(origin+Vec{60,0});
+            check(tool==DottedBond&&doc.atoms.size()==2&&doc.bonds.size()==1&&doc.bonds[0].kind==BondKind::Dot&&doc.objects.empty(),"dotted bond tool draws a real single bond between two atoms");
+            const int dottedId=doc.bonds.front().id;
+            command(201);mouseDown(screen((doc.atoms[0].p+doc.atoms[1].p)*.5));mouseUp(screen((doc.atoms[0].p+doc.atoms[1].p)*.5));
+            check(doc.bonds.size()==1&&doc.bond(dottedId)->kind==BondKind::Single,"single bond tool restores dotted bond to solid without duplicates");
+            selection={dottedId};command(dottedBondCommand);
+            check(doc.bond(dottedId)->kind==BondKind::Dot,"selected solid bond converts to dotted from the command");
+            command(104);check(doc.bond(dottedId)->kind==BondKind::Single,"dotted bond conversion can be undone");
+            selection.clear();command(dottedBondCommand);
+            mouseDown(screen((doc.atoms[0].p+doc.atoms[1].p)*.5));mouseUp(screen((doc.atoms[0].p+doc.atoms[1].p)*.5));
+            check(doc.bonds.size()==1&&doc.bond(dottedId)->kind==BondKind::Dot,"dotted tool converts an existing bond on click");
+            check(fromCdxml(toCdxml(doc)).bond(dottedId)->kind==BondKind::Dot,"drawn dotted bond survives a CDXML round trip");
+            doc=Document{};selection.clear();history.clear();dirty=false;
+            const auto interaction=hit(interactionToolCommand);
+            mouseDown({interaction.X+interaction.Width/2,interaction.Y+interaction.Height/2});
+            mouseDown(origin);mouseUp(origin+Vec{60,20});
+            check(tool==Interaction&&doc.atoms.empty()&&doc.bonds.empty()&&doc.objects.size()==1&&
+                  doc.objects.front().kind==ObjectKind::Line&&doc.objects.front().dash==2&&
+                  fromCdxml(toCdxml(doc)).objects.front().dash==2,
+                  "the sidebar interaction tool draws a dotted graphic that survives a CDXML round trip");
+            command(104);check(doc.objects.empty(),"interaction line can be undone");
+            const int donor=doc.addAtom({0,0},8),acceptor=doc.addAtom({45,0},7);
+            mouseDown(screen(doc.atom(donor)->p));mouseUp(screen(doc.atom(acceptor)->p));
+            auto attached=fromCdxml(toCdxml(doc)).subset({donor,acceptor});
+            check(attached.objects.size()==1&&attached.objects.front().sourceAtom==donor&&
+                  attached.objects.front().targetAtom==acceptor,"both atom anchors survive saving and copying the structure");
+            attached.translate({acceptor},{20,15});
+            const auto routed=routeArrow(attached,attached.objects.front());
+            check((routed.front()-attached.atom(donor)->p).length()<1e-9&&
+                  (routed.back()-attached.atom(acceptor)->p).length()<1e-9,"the interaction endpoint follows the moved atom");
+            doc=Document{};selection.clear();history.clear();
             command(218);orbitalKind=OrbitalKind::P;orbitalPhase=2;
             Vec at=origin;mouseDown(at);mouse=at+Vec{60,0};mouseUp(mouse);
             check(doc.objects.size()==2&&doc.groups.size()==1&&selection.size()==2,"orbital tool draws two grouped phase lobes on drag");
@@ -380,6 +569,55 @@ int main(int argc,char** argv){
             doc={};history.clear();selection.clear();dirty=false;
         }
         {
+            doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;
+            doc.plots[0].series[0].values[0]=.123456789012345;
+            const auto before=doc;
+            pathNameStep=pathNameTicks=0;pathNameHeaderUpdated=false;
+            SetTimer(hwnd,901,10,drivePathName);
+            command(131);
+            KillTimer(hwnd,901);
+            auto expected=before;expected.plots[0].series[0].name="S = 1";
+            check(pathNameHeaderUpdated&&dirty&&toNative(doc)==toNative(expected)&&
+                  doc.plots[0].series[0].values==expected.plots[0].series[0].values,
+                  "double-clicking the path column renames only that series and preserves energy precision");
+            const auto picture=scene();
+            check(std::any_of(picture.items.begin(),picture.items.end(),[](const Primitive& item){
+                return item.type==Primitive::Text&&item.textRole==7&&item.text=="S = 1";
+            }),"renamed pathway appears in the graph legend");
+            check(fromNative(toNative(doc)).plots[0].series[0].name=="S = 1"&&
+                  history.undo(doc)&&toNative(doc)==toNative(before),"path name persists on reopen and can be undone");
+            doc={};history.clear();selection.clear();dirty=false;
+        }
+        {
+            doc={};history.clear();dirty=false;
+            EnergyPlot p;p.id=doc.nextId++;p.states={{"R",-19.52},{"TS",43.4},{"P",3.59}};
+            p.series={{"S = 0","#000000",{-19.52,43.4,3.59}},{"S = 1","#b44758",{-20.41,7.79,0}},
+                      {"S = 2","#167d9a",{0,0,-5.33}}};
+            p.series[2].present={false,false,true};
+            doc.plots={p};selection={p.id};
+            auto run=[&](CrossingAction action){
+                crossingAction=action;crossingPreviewSeen=false;
+                SetTimer(hwnd,901,10,driveCrossing);command(151);KillTimer(hwnd,901);
+            };
+            run(CrossingAction::AddLeft);
+            check(crossingPreviewSeen&&doc.plots[0].crossings.size()==1,"adding by named segment previews and commits the left crossing");
+            const auto left=doc.plots[0].crossings[0];
+            check(left.segment==0&&left.firstPath==1&&left.secondPath==2&&left.position==.5&&
+                  left.label=="S = 1 / S = 2"&&left.energy==6.92,"named paths and default midpoint populate the left crossing");
+            run(CrossingAction::AddRight);
+            check(crossingPreviewSeen&&doc.plots[0].crossings.size()==2,"the remaining named segment adds the right crossing");
+            const auto right=doc.plots[0].crossings[1];
+            check(right.segment==1&&right.firstPath==0&&right.secondPath==1&&right.position==.35&&right.energy==6.57,
+                  "the right crossing uses the chosen position and energy");
+            const auto before=toNative(doc);
+            run(CrossingAction::CancelEdit);
+            check(crossingPreviewSeen&&toNative(doc)==before,"canceling an existing crossing edit restores its preview");
+            run(CrossingAction::DeleteLeft);
+            check(doc.plots[0].crossings.size()==1&&doc.plots[0].crossings[0].segment==1&&
+                  history.undo(doc)&&toNative(doc)==before,"deleting one crossing preserves the other and is undoable");
+            doc={};history.clear();selection.clear();dirty=false;
+        }
+        {
             doc=coordinateDemo();history.clear();selection={doc.plots[0].id};targetContainer=selection.front();tool=Text;dirty=false;doc.graphsLocked=true;
             auto before=toNative(doc);auto chosen=selection;auto target=targetContainer;
             for(double scale:{.6,1.,3.}){
@@ -423,7 +661,80 @@ int main(int argc,char** argv){
         }
 
         {
+            doc={};history.clear();selection.clear();tool=Select;
+            EnergyPlot p;
+            p.id=doc.nextId++;
+            p.states={{"A",0,{},{}},{"TS",42.7,{},{}}};
+            p.series={{"S = 0","#000000",{0,42.7}},{"S = 2","#0000ff",{7.4,19.0}}};
+            p.crossings={{"MECP",0,0,1,.44,9.46}};
+            doc.plots={p};
+            zoom=1.25;origin={double(left+25),double(top+20)};
+            redraw();
+            const auto caption=scene().crossingCaptions.at(0);
+            const Vec at=screen({caption.bounds.x+caption.bounds.w/2,caption.bounds.y+5});
+            mouseDown(at);
+            check(dragging,"crossing caption starts a drag in select mode");
+            mouseUp(at+Vec{50,25});
+            const auto& movedPlot=doc.plots.front();
+            check((movedPlot.p-p.p).length()<1e-8&&movedPlot.crossings[0].energy==9.46,
+                  "dragging the crossing caption keeps the graph and crossing fixed");
+            check(movedPlot.crossings[0].labelOffset&&
+                  (*movedPlot.crossings[0].labelOffset-caption.offset-Vec{40,20}).length()<1e-8,
+                  "crossing caption moves by the pointer displacement in plot coordinates");
+            check(history.undo(doc)&&!doc.plots.front().crossings.front().labelOffset,
+                  "crossing caption drag is one undo operation");
+            selection.clear();
+        }
+
+        {
+            doc={};history.clear();selection.clear();hoverBond=0;tool=Select;
+            const int a=doc.addAtom({20,20}),b=doc.addAtom({70,20});doc.addBond(a,b);hoverAtom=a;
+            const auto carbonVisible=[&](const Document& drawing){
+                for(const auto& item:makeScene(drawing).items)
+                    if(item.owner==a&&item.type==Primitive::Text&&item.text=="C")return true;
+                return false;
+            };
+            check(!carbonVisible(doc),"ordinary bonded carbon starts with its symbol implicit");
+            const auto before=toNative(doc);
+            SendMessageW(hwnd,WM_CHAR,'c',0);
+            check(doc.atom(a)->element==6&&doc.atom(a)->label=="C"&&carbonVisible(doc)&&doc.atoms.size()==2&&doc.bonds.size()==1,
+                  "lowercase c explicitly displays C on a bonded carbon without changing connectivity");
+            check(carbonVisible(fromNative(toNative(doc))),"explicit carbon symbol survives native save and reload");
+            check(carbonVisible(fromCdxml(toCdxml(doc))),"explicit carbon symbol survives CDXML save and reload");
+            check(history.undo(doc)&&toNative(doc)==before&&!carbonVisible(doc),"explicit carbon symbol is one undo operation");
+            doc.atom(a)->charge=1;doc.atom(a)->radical=2;hotkey('c');
+            check(carbonVisible(doc)&&doc.atom(a)->charge==1&&doc.atom(a)->radical==2,"carbon shortcut preserves charge and radical");
+            hotkey('0');check(carbonVisible(doc),"clearing annotations preserves the explicit carbon symbol");
+            hotkey('n');check(doc.atom(a)->element==7&&doc.atom(a)->label.empty(),"another element shortcut removes the explicit C label");
+            hotkey('c');check(doc.atom(a)->element==6&&carbonVisible(doc),"converting another element to carbon explicitly displays C");
+            hotkey('C');check(doc.atom(a)->element==17&&doc.atom(a)->label.empty(),"uppercase C retains the chlorine shortcut");
+            selection.clear();hoverAtom=hoverBond=0;
+        }
+
+        {
             doc={};history.clear();int a=doc.addAtom({20,20},27),b=doc.addAtom({70,20},8);doc.atom(a)->label="CoIII";selection={a};hoverAtom=hoverBond=0;tool=Select;
+            for(const auto state:std::vector<std::pair<int,int>>{{0,1},{0,2},{0,3},{1,0},{-1,0},{2,2},{-2,2}}){
+                doc.atom(a)->charge=state.first;doc.atom(a)->radical=state.second;history.clear();
+                const auto before=toNative(doc);
+                SendMessageW(hwnd,WM_CHAR,'0',0);
+                check(!doc.atom(a)->charge&&!doc.atom(a)->radical&&doc.atom(a)->label=="CoIII"&&doc.atoms.size()==2,
+                      "zero clears selected radical and ion annotations while preserving atom and label");
+                for(const auto& item:scene().items)check(item.owner!=a||item.textRole!=13,"cleared annotations are no longer rendered");
+                check(history.undo(doc)&&toNative(doc)==before,"zero clears both annotations in one undo operation");
+                check(!history.undo(doc),"zero adds exactly one undo checkpoint");
+            }
+            doc.atom(a)->charge=-1;doc.atom(a)->radical=2;
+            doc.atom(b)->charge=1;doc.atom(b)->radical=2;hoverAtom=b;history.clear();
+            hotkey('0');
+            check(!doc.atom(b)->charge&&!doc.atom(b)->radical&&doc.atom(a)->charge==-1&&doc.atom(a)->radical==2,
+                  "zero uses hovered atom before the selected atom");
+            check(history.undo(doc)&&doc.atom(b)->charge==1&&doc.atom(b)->radical==2,"hovered reset is undoable");
+            doc.atom(b)->charge=0;doc.atom(b)->radical=0;history.clear();
+            const auto neutral=toNative(doc);hotkey('0');
+            check(toNative(doc)==neutral&&!history.undo(doc),"zero on neutral hovered atom makes no edit or undo checkpoint");
+            hoverAtom=0;selection.clear();const auto untargeted=toNative(doc);hotkey('0');
+            check(toNative(doc)==untargeted&&!history.undo(doc),"zero without atom target leaves the drawing unchanged");
+            selection={a};doc.atom(a)->charge=0;doc.atom(a)->radical=0;
             hotkey('-');hotkey('*');check(doc.atom(a)->charge==-1&&doc.atom(a)->radical==2&&doc.atom(a)->label=="CoIII","selected atom accepts radical anion without clearing label");
             hotkey('*');check(!doc.atom(a)->radical&&doc.atom(a)->charge==-1,"radical shortcut toggles independently of charge");
             hoverAtom=b;hotkey('+');hotkey('*');check(doc.atom(b)->charge==1&&doc.atom(b)->radical==2&&doc.atom(a)->charge==-1,"hover target gets radical cation before selected atom");
@@ -433,9 +744,35 @@ int main(int argc,char** argv){
             check(doc.atom(b)->annotationManual&&(doc.atom(b)->p-original).length()<1e-8,"annotation drag leaves atom fixed");
             auto saved=fromNative(toNative(doc));check(saved.atom(b)->annotationManual,"dragged annotation persists");
             check(history.undo(doc)&&!doc.atom(b)->annotationManual,"annotation drag is one undo operation");
+            selection={a};
+            chemistryMenuOpened=false;
+            SetTimer(hwnd,973,10,driveChemistryMenu);
+            SendMessageW(hwnd,WM_COMMAND,mullikenSpinCommand,0);
+            KillTimer(hwnd,973);
+            check(chemistryMenuOpened&&doc.atom(a)->mullikenSpin==-.314&&!doc.atom(b)->mullikenSpin,
+                  "Mulliken edit menu annotates only the selected atom");
+            check(history.undo(doc)&&!doc.atom(a)->mullikenSpin,"selected spin edit is undoable");
             setInlineValue({a,0},"CoIII");check(doc.atom(a)->label=="Co^{III}","typed atom oxidation state is normalized");
             Object text;text.id=doc.nextId++;text.kind=ObjectKind::Text;text.points={{20,70}};doc.objects.push_back(text);setInlineValue({text.id,0},"CoIII");check(doc.objects.back().text=="Co^{III}","typed free text oxidation state is normalized");
             writePreview(L"atom-annotations.png",doc);selection.clear();hoverAtom=hoverBond=0;annotationDrag=0;
+        }
+        {
+            const auto& groups=functionalGroups();
+            const auto entry=std::find_if(groups.begin(),groups.end(),[](const auto& item){
+                return std::string(item.abbreviation)=="OMe";
+            });
+            check(entry!=groups.end(),"methoxy template is available");
+            doc=entry->drawing;
+            const int root=doc.atoms.front().id;
+            history.clear();selection={root};
+            chemistryMenuOpened=false;
+            SetTimer(hwnd,973,10,driveChemistryMenu);
+            SendMessageW(hwnd,WM_COMMAND,abbreviateGroupsCommand,0);
+            KillTimer(hwnd,973);
+            check(chemistryMenuOpened&&doc.atom(root)->label=="OMe"&&doc.atoms.size()==2,
+                  "abbreviation edit menu applies a recognized group");
+            check(history.undo(doc)&&doc.atoms.size()==3,"menu abbreviation is undoable");
+            selection.clear();
         }
 
         {
@@ -490,6 +827,18 @@ int main(int argc,char** argv){
             formAction=4;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);reactionSettings(doc.reactions[0].id);
             check(formDriven&&previewObserved&&doc.reactions[0].wrapColumns==2&&doc.reactions[0].rowGap==180,"serpentine settings apply from the real dialog");
             check(history.undo(doc)&&toNative(doc)==formBefore,"serpentine settings undo restores original structures and positions");
+            doc={};history.clear();
+            auto legacy=mechanismTemplate(MechanismTemplate::SplitAndMerge);
+            legacy.id=doc.nextId++;
+            legacy.circularMerge=false;
+            legacy.slotGrid={{-1,0},{0,0},{0,1},{-1.35,1.65},{-1.35,2.55},{1.45,2.1},{0,3.2}};
+            legacy.slots[3].label="Saved intermediate";
+            doc.reactions.push_back(legacy);
+            formBefore=toNative(doc);
+            formAction=26;formDriven=false;SetTimer(hwnd,901,10,driveForm);reactionSettings(legacy.id);
+            check(formDriven&&doc.reactions.front().circularMerge&&doc.reactions.front().slots[3].label=="Saved intermediate"&&
+                  mechanismLinkArc(doc.reactions.front(),2,doc.style).has_value(),"settings convert an existing oval and keep its stage contents");
+            check(history.undo(doc)&&toNative(doc)==formBefore,"converting an existing path is undoable");
             doc=mechanismDemo();for(int i=0;i<4;i++){doc.reactions[0].slots.push_back({"State "+std::to_string(i+4),{},"0.0"});doc.reactions[0].above.push_back("TS / Step");doc.reactions[0].below.push_back("12.3");}
             doc.reactions[0].wrapColumns=3;for(size_t i=0;i<7;i++)if(doc.reactions[0].slots[i].members.empty())fillSlot(doc,demo(),doc.reactions[0].id,i);optimizeMechanism(doc);writePreview(L"mechanism-serpentine.png",doc);
             doc={};EnergyPlot staged;staged.id=doc.nextId++;staged.states={{"A",0},{"B",20},{"C",-10}};staged.series={{"Path 1","#167d9a",{0,20,-10}}};staged.stages=defaultMechanismStages();staged.stages[1].fontSize=24;doc.plots.push_back(staged);
@@ -736,6 +1085,39 @@ int main(int argc,char** argv){
             check(history.undo(doc)&&toNative(doc)==formBefore,"range color edit is undoable");
             formAction=10;formBefore=toNative(doc);previewObserved=false;formDriven=false;SetTimer(win,995,20,driveForm);editPlotColors(id);
             check(formDriven&&previewObserved&&toNative(doc)==formBefore,"cancel restores colors after preview");
+            tool=Select;hits.clear();
+            auto point=std::find_if(points.begin(),points.end(),[](const auto& s){return s.state==2&&s.edge==0;});
+            check(point!=points.end(),"interior level has a drag handle");
+            const auto at=screen(point->p);
+            const auto graphBefore=toNative(doc);
+            const double previousEnergy=doc.plots[0].series[0].values[2];
+            mouseDown(at);mouseUp(at+Vec{0,-12});
+            check(doc.plots[0].series[0].values[2]>previousEnergy&&!doc.plots[0].yMax,
+                  "vertical drag updates the energy and restores automatic axis mode");
+            check(history.undo(doc)&&toNative(doc)==graphBefore,"level height drag is undoable");
+
+            BYTE savedKeys[256]{},altKeys[256]{};
+            GetKeyboardState(savedKeys);memcpy(altKeys,savedKeys,sizeof(altKeys));altKeys[VK_MENU]=0x80;
+            SetKeyboardState(altKeys);mouseDown(at);mouseUp(at+Vec{15,0});SetKeyboardState(savedKeys);
+            check(doc.plots[0].states[2].position&&*doc.plots[0].states[2].position>.5,
+                  "Alt-drag moves a graph state on the horizontal axis");
+            check(history.undo(doc)&&toNative(doc)==graphBefore,"horizontal level drag is undoable");
+
+            doc=mechanismDemo();fit();hits.clear();
+            const auto mechanism=toNative(doc);
+            const auto beforeSlot=reactionSlot(doc.reactions[0],1);
+            const auto beforeOther=reactionSlot(doc.reactions[0],0);
+            const int member=doc.reactions[0].slots[1].members.front();
+            const auto beforeAtom=doc.atom(member)->p;
+            const auto handle=screen(beforeSlot);
+            SetKeyboardState(altKeys);mouseDown(handle);mouseUp(handle+Vec{30,24});SetKeyboardState(savedKeys);
+            const auto displacement=reactionSlot(doc.reactions[0],1)-beforeSlot;
+            check(doc.reactions[0].fixedFrames&&displacement.length()>1&&
+                  (doc.atom(member)->p-beforeAtom-displacement).length()<1e-6&&
+                  (reactionSlot(doc.reactions[0],0)-beforeOther).length()<1e-6,
+                  "Alt-drag moves the stage and its structure without shifting neighboring stages");
+            check(history.undo(doc)&&toNative(doc)==mechanism,"manual stage placement is undoable");
+            doc=fromNative(graphBefore);fit();hits.clear();
             snapPlot=id;snapStage=-1;snapLabel={"Spin crossing",0,100};snapStart.reset();
             auto before=toNative(doc);auto first=points.front(),last=points.back();
             mouseDown(screen(last.p));check(snapStart.has_value()&&toNative(doc)==before,"first snap click is nonmutating");
@@ -750,6 +1132,20 @@ int main(int argc,char** argv){
         }
         check(closeDocumentTab(1)&&documents.size()==1&&doc.atoms[0].element==6,"closing a tab restores its neighbor");
         check(closeDocumentTab(0)&&documents.size()==1&&doc.atoms.empty()&&!dirty,"closing last tab leaves a clean empty document");
+        check((GetWindowLongPtrW(hwnd,GWL_EXSTYLE)&WS_EX_ACCEPTFILES)!=0,"editor accepts shell file drops");
+        const auto nativePath=fs::absolute(L"드롭 테스트.ydraw").wstring();
+        Document native;native.addAtom({0,0},8);
+        writeFile(nativePath,toNative(native));
+        doc.addAtom({0,0},16);dirty=true;
+        dropFiles(hwnd,{firstPath,nativePath});
+        check(documents.size()==3&&filePath==nativePath&&doc.atoms.size()==1&&doc.atoms[0].element==8,
+              "one file drop opens CDXML and Unicode-named native documents in separate tabs");
+        check(documents[0].dirty&&documents[0].document.atoms[0].element==16,
+              "dropping files preserves the unsaved document");
+        dropFiles(hwnd,{firstPath});
+        check(documents.size()==3&&filePath==firstPath&&doc.atoms.size()==1&&doc.atoms[0].element==6,
+              "dropping an open document activates its existing tab");
+        fs::remove(nativePath);
         fs::remove(firstPath);fs::remove(secondPath);DestroyWindow(hwnd);
         std::cout<<"Document tab regression tests passed\n";
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';result=1;}
