@@ -5,6 +5,25 @@
 #include <cctype>
 #include <map>
 namespace yd {
+EnergyPlot spinMultiplicityPlot(){
+    EnergyPlot plot;
+    plot.width=460;
+    plot.height=285;
+    plot.title="Spin-state energies";
+    plot.xLabel="Spin multiplicity (2S + 1)";
+    plot.unit="kcal mol^{-1}";
+    plot.mode=independentEnergyLevels;
+    plot.states={{"S = 0",46.3},{"S = 1",21.1},{"S = 2",0.0}};
+    EnergySeries levels;
+    levels.values={46.3,21.1,0.0};
+    levels.levelColors={"#25282d","#b44758","#167d9a"};
+    levels.marker=3;
+    plot.series.push_back(std::move(levels));
+    return plot;
+}
+double plotStateFraction(const EnergyPlot& plot,size_t index){
+    return plot.states.at(index).position.value_or(double(index)/std::max(size_t(1),plot.states.size()-1));
+}
 EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std::string& leftName){
     const size_t n=original.states.size();
     if(n<2||n>50)throw std::runtime_error("양쪽 분기는 상태가 2~50개인 그래프에서 추가하세요 (분기 후 최대 99개).");
@@ -20,6 +39,11 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     std::vector<EnergyState> states;
     for(size_t i=n-1;i>0;i--){auto state=original.states[i];state.above.clear();state.below.clear();state.energy=left.values[i];states.push_back(state);}
     states.insert(states.end(),original.states.begin(),original.states.end());result.states=std::move(states);
+    for(size_t i=0;i<n;i++){
+        const auto position=i?plotStateFraction(original,i):0.;
+        result.states[n-1+i].position=.5+.5*position;
+        result.states[n-1-i].position=.5-.5*position;
+    }
     for(auto& path:result.series){
         std::vector<double> values(2*n-1,0);std::vector<bool> present(2*n-1,false);
         for(size_t i=0;i<n;i++)if(path.hasValue(i)){values[n-1+i]=path.values[i];present[n-1+i]=true;}
@@ -93,12 +117,14 @@ void validateEnergyCrossings(const EnergyPlot& plot){
             throw std::runtime_error("Invalid crossing point. Use two distinct paths and one point per segment.");
     }
 }
-bool hasCrossingEndpoints(const EnergyPlot& plot,const EnergyCrossing& crossing){
+bool hasCrossingPaths(const EnergyPlot& plot,const EnergyCrossing& crossing){
+    if(crossing.segment<0||size_t(crossing.segment)+1>=plot.states.size())return false;
     for(int path:{crossing.firstPath,crossing.secondPath}){
-        if(path<0||size_t(path)>=plot.series.size()||crossing.segment<0)return false;
+        if(path<0||size_t(path)>=plot.series.size())return false;
         const auto& series=plot.series[size_t(path)];
-        const auto start=size_t(crossing.segment);
-        if(!series.hasValue(start)||!series.hasValue(start+1))return false;
+        if(series.values.size()!=plot.states.size())return false;
+        if(!series.present.empty()&&std::none_of(series.present.begin(),series.present.end(),[](bool value){return value;}))
+            return false;
     }
     return true;
 }
@@ -106,7 +132,8 @@ EnergyAxis energyAxis(const EnergyPlot& plot){
     double low=0,high=0;bool first=true;
     auto include=[&](double v){if(!std::isfinite(v))return;if(first){low=high=v;first=false;}else{low=std::min(low,v);high=std::max(high,v);}};
     if(plot.series.empty()){for(auto& state:plot.states)include(state.energy);}else for(auto& path:plot.series)for(size_t i=0;i<path.values.size();i++)if(path.hasValue(i))include(path.values[i]);
-    for(const auto& crossing:plot.crossings)if(hasCrossingEndpoints(plot,crossing))include(crossing.energy);
+    if(plot.mode!=independentEnergyLevels)
+        for(const auto& crossing:plot.crossings)if(hasCrossingPaths(plot,crossing))include(crossing.energy);
     if(high-low<1e-8){high+=1;low-=1;}double margin=(high-low)*.22;low-=margin;high+=margin;
     double autoSpan=high-low;
     if(plot.yMin){if(!std::isfinite(*plot.yMin)||std::abs(*plot.yMin)>1e8)throw std::runtime_error("y축 최솟값이 올바르지 않습니다.");low=*plot.yMin;}
@@ -157,6 +184,9 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
         }
         series[k].levelColors=std::move(levels);series[k].segmentColors=std::move(segments);
         series[k].present=std::move(present);series[k].values=std::move(values);}
+    bool sameOrder=rows.size()==old.states.size();
+    for(size_t i=0;i<mapping.size();++i)sameOrder&=mapping[i]==int(i);
+    if(!sameOrder)for(auto& state:states)state.position.reset();
     plot.states=std::move(states);plot.series=std::move(series);
     plot.crossings.clear();
     for(auto crossing:old.crossings){

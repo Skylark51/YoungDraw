@@ -114,6 +114,7 @@ std::vector<Vec> arrowPrefix(const std::vector<Vec>& points,bool cubic,double pr
 class Transition {
     Document start_,end_;
     std::vector<Vec> origins_,destinations_;
+    std::vector<std::optional<double>> startSpin_,endSpin_;
     std::map<int,int> owners_;
     std::map<int,size_t> matchedPositions_;
     bool growsArrows_;
@@ -128,13 +129,16 @@ public:
         for(const auto& atom:start_.atoms){
             indices.emplace(atom.id,origins_.size());
             origins_.push_back(atom.p);
+            startSpin_.push_back(atom.mullikenSpin);
         }
         destinations_=origins_;
+        endSpin_.resize(origins_.size());
         for(const auto& atom:end_.atoms){
             auto found=owners_.find(atom.id);
             if(found==owners_.end())continue;
             auto index=indices.at(found->second);
             destinations_[index]=atom.p;
+            endSpin_[index]=atom.mullikenSpin;
             matchedPositions_.emplace(atom.id,index);
         }
         std::map<BondKey,int> bonds;
@@ -165,12 +169,39 @@ public:
     }
     bool hasGrowingArrows() const {return growsArrows_;}
 
-    Scene sceneAt(double progress){
+    Document intermediate(double t,bool useEnd) const {
+        Document structure=useEnd?end_:start_;
+        for(size_t i=0;i<structure.atoms.size();++i){
+            auto& atom=structure.atoms[i];
+            const auto matched=matchedPositions_.find(atom.id);
+            if(useEnd&&matched==matchedPositions_.end())continue;
+            const size_t index=useEnd?matched->second:i;
+            atom.p=origins_[index]*(1-t)+destinations_[index]*t;
+            if(startSpin_[index]&&endSpin_[index])atom.mullikenSpin=spinAt(index,t);
+        }
+        structure.objects.erase(std::remove_if(structure.objects.begin(),structure.objects.end(),
+            [](const Object& o){return o.head!=0;}),structure.objects.end());
+        return structure;
+    }
+    double spinAt(size_t index,double t) const {
+        return *startSpin_[index]*(1-t)+*endSpin_[index]*t;
+    }
+
+    Scene sceneAt(double progress,bool animateSpin=true){
         const double t=structureProgress(progress);
-        for(size_t i=0;i<start_.atoms.size();++i)start_.atoms[i].p=origins_[i]*(1-t)+destinations_[i]*t;
+        for(size_t i=0;i<start_.atoms.size();++i){
+            auto& atom=start_.atoms[i];
+            atom.p=origins_[i]*(1-t)+destinations_[i]*t;
+            atom.mullikenSpin=animateSpin&&startSpin_[i]&&endSpin_[i]?
+                std::optional<double>(spinAt(i,t)):startSpin_[i];
+        }
         for(auto& atom:end_.atoms){
             auto it=matchedPositions_.find(atom.id);
-            if(it!=matchedPositions_.end())atom.p=start_.atoms[it->second].p;
+            if(it==matchedPositions_.end())continue;
+            const auto i=it->second;
+            atom.p=start_.atoms[i].p;
+            atom.mullikenSpin=animateSpin&&startSpin_[i]&&endSpin_[i]?
+                std::optional<double>(spinAt(i,t)):endSpin_[i];
         }
         auto before=makeScene(start_,measure);
         auto removeArrows=[](Scene& scene){
@@ -489,6 +520,7 @@ std::vector<AnimationStage> animationMechanismStages(const Document& source,cons
 namespace {
 struct Playback {
     double speed=1.;
+    bool animateSpin=true;
     int hold=stageDelay; // Centiseconds, like GIF frame delays.
     enum Loop {Once,Forward,PingPong};
     Loop loop=PingPong;
@@ -536,6 +568,9 @@ public:
         width=std::max(structureWidth,(energies||transitionEnergies)?480:(titles||names)?320:0);
         height=header+structureHeight+footer;
     }
+    Document intermediate(size_t segment,double t,bool useEnd) const {
+        return transitions.at(segment).intermediate(t,useEnd);
+    }
     int lastFrame() const {return int(transitions.size())*transitionSteps;}
     int frameCount() const {return 2*lastFrame();}
     bool hasArrows(size_t segment) const {return transitions.at(segment).hasGrowingArrows();}
@@ -553,15 +588,18 @@ public:
         const int index=arrows&&!growing?local-arrowSteps:local;
         const int duration=growing?stages[segment].arrowGrowth:morphDuration(segment);
         const int motion=scaled(double(duration)*(index+1)/steps)-scaled(double(duration)*index/steps);
-        const int hold=local==0?playback.hold:arrows&&local==arrowSteps?stages[segment].arrowHold:0;
+        const int hold=local==0&&!stages[segment].intermediate?playback.hold:arrows&&local==arrowSteps?stages[segment].arrowHold:0;
         return std::max(2,motion)+scaled(hold);
     }
     int forwardFrame(int frame) const {return std::min(frame,frameCount()-frame);}
-    void draw(Graphics& g,int frame,bool themed){
+    void draw(Graphics& g,int frame,bool themed,bool animateSpin){
         const size_t segment=std::min(size_t(frame/transitionSteps),transitions.size()-1);
         double t=double(frame-int(segment)*transitionSteps)/transitionSteps;
+        const double linear=t,u=1-t;
         t=t*t*(3-2*t);
-        auto scene=transitions[segment].sceneAt(t);
+        if(stages[segment].intermediate)t+=linear*u*u;
+        if(stages[segment+1].intermediate)t-=linear*linear*u;
+        auto scene=transitions[segment].sceneAt(t,animateSpin);
         t=transitions[segment].structureProgress(t);
         const auto& from=stages[segment];
         const auto& to=stages[segment+1];
@@ -612,7 +650,7 @@ std::string encodeAnimation(AnimationTimeline& timeline,const Playback& playback
             g.SetSmoothingMode(SmoothingModeAntiAlias);
             g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
             g.ScaleTransform(float(width)/timeline.width,float(height)/timeline.height);
-            timeline.draw(g,frame,themed);
+            timeline.draw(g,frame,themed,playback.animateSpin);
         }
         frameOffsets.push_back(bytes.size());
         int duration=0;
@@ -654,7 +692,7 @@ bool editAnimationCaptions(HWND owner,std::vector<AnimationStage>& stages){
 enum PreviewControl {
     PreviewPlay=101,PreviewRestart,PreviewPrevious,PreviewNext,PreviewTiming,
     PreviewCaptions,PreviewReplace,PreviewSave,PreviewClose,PreviewReadout,PreviewRepeat,PreviewBackground,PreviewAdd,PreviewRemove,
-    PreviewSegmentTiming
+    PreviewSegmentTiming,PreviewKeyframe
 };
 constexpr int previewSidebar=252;
 const std::vector<std::wstring> loopModes={L"1회 재생",L"정방향 반복",L"왕복 반복"};
@@ -753,6 +791,7 @@ void previewButtons(HWND hwnd){
     MoveWindow(GetDlgItem(hwnd,PreviewReplace),x,376,w,30,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewAdd),x,412,(w-8)/2,28,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewRemove),x+(w+8)/2,412,(w-8)/2,28,TRUE);
+    MoveWindow(GetDlgItem(hwnd,PreviewKeyframe),x,445,w,30,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewSave),x,rc.bottom-83,w,35,TRUE);
     MoveWindow(GetDlgItem(hwnd,PreviewClose),x,rc.bottom-41,w,29,TRUE);
 }
@@ -791,7 +830,7 @@ void paintPreview(HWND hwnd,HDC dc,AnimationPreview& preview){
                     if((x/12+y/12)%2)g.FillRectangle(&tile,x,y,std::min(12,timeline.width-x),std::min(12,timeline.height-y));
             }
         }
-        preview.timeline.draw(g,preview.timeline.forwardFrame(preview.frame),themed);
+        preview.timeline.draw(g,preview.timeline.forwardFrame(preview.frame),themed,preview.playback.animateSpin);
         g.Restore(saved);
 
         saved=g.Save();g.SetClip(RectF(0,float(h-83),sidebar,83));
@@ -806,7 +845,7 @@ void paintPreview(HWND hwnd,HDC dc,AnimationPreview& preview){
             auto thumbState=g.Save();
             g.TranslateTransform(x+43-float(b.x+b.w/2)*fit,float(h-53)-float(b.y+b.h/2)*fit);
             g.ScaleTransform(fit,fit);render(g,scene,false,true);g.Restore(thumbState);
-            const auto title=std::to_string(i+1)+" "+timeline.stages[i].structureName;
+            const auto title=std::to_string(i+1)+(timeline.stages[i].intermediate?" · 중간":" "+timeline.stages[i].structureName);
             drawCaption(g,title,title,0,80,float(h-26),17,11,false,palette.text,x+3,3);
         }
         g.Restore(saved);
@@ -932,12 +971,14 @@ void previewAction(HWND hwnd,AnimationPreview& preview,int id){
         const auto selected=std::find(speeds.begin(),speeds.end(),preview.playback.speed)-speeds.begin();
         auto result=ui::form(hwnd,L"애니메이션 재생 설정",
             {{L"재생 속도",std::to_string(selected),false,{L"0.5×",L"0.75×",L"1×",L"1.5×",L"2×"}},
-             {L"단계에서 정지 (초)",std::to_string(preview.playback.hold/100.)}});
+             {L"단계에서 정지 (초)",std::to_string(preview.playback.hold/100.)},
+             {L"Mulliken 스핀 값 전환",preview.playback.animateSpin?"0":"1",false,{L"숫자를 연속 변경",L"시작·끝 숫자를 교차 표시"}}});
         if(result){
             auto speed=speeds.at(size_t(std::stoi((*result)[0])));
             auto hold=int(std::lround(numeric((*result)[1],0,10)*100));
             preview.playback.speed=speed;
             preview.playback.hold=hold;
+            preview.playback.animateSpin=(*result)[2]=="0";
             preview.updateTiming(preview.frame);
         }
     }else if(id==PreviewRepeat){
@@ -974,6 +1015,43 @@ void previewAction(HWND hwnd,AnimationPreview& preview,int id){
             preview.playback.multiplier=numeric((*result)[2],.25,4);
             preview.playback.background=AnimationBackground(std::stoi(result->front()));
             preview.playback.stride=1+std::stoi((*result)[3]);
+        }
+    }else if(id==PreviewKeyframe){
+        const int frame=preview.timeline.forwardFrame(preview.frame);
+        auto stages=preview.timeline.stages;
+        const int last=int(stages.size())-1;
+        const int segment=std::min(frame/transitionSteps,last-1);
+        const int local=frame-segment*transitionSteps;
+        const int percent=local==0||local==transitionSteps?50:std::clamp(int(std::lround(100.*local/transitionSteps)),5,95);
+        std::vector<std::wstring> segments;
+        for(int i=0;i<last;++i)segments.push_back(std::to_wstring(i+1)+L" → "+std::to_wstring(i+2));
+        auto choice=ui::form(hwnd,L"중간 프레임 설계",{
+            {L"작업","0",false,{L"중간 구조 만들고 편집",L"현재 단계 구조 직접 편집"}},
+            {L"삽입할 구간",std::to_string(segment),false,segments},
+            {L"구간 내 원자 위치 (%)",std::to_string(percent)},
+            {L"새 프레임의 시작 결합 상태","0",false,{L"구간 앞 구조의 결합",L"구간 뒤 구조의 결합"}}
+        });
+        if(!choice)return;
+        if(choice->front()=="1"){
+            const int index=preview.stage();
+            auto edited=runStructureEditor(stages[index].structure,hwnd);
+            if(!edited)return;
+            stages[index].structure=std::move(*edited);
+            preview.replace(std::move(stages),index);
+        }else{
+            if(stages.size()>=maxStages)throw std::runtime_error("애니메이션은 중간 프레임을 포함해 최대 40단계입니다.");
+            const int from=std::stoi((*choice)[1]);
+            const double t=numeric((*choice)[2],1,99)/100.;
+            auto structure=preview.timeline.intermediate(from,t,(*choice)[3]=="1");
+            auto edited=runStructureEditor(structure,hwnd);
+            if(!edited)return;
+            AnimationStage inserted=stages[from];
+            inserted.structure=std::move(*edited);
+            inserted.transitionEnergies.clear();
+            inserted.morphTime.reset();
+            inserted.intermediate=true;
+            stages.insert(stages.begin()+from+1,std::move(inserted));
+            preview.replace(std::move(stages),from+1);
         }
     }else if(id==PreviewCaptions||id==PreviewReplace||id==PreviewAdd||id==PreviewRemove){
         auto stages=preview.timeline.stages;
@@ -1051,9 +1129,9 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         SendMessageW(repeat,WM_SETFONT,WPARAM(preview->font),FALSE);
         for(const auto& mode:loopModes)SendMessageW(repeat,CB_ADDSTRING,0,LPARAM(mode.c_str()));
         SendMessageW(repeat,CB_SETCURSEL,Playback::PingPong,0);
-        for(auto id:{PreviewBackground,PreviewAdd,PreviewRemove,PreviewSegmentTiming}){
+        for(auto id:{PreviewBackground,PreviewAdd,PreviewRemove,PreviewSegmentTiming,PreviewKeyframe}){
             auto control=CreateWindowW(L"BUTTON",id==PreviewAdd?L"단계 추가…":id==PreviewRemove?L"단계 삭제":
-                id==PreviewSegmentTiming?L"구간별 시간…":L"출력 설정…",
+                id==PreviewSegmentTiming?L"구간별 시간…":id==PreviewKeyframe?L"중간 프레임 설계…":L"출력 설정…",
                 WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,0,0,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);
             SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(preview->font),FALSE);
         }
@@ -1068,7 +1146,7 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(!preview)return DefWindowProcW(hwnd,msg,wp,lp);
     switch(msg){
     case WM_GETMINMAXINFO:
-        reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={680,580};return 0;
+        reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={680,600};return 0;
     case WM_SIZE:
         previewButtons(hwnd);InvalidateRect(hwnd,nullptr,FALSE);return 0;
     case WM_ERASEBKGND:return 1;
@@ -1144,7 +1222,7 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         const int id=LOWORD(wp);
         if(id==PreviewClose||id==IDCANCEL){SendMessageW(hwnd,WM_CLOSE,0,0);return 0;}
         if(id==PreviewRepeat&&HIWORD(wp)!=CBN_SELCHANGE)return 0;
-        if((id>=PreviewPlay&&id<=PreviewSave)||id==PreviewRepeat||id==PreviewBackground||id==PreviewAdd||id==PreviewRemove||id==PreviewSegmentTiming){
+        if((id>=PreviewPlay&&id<=PreviewSave)||id==PreviewRepeat||id==PreviewBackground||id==PreviewAdd||id==PreviewRemove||id==PreviewSegmentTiming||id==PreviewKeyframe){
             // Pause while editing or choosing an export destination.
             if(id>=PreviewTiming)setPlaying(hwnd,*preview,false);
             try{previewAction(hwnd,*preview,id);}

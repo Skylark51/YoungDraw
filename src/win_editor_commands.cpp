@@ -21,7 +21,7 @@
 
 namespace yd::editor {
 
-void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==167||id==insertBranchArrowsCommand||id==externalMechanismCommand||id==bondAnimationCommand||id==recognizeMechanismCommand)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();
+void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==spinMultiplicityPlotCommand||id==167||id==insertBranchArrowsCommand||id==externalMechanismCommand||id==bondAnimationCommand||id==recognizeMechanismCommand)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();
  if(id==184){appearance::picker(win,[](){refreshAppearance();});status=std::wstring(L"작업실 · ")+appearance::palette().name+L" / 테마는 출력에 포함되지 않습니다.";redraw();return;}
  if(id==156){pruneLockedSelection();textColorPalette(colorTarget);return;}
  if(id==155){pruneLockedSelection();atomColorPalette();return;}
@@ -35,7 +35,19 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
     if(id==179){images=false;graphs=true;}if(id==180){images=true;graphs=false;}if(id==181)images=graphs=false;
     if(images!=doc.imagesLocked||graphs!=doc.graphsLocked){history.checkpoint(doc);doc.imagesLocked=images;doc.graphsLocked=graphs;pruneLockedSelection();status=L"레이어 잠금 적용 · 잠긴 항목은 보이지만 선택·이동·삭제되지 않습니다.";changed();}redraw();return;
  }
- pruneLockedSelection();if(id==interactionToolCommand){tool=Interaction;selection.clear();redraw();return;}if(id>=200&&id<=218){if(id==217){auto before=doc;if(delocalizeBonds(doc,selection)){history.checkpoint(before);changed();}tool=Delocalized;}else{tool=Tool(id-200);selection.clear();}redraw();return;}if(id>=301&&id<=418){element=id-300;int aid=hoverAtom?hoverAtom:(doc.atom(primary())?primary():0);if(aid){history.checkpoint(doc);auto a=doc.atom(aid);setAtomElement(doc,aid,element);a->label.clear();a->labelRuns.clear();a->explicitH=-1;changed();}redraw();return;}
+ pruneLockedSelection();
+ if(id==dottedBondCommand){
+    const auto ids=groupedSelection(selection);
+    auto before=doc;bool edited=false;
+    for(auto& bond:doc.bonds)if(contains(ids,bond.id)||(contains(ids,bond.a)&&contains(ids,bond.b))){
+        if(bond.kind!=BondKind::Dot||!bond.customOrder.empty()||!bond.customDisplay.empty()){
+            setBondKind(doc,bond.id,BondKind::Dot);bond.customOrder.clear();bond.customDisplay.clear();edited=true;
+        }
+    }
+    if(edited){history.checkpoint(before);changed();}
+    tool=DottedBond;status=L"점선 단일 결합: 기존 결합을 클릭하거나 원자 사이를 드래그하세요. 1 키: 실선 단일 결합.";redraw();return;
+ }
+ if(id==interactionToolCommand){tool=Interaction;selection.clear();redraw();return;}if(id>=200&&id<=218){if(id==217){auto before=doc;if(delocalizeBonds(doc,selection)){history.checkpoint(before);changed();}tool=Delocalized;}else{tool=Tool(id-200);selection.clear();}redraw();return;}if(id>=301&&id<=418){element=id-300;int aid=hoverAtom?hoverAtom:(doc.atom(primary())?primary():0);if(aid){history.checkpoint(doc);auto a=doc.atom(aid);setAtomElement(doc,aid,element);a->label.clear();a->labelRuns.clear();a->explicitH=-1;changed();}redraw();return;}
  firstUseGuide(id);
  switch(id){
  case 230:searchCommands();break;
@@ -47,17 +59,15 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  case 186:if(isolatedStructureEditing){writeFile(isolatedStructureResult,toNative(doc));dirty=false;DestroyWindow(win);}else editTargetStructure();break;
  case 187:if(isolatedStructureEditing)DestroyWindow(win);break;
  case 185:manageProjects();break;
+ case mullikenSpinCommand:editMullikenSpin();break;
+ case abbreviateGroupsCommand:abbreviateGroups();break;
  case 166:{auto candidate=doc;auto ids=groupedSelection(selection);if(ids.empty())throw std::runtime_error("벤젠이 포함된 그룹이나 고리를 선택하세요.");int count=collapsePhenyl(candidate,ids);if(!count)throw std::runtime_error("단일 결합 하나로 연결된 비치환 벤젠을 찾지 못했습니다.");history.checkpoint(doc);doc=std::move(candidate);selection.erase(std::remove_if(selection.begin(),selection.end(),[&](int id){auto all=doc.allIds();return !contains(all,id);}),selection.end());changed();break;}
  case 167:arrangeImported();break;
  case recognizeMechanismCommand:arrangeImported(true);break;
  case insertBranchArrowsCommand:insertBranchArrows();break;case externalMechanismCommand:externalMechanism();break;
  case 168:editArrowCross();break;case 169:branchMechanism();break;
  case 165:resizeSelected();break;case 160:case 161:case 162:case 163:case 164:transformSelected(id);break;case 170:library(L"전체");break;case 171:library(L"리간드");break;case 172:library(L"착물");break;case 173:library(L"기질");break;case 174:library(L"산·시약");break;case 100:newDocumentTab();break;case 109:closeDocumentTab(activeDocument);break;
- case 101:{for(const auto& path:openDocumentFiles()){
-    bool found=false;for(size_t i=0;i<documents.size();i++){auto currentPath=i==activeDocument?filePath:documents[i].path;if(!currentPath.empty()&&_wcsicmp(fs::absolute(currentPath).lexically_normal().c_str(),fs::absolute(path).lexically_normal().c_str())==0){switchDocumentTab(i);found=true;break;}}
-    if(!found){auto imported=fromCdxml(readFile(path));newDocumentTab(std::move(imported),path);status=L"문서를 새 탭에서 열었습니다.";
-        if(!doc.importWarnings.empty()){std::wstring warnings=L"지원하지 않는 XML 객체는 CDXML 저장 시 보존됩니다. 미리보기와 SVG에는 일부 객체가 생략될 수 있습니다.\n\n";for(size_t i=0;i<std::min(size_t(12),doc.importWarnings.size());i++)warnings+=ui::wide(doc.importWarnings[i])+L"\n";MessageBoxW(win,warnings.c_str(),L"CDXML 호환성 보고서",MB_OK|MB_ICONINFORMATION);}}
-    }break;}
+ case 101:openDocuments(openDocumentFiles());break;
  case 102:save();break;case 103:{auto p=fileDialog(true,1);if(p){writeFile(*p,toSvg(scene()));status=L"SVG를 내보냈습니다. 가져온 미지원 객체는 결과를 확인하세요.";}break;}case 108:{auto p=fileDialog(true,2);if(p){writeFile(*p,toCdxml(doc));status=L"CDXML을 내보냈습니다.";}break;}
   case 106:{
       int choice=MessageBoxW(win,L"JACS 출판용 SVG\n\n예: 단일 열 (240 pt)\n아니요: 두 열 (504 pt)\n취소: 내보내기 중단",
@@ -85,7 +95,17 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  case 113:{auto p=fileDialog(false);if(p)insert(fromCdxml(readFile(*p)),center());break;}
  case 120:newReaction();break;
  case 121:if(reaction(primary()))editReaction(primary());else edit();break;case 122:case 128:{auto* r=reaction(primary());if(!r)throw std::runtime_error("반응 메커니즘을 선택하세요.");if(r->slots.size()>=40)throw std::runtime_error("메커니즘은 최대 40칸까지 추가할 수 있습니다.");history.checkpoint(doc);appendMechanismStage(*r,id==128,targetContainer==r->id?targetSlot:size_t(-1));optimizeMechanism(doc,{r->id},r->cyclic);changed();fit();break;}case 123:fillTarget(false);break;case 124:fillTarget(true);break;
- case 130:{sidebarPage=1;history.checkpoint(doc);EnergyPlot p;p.id=doc.nextId++;p.stages=defaultMechanismStages();p.states={{"R",0,{},{}},{"TS",20,{},{}},{"P",-10,{},{}}};p.series={{"Path 1","#000000",{0,20,-10},1,3.5}};Document graph;graph.style=doc.style;graph.plots.push_back(p);
+ case 130:case spinMultiplicityPlotCommand:{
+     sidebarPage=1;history.checkpoint(doc);
+     EnergyPlot p;
+     if(id==spinMultiplicityPlotCommand)p=spinMultiplicityPlot();
+     else{
+         p.stages=defaultMechanismStages();
+         p.states={{"R",0,{},{}},{"TS",20,{},{}},{"P",-10,{},{}}};
+         p.series={{"Path 1","#000000",{0,20,-10},1,3.5}};
+     }
+     p.id=doc.nextId++;
+     Document graph;graph.style=doc.style;graph.plots.push_back(p);
      const auto bounds=makeScene(graph,measure).bounds;
      const auto view=canvasBox();
      const Vec target=center();

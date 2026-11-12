@@ -57,6 +57,34 @@ static void checkBondAnimation(){
         check(redAt(54)==middle&&redAt(71)==redAt(1),"the reverse leg and loop seam reuse the forward frames");
     }
 }
+static void checkSpinKeyframes(){
+    Document start;
+    const int atom=start.addAtom({0,0},8);
+    start.atom(atom)->mullikenSpin=.1;
+    Document end=start, midpoint=start;
+    end.atom(atom)->mullikenSpin=.9;
+    midpoint.atom(atom)->mullikenSpin=.5;
+    AnimationStage middle{midpoint};
+    middle.intermediate=true;
+    auto gif=imageDocument(bondAnimationGif({{start},middle,{end}},false));
+    const auto& hex=gif.objects.front().imageHex;
+    const auto& ends=imageCache.at(hex).ends;
+    check(ends.size()==73&&ends[36]-ends[35]==40,"an inserted keyframe exports without the regular stage pause");
+
+    auto direct=imageDocument(bondAnimationGif({{start},{end}},false));
+    auto* interpolated=decode(direct.objects.front().imageHex);
+    auto* explicitFrame=decode(hex);
+    check(interpolated->SelectActiveFrame(&FrameDimensionTime,18)==Ok&&
+          explicitFrame->SelectActiveFrame(&FrameDimensionTime,36)==Ok,"read interpolated and explicit spin frames");
+    check(interpolated->GetWidth()==explicitFrame->GetWidth()&&interpolated->GetHeight()==explicitFrame->GetHeight(),
+          "spin labels keep a common GIF viewport");
+    bool equal=true;
+    for(UINT y=0;y<interpolated->GetHeight()&&equal;++y)for(UINT x=0;x<interpolated->GetWidth()&&equal;++x){
+        Color a,b;
+        equal=interpolated->GetPixel(x,y,&a)==Ok&&explicitFrame->GetPixel(x,y,&b)==Ok&&a.GetValue()==b.GetValue();
+    }
+    check(equal,"the interpolated spin is rendered as one intermediate numeric label");
+}
 static void checkAnimationExportOptions(){
     Document bound;
     int a=bound.addAtom({-30,0},17), b=bound.addAtom({30,0},35);
@@ -332,6 +360,7 @@ int main(){
         auto hwnd=CreateWindowW(wc.lpszClassName,L"GIF test",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);check(hwnd!=nullptr,"create canvas window");
         check(SUCCEEDED(office::start({hwnd,[](const Document&){},[](){return doc;},officePicture},false,false)),"initialize native clipboard rendering callbacks");
         checkBondAnimation();
+        checkSpinKeyframes();
         checkAnimationExportOptions();
         checkGrowingArrowAndInteraction();
         checkMechanismAnimation();

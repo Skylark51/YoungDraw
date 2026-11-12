@@ -18,18 +18,19 @@ const Palette themes[]={
  {c(0xe9e2d6),c(0xf3ede2),c(0xfffbf4),c(0xe0d4c1),c(0xd0c5b3),c(0x3c3b38),c(0x7c7467),c(0x846640),c(0xfffbf4),c(0xfffcf3),c(0x39352c),L"아카이브",L"아이보리 · 잉크 / 오래 간직할 연구 노트",false,0},
  {c(0x34301d),c(0x433d25),c(0x514b2c),c(0x665d35),c(0x756841),c(0xf4edca),c(0xbdb183),c(0xe7ce70),c(0x302b18),c(0xe9dfb4),c(0x322c18),L"백룸",L"LEVEL 0 / 형광등의 잔향, 끝없이 반복되는 노란 방",false,201},
  {c(0x2a253c),c(0x382f49),c(0x493c58),c(0x5c496a),c(0x705871),c(0xf8e7dd),c(0xc9aeb8),c(0xf2ba9a),c(0x3a2b3b),c(0xf5e7dc),c(0x473343),L"노스텔지아",L"AFTER THE RAIN / CRT, 여름비, 돌아갈 수 없는 저녁",false,202},
- {c(0x110f17),c(0x1c1620),c(0x2b202b),c(0x412a38),c(0x51323e),c(0xeee5e6),c(0xb799a5),c(0xe79a9f),c(0x29151e),c(0x171d24),c(0xe9e7dd),L"공포",L"THE LAST EXPERIMENT / 붉은 경고등 아래, 비어 있는 실험실",true,203}
+ {c(0x110f17),c(0x1c1620),c(0x2b202b),c(0x412a38),c(0x51323e),c(0xeee5e6),c(0xb799a5),c(0xe79a9f),c(0x29151e),c(0x171d24),c(0xe9e7dd),L"공포",L"THE LAST EXPERIMENT / 붉은 경고등 아래, 비어 있는 실험실",true,203},
+ {c(0xe5ebf1),c(0xedf1f5),c(0xfbfcfe),c(0xced9e3),c(0xc7d1dc),c(0x34404b),c(0x667687),c(0x4c6278),c(0xffffff),c(0xedf1f5),c(0x283a4a),L"교수님이 보고있어",L"반투명 사진 · 2.4초마다 번쩍이는 눈빛",false,205}
 };
 Settings current;
-std::array<std::unique_ptr<Bitmap>,3> images;
-std::array<IStream*,3> streams{};
+std::array<std::unique_ptr<Bitmap>,4> images;
+std::array<IStream*,4> streams{};
 std::unique_ptr<Bitmap> cached;
 int cacheW=0,cacheH=0,cacheKey=-1;
 const wchar_t* patternNames[]={L"없음",L"도트",L"격자",L"줄노트",L"등각 격자",L"육각 결합"};
 const wchar_t* intensityNames[]={L"은은하게",L"균형 있게",L"몰입감 있게"};
 void resetCache(){cached.reset();cacheKey=-1;}
 Bitmap* image(int id){
- if(id<201||id>203)return nullptr;size_t i=size_t(id-201);
+ if((id<201||id>203)&&id!=205)return nullptr;size_t i=id==205?3:size_t(id-201);
  if(images[i])return images[i].get();
  HMODULE module=GetModuleHandleW(nullptr);HRSRC resource=FindResourceW(module,MAKEINTRESOURCEW(id),RT_RCDATA);if(!resource)return nullptr;
  DWORD size=SizeofResource(module,resource);const void* data=LockResource(LoadResource(module,resource));if(!size||!data)return nullptr;
@@ -39,6 +40,31 @@ Bitmap* image(int id){
 }
 void label(Graphics& g,const std::wstring& s,RectF box,float size,Color color,bool bold=false,bool center=false){ui::drawLabel(g,s,box,size,color,bold,center);}
 void cover(Graphics& g,Bitmap* bitmap,RectF box){if(!bitmap)return;float iw=float(bitmap->GetWidth()),ih=float(bitmap->GetHeight());float scale=std::max(box.Width/iw,box.Height/ih),sw=box.Width/scale,sh=box.Height/scale;g.DrawImage(bitmap,box,(iw-sw)/2,(ih-sh)/2,sw,sh,UnitPixel);}
+// Keep the complete portrait visible and use the same transform for both eyes.
+RectF portraitBox(RectF box){
+ auto* photo=image(205);if(!photo)return box;
+ float scale=std::min(box.Width/photo->GetWidth(),box.Height/photo->GetHeight());
+ float w=photo->GetWidth()*scale,h=photo->GetHeight()*scale;
+ return {box.X+(box.Width-w)/2,box.Y+(box.Height-h)/2,w,h};
+}
+void eyeGlints(Graphics& g,RectF box,float pulse){
+ const RectF photo=portraitBox(box);
+ auto saved=g.Save();g.SetClip(box,CombineModeIntersect);
+ const float radius=std::max(3.f,photo.Width*.037f);
+ for(const auto& at:{PointF(.400f,.299f),PointF(.563f,.291f)}){
+  PointF eye(photo.X+photo.Width*at.X,photo.Y+photo.Height*at.Y);
+  GraphicsPath oval;oval.AddEllipse(eye.X-radius,eye.Y-radius,radius*2,radius*2);
+  PathGradientBrush halo(&oval);halo.SetCenterColor(Color(BYTE(210*pulse),125,218,255));
+  Color edge(0,125,218,255);INT count=1;halo.SetSurroundColors(&edge,&count);g.FillPath(&halo,&oval);
+  Pen horizontal(Color(BYTE(205*pulse),195,240,255),std::max(.7f,radius*.06f));
+  g.DrawLine(&horizontal,eye.X-radius*1.6f,eye.Y,eye.X+radius*1.6f,eye.Y);
+  Pen vertical(Color(BYTE(160*pulse),215,245,255),std::max(.7f,radius*.05f));
+  g.DrawLine(&vertical,eye.X,eye.Y-radius*.9f,eye.X,eye.Y+radius*.9f);
+  SolidBrush core(Color(BYTE(255*pulse),245,253,255));float dot=std::max(1.2f,radius*.16f);
+  g.FillEllipse(&core,eye.X-dot,eye.Y-dot,dot*2,dot*2);
+ }
+ g.Restore(saved);
+}
 void pattern(Graphics& g,RectF box,int kind,Color color,float spacing=24){
  auto saved=g.Save();g.SetClip(box,CombineModeIntersect);Pen p(color,1);SolidBrush b(color);
  if(kind==1)for(float y=box.Y+spacing/2;y<box.GetBottom();y+=spacing)for(float x=box.X+spacing/2;x<box.GetRight();x+=spacing)g.FillEllipse(&b,x,y,1.6f,1.6f);
@@ -49,7 +75,12 @@ void pattern(Graphics& g,RectF box,int kind,Color color,float spacing=24){
 }
 void scene(Graphics& g,RectF box,int theme,int strength,bool thumbnail){
  const auto& p=themes[theme];SolidBrush base(p.canvas);g.FillRectangle(&base,box);
- if(p.resource){
+ if(p.resource==205){
+  if(auto* photo=image(205))g.DrawImage(photo,portraitBox(box));
+  BYTE alpha=BYTE(thumbnail?80:strength==0?153:strength==1?102:76);
+  SolidBrush veil(Color(alpha,p.canvas.GetR(),p.canvas.GetG(),p.canvas.GetB()));g.FillRectangle(&veil,box);
+  if(thumbnail)eyeGlints(g,box,1.f);
+ }else if(p.resource){
   cover(g,image(p.resource),box);
   BYTE alpha=BYTE(thumbnail?35:strength==0?216:strength==1?183:145);SolidBrush veil(Color(alpha,p.canvas.GetR(),p.canvas.GetG(),p.canvas.GetB()));g.FillRectangle(&veil,box);
   // A soft central pool keeps bonds and labels legible without flattening the atmosphere at the edges.
@@ -68,13 +99,13 @@ struct Picker {
 };
 struct Target {RectF box;int id;};
 constexpr float pickerWidth=916.f,pickerHeight=700.f;
-std::array<Target,17> targets(){
- std::array<Target,17> result{};
- for(int i=0;i<6;i++)result[size_t(i)]={{24.f+float(i%3)*292.f,108.f+float(i/3)*160.f,280.f,148.f},100+i};
- for(int i=0;i<6;i++)result[size_t(6+i)]={{24.f+float(i)*146.f,466.f,134.f,40.f},200+i};
- for(int i=0;i<3;i++)result[size_t(12+i)]={{24.f+float(i)*194.f,567.f,182.f,40.f},300+i};
- result[15]={{648.f,644.f,240.f,42.f},IDOK};
- result[16]={{526.f,644.f,110.f,42.f},IDCANCEL};
+std::array<Target,18> targets(){
+ std::array<Target,18> result{};
+ for(int i=0;i<7;i++)result[size_t(i)]={{24.f+float(i%4)*220.f,108.f+float(i/4)*160.f,208.f,148.f},100+i};
+ for(int i=0;i<6;i++)result[size_t(7+i)]={{24.f+float(i)*146.f,466.f,134.f,40.f},200+i};
+ for(int i=0;i<3;i++)result[size_t(13+i)]={{24.f+float(i)*194.f,567.f,182.f,40.f},300+i};
+ result[16]={{648.f,644.f,240.f,42.f},IDOK};
+ result[17]={{526.f,644.f,110.f,42.f},IDCANCEL};
  return result;
 }
 void roundPath(GraphicsPath& path,RectF r,float radius){
@@ -148,16 +179,16 @@ void drawPicker(Graphics& g,const Picker& state){
  label(g,L"테마와 문양은 화면에만 적용됩니다. 문서·SVG·Office 출력은 원래 색상을 유지합니다.",
        {24,62,870,25},14,pal.muted);
  const auto items=targets();
- for(int i=0;i<6;i++)pickerCard(g,state,i,items[size_t(i)].box);
+ for(int i=0;i<7;i++)pickerCard(g,state,i,items[size_t(i)].box);
  label(g,L"바탕 문양",{24,424,870,28},15,pal.text,true);
- for(int i=0;i<6;i++)pickerButton(g,state,200+i,items[size_t(6+i)].box,
+ for(int i=0;i<6;i++)pickerButton(g,state,200+i,items[size_t(7+i)].box,
      patternNames[i],current.pattern==i);
  label(g,L"배경의 존재감",{24,526,870,28},15,pal.text,true);
- for(int i=0;i<3;i++)pickerButton(g,state,300+i,items[size_t(12+i)].box,
+ for(int i=0;i<3;i++)pickerButton(g,state,300+i,items[size_t(13+i)].box,
      intensityNames[i],current.intensity==i);
  label(g,pal.description,{24,613,600,24},13,pal.muted);
- pickerButton(g,state,IDCANCEL,items[16].box,L"취소");
- pickerButton(g,state,IDOK,items[15].box,L"이 분위기로 작업하기",true);
+ pickerButton(g,state,IDCANCEL,items[17].box,L"취소");
+ pickerButton(g,state,IDOK,items[16].box,L"이 분위기로 작업하기",true);
 }
 int hitTest(float x,float y){
  const auto items=targets();
@@ -172,7 +203,7 @@ PointF pointInPicker(HWND hwnd,LPARAM lp){
  return {GET_X_LPARAM(lp)*pickerWidth/w,GET_Y_LPARAM(lp)*pickerHeight/h};
 }
 void choose(Picker& state,int id){
- if(id>=100&&id<106)current.theme=id-100;
+ if(id>=100&&id<107)current.theme=id-100;
  else if(id>=200&&id<206)current.pattern=id-200;
  else if(id>=300&&id<303)current.intensity=id-300;
  else if(id==IDOK||id==IDCANCEL){
@@ -197,7 +228,7 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
  // existing theme regression tests even though buttons are painted in one view.
  case WM_COMMAND:{
      int id=LOWORD(wp);
-     if((id>=100&&id<106)||(id>=200&&id<206)||
+     if((id>=100&&id<107)||(id>=200&&id<206)||
         (id>=300&&id<303)||id==IDOK||id==IDCANCEL){
          state->focus=id;choose(*state,id);
      }
@@ -257,13 +288,13 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
      }
      if(wp==VK_LEFT||wp==VK_RIGHT||wp==VK_UP||wp==VK_DOWN){
          int id=state->focus;
-         if(id>=100&&id<106){
+         if(id>=100&&id<107){
              int index=id-100,step=0;
              if(wp==VK_LEFT)step=-1;
              if(wp==VK_RIGHT)step=1;
-             if(wp==VK_UP)step=-3;
-             if(wp==VK_DOWN)step=3;
-             state->focus=100+std::clamp(index+step,0,5);
+             if(wp==VK_UP)step=-4;
+             if(wp==VK_DOWN)step=4;
+             state->focus=100+std::clamp(index+step,0,6);
          }else if(id>=200&&id<206){
              state->focus=200+std::clamp(id-200+
                  ((wp==VK_LEFT||wp==VK_UP)?-1:1),0,5);
@@ -284,12 +315,17 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
  return DefWindowProcW(hwnd,msg,wp,lp);
 }
 }
-const Palette& palette(){return themes[current.theme];}const Palette& palette(int index){return themes[std::clamp(index,0,5)];}Settings settings(){return current;}
-void load(){HKEY key;if(RegOpenKeyExW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Appearance",0,KEY_QUERY_VALUE,&key)!=ERROR_SUCCESS)return;auto read=[&](const wchar_t* name,int fallback,int max){DWORD value=0,size=4,type=0;if(RegQueryValueExW(key,name,nullptr,&type,reinterpret_cast<BYTE*>(&value),&size)==ERROR_SUCCESS&&type==REG_DWORD&&size==4&&value<=DWORD(max))return int(value);return fallback;};current={read(L"Theme",Settings{}.theme,5),read(L"Pattern",1,5),read(L"Intensity",1,2)};RegCloseKey(key);resetCache();}
+const Palette& palette(){return themes[current.theme];}const Palette& palette(int index){return themes[std::clamp(index,0,6)];}Settings settings(){return current;}
+void load(){HKEY key;if(RegOpenKeyExW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Appearance",0,KEY_QUERY_VALUE,&key)!=ERROR_SUCCESS)return;auto read=[&](const wchar_t* name,int fallback,int max){DWORD value=0,size=4,type=0;if(RegQueryValueExW(key,name,nullptr,&type,reinterpret_cast<BYTE*>(&value),&size)==ERROR_SUCCESS&&type==REG_DWORD&&size==4&&value<=DWORD(max))return int(value);return fallback;};current={read(L"Theme",Settings{}.theme,6),read(L"Pattern",1,5),read(L"Intensity",1,2)};RegCloseKey(key);resetCache();}
 void shutdown(){cached.reset();for(auto& i:images)i.reset();for(auto& s:streams)if(s){s->Release();s=nullptr;}}
 void rounded(Graphics& g,RectF r,float radius,Color color){if(r.Width<=0||r.Height<=0)return;float d=std::min({radius*2,r.Width,r.Height});GraphicsPath p;p.AddArc(r.X,r.Y,d,d,180,90);p.AddArc(r.GetRight()-d,r.Y,d,d,270,90);p.AddArc(r.GetRight()-d,r.GetBottom()-d,d,d,0,90);p.AddArc(r.X,r.GetBottom()-d,d,d,90,90);p.CloseFigure();SolidBrush b(color);g.FillPath(&b,&p);}
-void background(Graphics& g,RectF box){int w=std::max(1,int(box.Width)),h=std::max(1,int(box.Height)),key=current.theme*100+current.pattern*10+current.intensity;if(!cached||cacheW!=w||cacheH!=h||cacheKey!=key){cached=std::make_unique<Bitmap>(w,h,PixelFormat32bppARGB);Graphics bg(cached.get());bg.SetSmoothingMode(SmoothingModeAntiAlias);bg.SetInterpolationMode(InterpolationModeHighQualityBicubic);scene(bg,{0,0,float(w),float(h)},current.theme,current.intensity,false);const auto& p=palette();pattern(bg,{0,0,float(w),float(h)},current.pattern,Color(p.darkCanvas?24:28,p.canvasInk.GetR(),p.canvasInk.GetG(),p.canvasInk.GetB()));cacheW=w;cacheH=h;cacheKey=key;}g.DrawImage(cached.get(),box.X,box.Y);}
+void background(Graphics& g,RectF box){int w=std::max(1,int(box.Width)),h=std::max(1,int(box.Height)),key=current.theme*100+current.pattern*10+current.intensity;if(!cached||cacheW!=w||cacheH!=h||cacheKey!=key){cached=std::make_unique<Bitmap>(w,h,PixelFormat32bppARGB);Graphics bg(cached.get());bg.SetSmoothingMode(SmoothingModeAntiAlias);bg.SetInterpolationMode(InterpolationModeHighQualityBicubic);scene(bg,{0,0,float(w),float(h)},current.theme,current.intensity,false);const auto& p=palette();pattern(bg,{0,0,float(w),float(h)},current.pattern,Color(p.darkCanvas?24:28,p.canvasInk.GetR(),p.canvasInk.GetG(),p.canvasInk.GetB()));cacheW=w;cacheH=h;cacheKey=key;}g.DrawImage(cached.get(),box.X,box.Y);
+ if(current.theme==6){float phase=float(GetTickCount64()%2400)/2400.f;
+  float pulse=.16f+.84f*std::pow(.5f+.5f*std::cos(phase*6.2831853f),12.f);
+  eyeGlints(g,box,pulse);
+ }
+}
 Color documentColor(Color color,bool backing){const auto& p=palette();if(backing&&color.GetR()==255&&color.GetG()==255&&color.GetB()==255)return p.canvas;if(color.GetR()==color.GetG()&&color.GetG()==color.GetB()&&color.GetR()<190){BYTE v=color.GetR();if(v<40)return p.canvasInk;if(p.darkCanvas)return c(0xa4b2bf);}if(p.darkCanvas){float luminance=.2126f*color.GetR()+.7152f*color.GetG()+.0722f*color.GetB();if(luminance<155){auto lift=[](BYTE v){return BYTE(v+(255-v)*.35f);};return Color(color.GetA(),lift(color.GetR()),lift(color.GetG()),lift(color.GetB()));}}return color;}
-void titlebar(HWND hwnd){BOOL dark=current.theme!=2;DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));COLORREF caption=RGB(palette().chrome.GetR(),palette().chrome.GetG(),palette().chrome.GetB());DwmSetWindowAttribute(hwnd,35,&caption,sizeof(caption));}
+void titlebar(HWND hwnd){BOOL dark=current.theme!=2&&current.theme!=6;DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));COLORREF caption=RGB(palette().chrome.GetR(),palette().chrome.GetG(),palette().chrome.GetB());DwmSetWindowAttribute(hwnd,35,&caption,sizeof(caption));}
 void picker(HWND parent,const std::function<void()>& refresh){Picker p;p.parent=parent;p.before=current;p.refresh=refresh;WNDCLASSW wc{};wc.lpfnWndProc=pickerProc;wc.hInstance=GetModuleHandleW(nullptr);wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.lpszClassName=L"YoungDrawAppearance";RegisterClassW(&wc);RECT r{0,0,916,700};AdjustWindowRectEx(&r,WS_CAPTION|WS_SYSMENU,FALSE,WS_EX_DLGMODALFRAME);RECT parentRect{};GetWindowRect(parent,&parentRect);int width=r.right-r.left,height=r.bottom-r.top;HMONITOR monitor=MonitorFromWindow(parent,MONITOR_DEFAULTTONEAREST);MONITORINFO info{sizeof(info)};GetMonitorInfoW(monitor,&info);int x=std::clamp(int(parentRect.left+(parentRect.right-parentRect.left-width)/2),int(info.rcWork.left),std::max(int(info.rcWork.left),int(info.rcWork.right)-width));int y=std::clamp(int(parentRect.top+(parentRect.bottom-parentRect.top-height)/2),int(info.rcWork.top),std::max(int(info.rcWork.top),int(info.rcWork.bottom)-height));HWND hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,L"YoungDraw · 배경과 테마",WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN,x,y,width,height,parent,nullptr,wc.hInstance,&p);if(!hwnd)return;titlebar(hwnd);EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(hwnd);MSG msg{};bool quit=false;while(!p.done){BOOL result=GetMessageW(&msg,nullptr,0,0);if(result<=0){quit=result==0;break;}TranslateMessage(&msg);DispatchMessageW(&msg);}if(p.accepted)save();else current=p.before;resetCache();EnableWindow(parent,TRUE);DestroyWindow(hwnd);SetActiveWindow(parent);refresh();if(quit)PostQuitMessage(int(msg.wParam));}
 }

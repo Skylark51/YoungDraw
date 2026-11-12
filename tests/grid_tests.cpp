@@ -29,6 +29,20 @@ int main(){try{
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&controls);
     WNDCLASSW wc{};wc.lpfnWndProc=ui::gridProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawGridRegression";check(RegisterClassW(&wc)!=0,"register grid");
     {
+        auto original=coordinateDemo().plots[0];
+        Fixture f(original,{{"A","0","1"},{"B","2","3"},{"C","4","5"}});auto& g=f.grid;
+        RECT first{},last{};ListView_GetSubItemRect(g.list,0,2,LVIR_BOUNDS,&first);ListView_GetSubItemRect(g.list,1,3,LVIR_BOUNDS,&last);
+        SendMessageW(g.list,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(first.left+5,first.top+5));
+        SendMessageW(g.list,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(last.left+5,last.top+5));
+        SendMessageW(g.list,WM_LBUTTONUP,0,MAKELPARAM(last.left+5,last.top+5));
+        check(g.anchorRow==0&&g.row==1&&g.anchorCol==1&&g.col==2,"drag selects a rectangular range");
+        SendMessageW(g.list,WM_KEYDOWN,VK_DELETE,0);
+        check(g.rows[0][1].empty()&&g.rows[1][2].empty()&&g.rows[2][1]=="4","Delete clears only the dragged range");
+        ui::undo(g);check(g.rows==g.original,"undo restores cleared values");ui::undo(g,true);check(g.rows[1][2].empty(),"redo clears the values again");ui::undo(g);
+        SendMessageW(g.win,WM_COMMAND,21,0);check(g.rows.size()==1&&g.rows[0][0]=="C","row delete removes the selected rows");
+        SendMessageW(g.win,WM_COMMAND,27,0);check(g.rows==g.original,"undo button restores deleted rows");
+    }
+    {
         auto mechanism=mechanismDemo().reactions[0];auto applied=mechanism;ui::Grid grid;
         grid.rows=mechanismRows(mechanism);grid.original=grid.rows;grid.stages=true;grid.scripts=true;
         grid.columns={L"구분",L"이름",L"S",L"에너지"};

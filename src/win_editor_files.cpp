@@ -1,5 +1,9 @@
 #include "win_editor_files.h"
+#include "cdxml.h"
+#include "win_dialogs.h"
 #include "win_editor_state.h"
+#include "win_editor_tabs.h"
+#include "win_editor_text.h"
 #include "win_storage.h"
 #include <commdlg.h>
 #include <fstream>
@@ -17,6 +21,43 @@ std::vector<std::wstring> openDocumentFiles(){
     std::wstring first=buffer.data();const wchar_t* cursor=buffer.data()+first.size()+1;
     if(!*cursor)return {first};
     std::vector<std::wstring> paths;while(*cursor){std::wstring name=cursor;paths.push_back((fs::path(first)/name).wstring());cursor+=name.size()+1;}return paths;
+}
+
+void openDocuments(const std::vector<std::wstring>& paths){
+    if(paths.empty()||!finishInline(true))return;
+
+    std::wstring failures;
+    for(const auto& path:paths){
+        try{
+            const auto fullPath=fs::absolute(path).lexically_normal();
+            size_t index=0;
+            for(;index<documents.size();++index){
+                const auto& currentPath=index==activeDocument?filePath:documents[index].path;
+                if(!currentPath.empty()&&_wcsicmp(fs::absolute(currentPath).lexically_normal().c_str(),fullPath.c_str())==0)
+                    break;
+            }
+            if(index<documents.size()){
+                switchDocumentTab(index);
+                continue;
+            }
+
+            auto imported=fromCdxml(readFile(path));
+            newDocumentTab(std::move(imported),path);
+            status=L"문서를 새 탭에서 열었습니다.";
+            if(!doc.importWarnings.empty()){
+                std::wstring warnings=L"지원하지 않는 XML 객체는 CDXML 저장 시 보존됩니다. 미리보기와 SVG에는 일부 객체가 생략될 수 있습니다.\n\n";
+                for(size_t i=0;i<std::min(size_t(12),doc.importWarnings.size());++i)
+                    warnings+=ui::wide(doc.importWarnings[i])+L"\n";
+                MessageBoxW(win,warnings.c_str(),L"CDXML 호환성 보고서",MB_OK|MB_ICONINFORMATION);
+            }
+        }catch(const std::exception& e){
+            failures+=L"\n"+fs::path(path).filename().wstring()+L" — "+ui::wide(e.what())+L"\n";
+        }
+    }
+    if(!failures.empty()){
+        const auto message=L"다음 파일을 열 수 없습니다.\n"+failures;
+        MessageBoxW(win,message.c_str(),L"문서 열기",MB_OK|MB_ICONWARNING);
+    }
 }
 
 } // namespace yd::editor

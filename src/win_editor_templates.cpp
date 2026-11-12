@@ -7,6 +7,7 @@
 #include "win_editor_templates.h"
 #include "cdxml.h"
 #include "lab_templates_data.h"
+#include "structure_templates.h"
 #include "win_dialogs.h"
 #include "win_ui.h"
 #include <cwctype>
@@ -83,6 +84,9 @@ std::vector<ui::TemplateCard>& templateCards(size_t& unreadable){
         add(L"기본",L"반응 메커니즘",mechanismDemo());
         add(L"기본",L"촉매 순환 · 수소화 예시",catalyticCycleDemo());
         add(L"기본",L"에너지 그래프",coordinateDemo());
+        for(const auto& entry:layoutReferences())add(L"2D 배치 기준",ui::wide(entry.name),entry.drawing);
+        for(const auto& entry:functionalGroups())
+            add(L"작용기",ui::wide(entry.abbreviation)+L" · "+ui::wide(entry.name),entry.drawing);
         for(auto& entry:labTemplates)add(ui::wide(entry.category),ui::wide(entry.name),fromNative(entry.data));
         for(const auto& path:paths)try{
             add(L"사용자",path.stem().wstring(),fromCdxml(readFile(path.wstring())),path.wstring(),groupOf(path));

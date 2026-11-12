@@ -22,9 +22,10 @@ struct Style {
     double hashSpacing=2.7, bondSpacing=.12, fontSize=14;
     int labelFace=1;
 };
-enum class BondKind { Single, Double, Triple, Wedge, Hash, Dash, Bold, Wavy, Aromatic, Dative };
+enum class BondKind { Single, Double, Triple, Wedge, Hash, Dash, Bold, Wavy, Aromatic, Dative, Dot };
 struct TextRun { std::string text,color="#000000",font="Arial"; double size=10; int face=0; };
 struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,radical=0; std::string label; bool protect=false; std::vector<TextRun> labelRuns; Vec labelOffset; std::string color="#000000"; Vec annotationOffset; bool annotationManual=false; double drawingScale=1;
+    std::optional<double> mullikenSpin;
     std::optional<double> labelSize, labelMargin;
     std::optional<int> labelFace;
     void preserveStyle(const Style& from,const Style& to);
@@ -72,7 +73,7 @@ struct Reaction {
     bool circularMerge=false; // Fit both directed branches to a shared circle.
     bool explicitConnections() const {return manualConnections||!links.empty();}
 };
-struct EnergyState { std::string label; double energy=0; std::vector<int> above,below; int marker=-1; };
+struct EnergyState { std::string label; double energy=0; std::vector<int> above,below; int marker=-1; std::optional<double> position; };
 struct MechanismStage { std::string label; double start=0,end=100,fontSize=0; }; // Percent span; fontSize 0 matches state captions.
 // Empty color entries inherit the pathway color. Segment i joins states i and i+1.
 struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
@@ -87,7 +88,7 @@ struct EnergyCrossing {
 };
 struct EnergyPlot {
     int id=0; Vec p; double width=520,height=320;
-    std::string title="Reaction coordinate",unit="kcal/mol";
+    std::string title="Reaction coordinate",unit="kcal mol^{-1}";
     std::string xLabel="Reaction coordinate",yLabel="Energy",xColor="#000000",yColor="#000000";
     std::optional<double> yMin,yMax;
     double axisScale=1;
@@ -96,6 +97,9 @@ struct EnergyPlot {
     std::vector<MechanismStage> stages; // Empty in older documents; editable independently of energy states.
     std::vector<EnergyState> states; std::vector<EnergySeries> series; int mode=3; bool showValues=true;
     bool thinLines=false; // Display preset; stored path widths remain editable in either mode.
+    bool showXAxis=true,showYAxis=true;
+    bool showYTicks=true,energyAtTop=false;
+    Vec legendOffset; // Offset from the automatic legend position, in points.
     bool boldLevels=false; // Keep plateau strokes at their original weight in thin mode.
     std::vector<EnergyCrossing> crossings;
 };
@@ -132,7 +136,7 @@ struct Document {
     void ring(Vec center, int sides, bool alternating=false);
     void attachRing(int atomId,int bondId,int sides,bool alternating=false);
     std::vector<int> component(int atomId) const;
-    void translate(const std::vector<int>& ids,Vec delta);
+    void translate(const std::vector<int>& ids,Vec delta,bool includeGroups=true);
     void erase(const std::vector<int>& ids);
     std::vector<int> allIds() const;
     void append(const Document& other,Vec delta={});
@@ -141,9 +145,9 @@ struct Document {
     int hydrogens(int id) const;
     std::vector<std::string> validate() const;
 };
-struct CleanupReport { int regularRings=0,protectedComponents=0,components=0; };
+struct CleanupReport { int regularRings=0,protectedComponents=0,components=0,referenceComponents=0; };
 bool upgradeBondGeometry(Document& d);
-CleanupReport cleanStructure(Document& d,const std::vector<int>& selection={},bool preserveProjection=false);
+CleanupReport cleanStructure(Document& d,const std::vector<int>& selection={},bool preserveProjection=false,bool useReferences=false);
 size_t reactionRow(const Reaction& r,size_t index);
 Vec reactionSlot(const Reaction& r,size_t index);
 void appendMechanismStage(Reaction& r,bool below=false,size_t source=size_t(-1));

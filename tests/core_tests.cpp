@@ -11,6 +11,20 @@
 using namespace yd;
 int checks=0;static void check(bool v,const char* name){checks++;if(!v)throw std::runtime_error(name);}
 int main(){try{
+ {Document dotted;int a=dotted.addAtom({0,0}),b=dotted.addAtom({30,0});
+  int id=dotted.addBond(a,b,BondKind::Dot);dotted.bond(id)->color="#123456";
+  auto visual=makeScene(dotted);int strokes=0;
+  for(const auto& stroke:visual.items)if(stroke.owner==id){++strokes;check(stroke.type==Primitive::Line&&stroke.dash==2&&stroke.color=="#123456","dotted bond is one dotted stroke in the bond color");}
+  check(strokes==1&&order(BondKind::Dot)==1&&dotted.hydrogens(a)==3&&dotted.hydrogens(b)==3,"dotted bonds retain single bond valence");
+  check(toSvg(visual).find("stroke-dasharray=\"1 2\"")!=std::string::npos,"dotted single bond exports as a dotted SVG path");
+#ifdef TEST_CDXML
+  for(const auto& restored:{fromNative(toNative(dotted)),fromCdxml(toCdxml(dotted))})
+   check(restored.bonds.size()==1&&restored.bonds[0].kind==BondKind::Dot&&restored.bonds[0].color=="#123456"&&restored.hydrogens(a)==3,"dotted bond connectivity, color and valence survive native and CDXML saving");
+  auto xml=toCdxml(dotted);check(xml.find("Display=\"Dot\"")!=std::string::npos&&xml.find("Order=\"1\"")!=std::string::npos,"CDXML declares a dotted single bond");
+  check(fromCdxml(xml).importWarnings.empty(),"dotted CDXML bonds are supported without import warnings");
+#endif
+ }
+
   {Scene figure;figure.bounds={0,0,480,300};
    Primitive line;line.type=Primitive::Line;line.points={{0,0},{100,0}};line.width=.8;figure.items.push_back(line);
    Primitive label;label.type=Primitive::Text;label.points={{0,20}};label.text="TS";label.fontSize=8;figure.items.push_back(label);
@@ -341,6 +355,33 @@ int main(){try{
  auto radical=fromCdxml("<CDXML><page id='1'><fragment id='2'><n id='3' p='20 20' Element='8' Radical='Doublet'/><n id='4' p='40 20'/><b id='5' B='3' E='4' Order='2.5'/></fragment></page></CDXML>");
  check(radical.atom(3)->radical==2&&toCdxml(radical).find("Order=\"2.5\"")!=std::string::npos,"retain named radicals and unusual bond orders");
  radical.addBond(4,radical.addAtom({54.4,20}));auto extension=strip(toCdxml(radical));check(fromCdxml(extension).atoms.size()==3,"extend an imported fragment");
+ auto joined=fromCdxml(R"(<CDXML><page id="1">
+   <fragment id="2"><n id="3" p="10 20"/><n id="4" p="25 20"/><b id="5" B="3" E="4" Order="2"/></fragment>
+   <group id="6" LabelSize="16"><fragment id="7"><n id="8" p="40 20" Element="8" Charge="-1" Future="retained"/><n id="9" p="55 20"/><b id="10" B="8" E="9"/></fragment></group>
+   <fragment><n id="11" p="85 20" Element="7"/></fragment>
+   <fragment id="12"><n id="13" p="10 60"/></fragment>
+   <scheme id="14"><step id="15" ReactionStepReactants="2 7 12" ReactionStepProducts="7"/></scheme>
+ </page></CDXML>)");
+ int bridge=joined.addAtom({70,20});
+ int direct=joined.addBond(4,8,BondKind::Dative);
+ int bridgeStart=joined.addBond(9,bridge),bridgeEnd=joined.addBond(bridge,11);
+ auto joinedXml=strip(toCdxml(fromNative(toNative(joined))));
+ auto start=joinedXml.find("<fragment id=\"2\">"),end=joinedXml.find("</fragment>",start);
+ check(start!=std::string::npos&&end!=std::string::npos,"merged CDXML fragment retains its original ID");
+ auto contents=joinedXml.substr(start,end-start);
+ for(int id:{3,4,5,8,9,10,11,bridge,direct,bridgeStart,bridgeEnd})
+     check(contents.find(" id=\""+std::to_string(id)+"\"")!=std::string::npos,"merged fragment contains every original and new atom and bond");
+ check(joinedXml.find("<fragment id=\"7\"")==std::string::npos&&joinedXml.find("<fragment id=\"12\"")!=std::string::npos,
+       "only joined source fragments merge");
+ check(joinedXml.find("ReactionStepReactants=\"2 12\"")!=std::string::npos&&joinedXml.find("ReactionStepProducts=\"2\"")!=std::string::npos,
+       "reaction references follow the merged fragment");
+ auto reopened=fromCdxml(joinedXml);
+ check(reopened.atoms.size()==joined.atoms.size()&&reopened.bonds.size()==joined.bonds.size()&&reopened.component(3).size()==6,
+       "plain CDXML retains the joined connectivity");
+ check(contents.find("Future=\"retained\"")!=std::string::npos&&reopened.atom(8)->charge==-1&&reopened.atom(8)->labelSize==16,
+       "moved atoms retain source properties and inherited label size");
+ check(reopened.bonds[0].kind==BondKind::Double&&reopened.bonds[2].kind==BondKind::Dative,
+       "plain CDXML retains the original and new bond types");
  auto grouped=fromCdxml(fixture);grouped.groups.clear();check(strip(toCdxml(grouped)).find("<group id=\"2\"")==std::string::npos,"ungroup imported source objects");
  Document groupedNew=demo();groupedNew.groups.push_back({groupedNew.nextId++,groupedNew.allIds()});check(fromCdxml(strip(toCdxml(groupedNew))).groups.size()==1,"native grouping exported to ordinary CDXML");
  auto warningCopy=fromNative(toNative(radical));check(!warningCopy.importWarnings.empty(),"compatibility warnings survive native save");

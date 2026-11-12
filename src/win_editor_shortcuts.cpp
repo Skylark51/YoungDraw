@@ -58,11 +58,22 @@ void hotkey(char c){
  // The main minus key produces '_' with Shift, while the keypad produces '-'.
  if((c=='+'||c=='-'||c=='_')&&(GetKeyState(VK_SHIFT)&0x8000)&&
     !mechanismConnectionDrag&&adjustSelectedStrokeWidths(c=='+'))return;
+ // Zero clears atom annotations and must never fall through to atom sprouting.
+ if(c=='0'){
+    int target=doc.atom(hoverAtom)?hoverAtom:selection.size()==1&&doc.atom(selection.front())?selection.front():0;
+    if(target){
+        auto* a=doc.atom(target);
+        if(a->charge||a->radical){
+            history.checkpoint(doc);a->charge=0;a->radical=0;a->explicitH=-1;changed();
+        }
+    }
+    return;
+ }
  if(c=='+'||c=='-'||c=='*'){
     int target=doc.atom(hoverAtom)?hoverAtom:selection.size()==1&&doc.atom(selection.front())?selection.front():0;
     if(target){history.checkpoint(doc);auto* a=doc.atom(target);if(c=='*')a->radical=a->radical?0:2;else{a->charge+=c=='+'?1:-1;a->explicitH=-1;}changed();return;}
  }
- int aid=hoverAtom,bid=aid?0:hoverBond;if(c=='a'&&!aid&&!bid){command(217);return;}if(aid){std::map<char,std::string> labels={{'b',"Br"},{'B',"B"},{'c',"C"},{'C',"Cl"},{'f',"F"},{'h',"H"},{'i',"I"},{'l',"Cl"},{'L',"Li"},{'n',"N"},{'w',"N"},{'o',"O"},{'q',"O"},{'p',"P"},{'s',"S"},{'S',"Si"},{'m',"Me"},{'e',"Et"},{'r',"R"},{'N',"NO2"},{'O',"OMe"},{'P',"Ph"},{'F',"CF3"},{'y',"Boc"},{'d',"D"}};auto label=labels.find(c);if(label!=labels.end()){history.checkpoint(doc);auto a=doc.atom(aid);int e=atomicNumber(label->second);if(e){setAtomElement(doc,a->id,e);a->label.clear();a->labelRuns.clear();a->explicitH=-1;}else{a->label=label->second;a->labelRuns.clear();}if(c=='d'){a->element=1;a->isotope=2;a->label.clear();a->labelRuns.clear();}selection={aid};changed();return;}if(c=='g'){selection=doc.component(aid);tool=Select;redraw();return;}
+ int aid=hoverAtom,bid=aid?0:hoverBond;if(c=='a'&&!aid&&!bid){command(217);return;}if(aid){std::map<char,std::string> labels={{'b',"Br"},{'B',"B"},{'c',"C"},{'C',"Cl"},{'f',"F"},{'h',"H"},{'i',"I"},{'l',"Cl"},{'L',"Li"},{'n',"N"},{'w',"N"},{'o',"O"},{'q',"O"},{'p',"P"},{'s',"S"},{'S',"Si"},{'m',"Me"},{'e',"Et"},{'r',"R"},{'N',"NO2"},{'O',"OMe"},{'P',"Ph"},{'F',"CF3"},{'y',"Boc"},{'d',"D"}};auto label=labels.find(c);if(label!=labels.end()){history.checkpoint(doc);auto a=doc.atom(aid);int e=atomicNumber(label->second);if(e){setAtomElement(doc,a->id,e);a->label=c=='c'?"C":"";a->labelRuns.clear();a->explicitH=-1;}else{a->label=label->second;a->labelRuns.clear();}if(c=='d'){a->element=1;a->isotope=2;a->label.clear();a->labelRuns.clear();}selection={aid};changed();return;}if(c=='g'){selection=doc.component(aid);tool=Select;redraw();return;}
  if((c>='0'&&c<='9')||c=='a'||c=='z'||c=='v'||c=='u'){history.checkpoint(doc);if(c=='3'||c=='a'||c=='6'||c=='7'||c=='v'||c=='u'){bool aromatic=c=='a'||c=='3';Vec at=bondEndpoint(doc,aid,doc.atom(aid)->p,BondKind::Single,6);if(aromatic&&doc.atom(aid)->element==6){Vec v=at-doc.atom(aid)->p;at=doc.atom(aid)->p+v*(doc.style.bondLength*benzeneConnectorScale/v.length());}int attached=doc.addAtom(at);doc.addBond(aid,attached);doc.attachRing(attached,0,c=='7'?5:c=='v'?3:c=='u'?4:6,aromatic);}else{int e=c=='2'?8:6;BondKind k=c=='2'||c=='8'?BondKind::Double:c=='z'?BondKind::Triple:c=='4'?BondKind::Wedge:c=='5'?BondKind::Hash:BondKind::Single;Vec p=bondEndpoint(doc,aid,doc.atom(aid)->p,k,e);int b=doc.addAtom(p,e);doc.addBond(aid,b,k);if(c=='9'){int z=doc.addAtom(sproutPoint(aid));doc.addBond(aid,z);}}changed();return;}}
  if(bid){auto b=doc.bond(bid);if(c=='g'){selection=doc.component(b->a);tool=Select;redraw();return;}if(c=='1'||c=='2'||c=='3'||c=='w'||c=='h'||c=='W'||c=='d'||c=='b'||c=='y'){history.checkpoint(doc);BondKind k=c=='1'?BondKind::Single:c=='2'?BondKind::Double:c=='3'?BondKind::Triple:c=='w'?BondKind::Wedge:c=='h'||c=='W'?BondKind::Hash:c=='d'?BondKind::Dash:c=='b'?BondKind::Bold:BondKind::Wavy;if(b->kind==k&&(k==BondKind::Wedge||k==BondKind::Hash))std::swap(b->a,b->b);setBondKind(doc,bid,k);b->customOrder.clear();b->customDisplay.clear();changed();return;}
  if((c>='4'&&c<='8')||c=='a'||c=='v'){history.checkpoint(doc);doc.attachRing(0,bid,c=='a'?6:c=='v'?3:c-'0',c=='a');changed();return;}if(c=='l'||c=='r'||c=='c'){history.checkpoint(doc);b->doubleSide=c=='l'?1:c=='r'?-1:0;changed();return;}}

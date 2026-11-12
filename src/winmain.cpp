@@ -17,6 +17,27 @@
 using namespace yd;
 using namespace yd::editor;
 
+namespace {
+std::string readPowerPointEmbedding(){
+    constexpr size_t limit=64*1024*1024;
+    auto input=GetStdHandle(STD_INPUT_HANDLE);
+    if(!input||input==INVALID_HANDLE_VALUE)throw std::runtime_error("PowerPoint에서 개체를 전달하지 않았습니다.");
+    std::string bytes;
+    char buffer[16384];
+    for(;;){
+        DWORD read=0;
+        if(!ReadFile(input,buffer,sizeof(buffer),&read,nullptr)){
+            if(GetLastError()==ERROR_BROKEN_PIPE)break;
+            throw std::runtime_error("PowerPoint에서 개체를 읽을 수 없습니다.");
+        }
+        if(!read)break;
+        if(bytes.size()+read>limit)throw std::runtime_error("ChemDraw 개체는 64 MB까지 열 수 있습니다.");
+        bytes.append(buffer,read);
+    }
+    return bytes;
+}
+}
+
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIAware();int argc=0;LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);OleInitialize(nullptr);bool embedding=argc>1&&(_wcsicmp(argv[1],L"/Embedding")==0||_wcsicmp(argv[1],L"-Embedding")==0);GdiplusStartupInput start;ULONG_PTR token;GdiplusStartup(&token,&start,nullptr);setMechanismTextMeasure(measure);
  if(argc==2&&std::wstring(argv[1])==L"--copy-office-demo"){office::start({nullptr,[](const Document&){},[](){return coordinateDemo();},officePicture},false);auto result=office::copy(coordinateDemo());if(SUCCEEDED(result))result=OleFlushClipboard();LocalFree(argv);imageCache.clear();GdiplusShutdown(token);OleUninitialize();return FAILED(result)?int(result):0;}
  if(argc==5&&std::wstring(argv[1])==L"--export-office"){
@@ -52,11 +73,20 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIA
  }
  if(argc==4&&std::wstring(argv[1])==L"--convert"){try{doc=fromCdxml(readFile(argv[2]));writeFile(std::wstring(argv[3])+L".ydraw",toNative(doc));writeFile(std::wstring(argv[3])+L".cdxml",toCdxml(doc));writeFile(std::wstring(argv[3])+L".svg",toSvg(scene()));LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(const std::exception& e){try{writeFile(std::wstring(argv[3])+L".error.txt",e.what());}catch(...){} LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
  isolatedStructureEditing=argc==4&&std::wstring(argv[1])==L"--edit-structure";if(isolatedStructureEditing)isolatedStructureResult=argv[3];
- StartupSplash splash(instance,!embedding && !isolatedStructureEditing && show!=SW_HIDE && show!=SW_SHOWMINIMIZED && show!=SW_SHOWMINNOACTIVE && show!=SW_MINIMIZE);
+ const bool powerPointImport=argc==2&&std::wstring(argv[1])==L"--open-powerpoint-chemdraw";
  std::vector<std::pair<Document,std::wstring>> startupDocuments;
+ if(powerPointImport){
+     try{startupDocuments.emplace_back(office::fromChemDrawEmbedding(readPowerPointEmbedding()),L"");}
+     catch(const std::exception& e){
+         MessageBoxW(nullptr,ui::wide(e.what()).c_str(),L"PowerPoint · YoungDraw",MB_OK|MB_ICONWARNING);
+         LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;
+     }
+ }
+ StartupSplash splash(instance,!embedding && !isolatedStructureEditing && show!=SW_HIDE && show!=SW_SHOWMINIMIZED && show!=SW_SHOWMINNOACTIVE && show!=SW_MINIMIZE);
  if(isolatedStructureEditing){try{startupDocuments.push_back({fromNative(readFile(argv[2])),argv[2]});}catch(const std::exception& e){MessageBoxW(nullptr,ui::wide(e.what()).c_str(),L"구조 편집",MB_OK|MB_ICONWARNING);LocalFree(argv);return 1;}}
- else if(!embedding)for(int i=1;i<argc;i++){try{startupDocuments.push_back({fromCdxml(readFile(argv[i])),argv[i]});}catch(...){}}
+ else if(!embedding&&!powerPointImport)for(int i=1;i<argc;i++){try{startupDocuments.push_back({fromCdxml(readFile(argv[i])),argv[i]});}catch(...){}}
  if(!startupDocuments.empty()){doc=std::move(startupDocuments[0].first);filePath=startupDocuments[0].second;Document beforeUpgrade=doc;if(!isolatedStructureEditing)normalizeChemicalLabels(doc);dirty=!isolatedStructureEditing&&(upgradeBondGeometry(doc)||toNative(doc)!=toNative(beforeUpgrade));if(dirty)history.checkpoint(beforeUpgrade);tool=Select;}
+ if(powerPointImport){dirty=true;status=L"PowerPoint의 ChemDraw 개체를 가져왔습니다. Ctrl+S로 CDXML을 저장할 수 있습니다.";}
 
  RECT work{};
  SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0);

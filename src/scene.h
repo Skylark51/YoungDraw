@@ -4,6 +4,7 @@
 #include <map>
 namespace yd {
 struct Rect { double x=0,y=0,w=0,h=0; };
+inline constexpr int mullikenSpinTextRole=14;
 struct Primitive {
     enum Type { Line, Polygon, Text, Bezier, Ellipse, Box, Image } type=Line;
     std::vector<Vec> points;
@@ -22,8 +23,9 @@ using Measure = std::function<double(const std::string&,double,const std::string
 struct ScriptRun {std::string text;int script=0;};
 std::vector<ScriptRun> scriptRuns(const std::string& input);
 struct PlotSnapPoint { Vec p; double percent=0; int state=0,path=0,edge=0; }; // edge: -1 left, 0 center, 1 right
+struct PlotDragScale { double unitsPerPoint, low, high; };
 struct CrossingCaption { int owner; size_t index; Rect bounds; Vec offset; };
-struct Scene { std::vector<CrossingCaption> crossingCaptions; std::map<int,double> plotBaselines; std::map<int,std::vector<PlotSnapPoint>> plotSnapPoints; std::vector<Primitive> items; Rect bounds; std::map<int,Rect> objectBounds; std::map<int,std::vector<Vec>> arrowPaths; };
+struct Scene { std::vector<CrossingCaption> crossingCaptions; std::map<int,double> plotBaselines; std::map<int,PlotDragScale> plotDragScales; std::map<int,std::vector<PlotSnapPoint>> plotSnapPoints; std::vector<Primitive> items; Rect bounds; std::map<int,Rect> objectBounds; std::map<int,std::vector<Vec>> arrowPaths; };
 std::vector<Vec> routeArrow(const Document& d,const Object& arrow,const std::map<int,Rect>& atomBoxes={});
 std::vector<Primitive> arrowPrimitives(const Object& arrow);
 void appendArrowCross(std::vector<Primitive>& items,const std::vector<Primitive>& shaft,const ArrowCross& mark,int owner);

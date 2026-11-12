@@ -8,7 +8,9 @@ Revvity의 [공식 단축키 안내](https://revvitysignals.com/sites/default/fi
 | Ctrl+Shift+Alt+T / M / B | 선택 객체 위 / 상하 중앙 / 아래 맞춤 |
 | Ctrl+Shift+Alt+H / V | 가로 / 세로의 빈 간격을 균등하게 배분 |
 | Ctrl+R / Ctrl+K | 회전 / 크기 대화상자 |
-| Ctrl+Shift+K | 구조 정리 미리보기 |
+| Ctrl+Shift+K | 고리 기준 그림을 활용하는 구조 정리와 적용 전후 미리보기 |
+| 준위 드래그 / Alt+준위 드래그 | 그래프 에너지 / 상태 가로 위치 조정 |
+| Alt+구조 칸 드래그 | 직선·분기 메커니즘의 단계 위치 조정 |
 | Ctrl+Shift+X | YoungDraw 반응 배치·크기 정돈 |
 | Ctrl+Shift+H / V | 좌우 / 상하 반전 |
 | 방향키 / Shift+방향키 | 1 / 10 pt 이동 |

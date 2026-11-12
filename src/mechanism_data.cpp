@@ -141,8 +141,12 @@ double mechanismArrowLength(const Reaction& r,const Style& style){
     for(auto& raw:r.below)measureEnergy(raw);
     return std::max(font*3.,widest+font*.6);
 }
-double mechanismArrowWeight(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.1,font*.085)*std::sqrt(std::max(1.,mechanismArrowLength(r,style)/(font*6)));}
-double mechanismArrowHead(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.25,font/10)*std::sqrt(std::max(1.,mechanismArrowLength(r,style)/(font*6)));}
+static double mechanismArrowScale(const Reaction& r,const Style& style){
+    const double relative=std::sqrt(std::max(1.,mechanismArrowLength(r,style)/(mechanismFontSize(r,style)*6)));
+    return 1.+.75*(1.-1./relative);
+}
+double mechanismArrowWeight(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.35,font*.105)*mechanismArrowScale(r,style);}
+double mechanismArrowHead(const Reaction& r,const Style& style){double font=mechanismFontSize(r,style);return std::max(1.35,font*.106)*mechanismArrowScale(r,style);}
 namespace {
 struct CycleBox {double x,y,w,h;};
 double cycleTextWidth(const std::string& text,double font){

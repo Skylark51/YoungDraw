@@ -1,4 +1,5 @@
 #include "model.h"
+#include "structure_templates.h"
 #include "plot_data.h"
 #include "scene.h"
 #include "mechanism_data.h"
@@ -28,7 +29,7 @@ static bool missingAnchor(const Document& d,const Object& o,const std::set<int>&
     auto missingBond=[&](int id){auto* b=d.bond(id);return id&&(!b||!ids.count(b->a)||!ids.count(b->b));};
     return (o.sourceAtom&&!ids.count(o.sourceAtom))||(o.targetAtom&&!ids.count(o.targetAtom))||missingBond(o.sourceBond)||missingBond(o.targetBond);
 }
-void Document::translate(const std::vector<int>& selection,Vec v){auto ids=editableExpansion(*this,selection);for(auto& o:objects)if(ids.count(o.id)&&o.autoRoute&&o.kind!=ObjectKind::Line&&missingAnchor(*this,o,ids)){o.points=routeArrow(*this,o);o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;o.autoRoute=false;}for(auto& a:atoms)if(ids.count(a.id))a.p=a.p+v;for(auto& o:objects)if(ids.count(o.id))for(auto& p:o.points)p=p+v;for(auto& r:reactions)if(ids.count(r.id))r.p=r.p+v;for(auto& p:plots)if(ids.count(p.id))p.p=p.p+v;}
+void Document::translate(const std::vector<int>& selection,Vec v,bool includeGroups){std::set<int> ids;if(includeGroups)ids=editableExpansion(*this,selection);else for(int id:selection)if(!isLocked(id))ids.insert(id);for(auto& o:objects)if(ids.count(o.id)&&o.autoRoute&&o.kind!=ObjectKind::Line&&missingAnchor(*this,o,ids)){o.points=routeArrow(*this,o);o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;o.autoRoute=false;}for(auto& a:atoms)if(ids.count(a.id))a.p=a.p+v;for(auto& o:objects)if(ids.count(o.id))for(auto& p:o.points)p=p+v;for(auto& r:reactions)if(ids.count(r.id))r.p=r.p+v;for(auto& p:plots)if(ids.count(p.id))p.p=p.p+v;}
 std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,double factor,std::optional<Vec> center){
     if(selection.empty())throw std::runtime_error("크기를 조정할 구조·이미지를 먼저 선택하세요.");
     if(!std::isfinite(factor)||factor<.01||factor>10)throw std::runtime_error("배율은 1~1000%로 입력하세요.");
@@ -239,7 +240,7 @@ Vec reactionSlot(const Reaction& r,size_t i){
     for(auto& slot:r.slots){double lines=1+std::count(slot.label.begin(),slot.label.end(),'\n');if(!slot.energy.empty())lines+=1+std::count(slot.energy.begin(),slot.energy.end(),'\n');captionHeight=std::max(captionHeight,font*(.6+1.5*lines));}
     return r.p+Vec{col*r.spacing,double(row)*(r.slotHeight+std::max(r.rowGap,captionHeight+80))};
 }
-Vec plotAnchor(const EnergyPlot& p,size_t i,bool above){double x=p.p.x+100+(p.width-154)*double(i)/std::max(size_t(1),p.states.size()-1);return {x,p.p.y+(above?-85:p.height+70)};}
+Vec plotAnchor(const EnergyPlot& p,size_t i,bool above){double x=p.p.x+100+std::max(0.,p.width-154)*plotStateFraction(p,i);return {x,p.p.y+(above?-85:p.height+70)};}
 static std::pair<Vec,std::vector<int>> slotContents(const Document& d,int container,size_t index,bool above){
     if(d.isLocked(container))throw std::runtime_error("잠긴 구조는 편집할 수 없습니다.");
     for(const auto& r:d.reactions)if(r.id==container&&index<r.slots.size())return {reactionSlot(r,index),r.slots[index].members};
@@ -648,7 +649,7 @@ static bool planarLayout(Document& d,const std::vector<int>& comp,const std::vec
     Vec before,after;for(int id:comp){before=before+original[id];after=after+placed[id];}Vec shift=(before-after)*(1./comp.size());
     for(int id:comp)d.atom(id)->p=placed[id]+shift;return true;
 }
-static CleanupReport cleanStructureCandidate(Document& d,const std::vector<int>& selection,bool preserveProjection){
+static CleanupReport cleanStructureCandidate(Document& d,const std::vector<int>& selection,bool preserveProjection,bool useReferences,std::set<int>& referenceSeeds){
     CleanupReport report;std::set<int> visited;std::set<int> requested(selection.begin(),selection.end());expand(d,requested);for(auto& b:d.bonds)if(requested.count(b.id)){requested.insert(b.a);requested.insert(b.b);}
     for(auto& seed:d.atoms){if(visited.count(seed.id))continue;auto comp=d.component(seed.id);visited.insert(comp.begin(),comp.end());if(!requested.empty()&&!std::any_of(comp.begin(),comp.end(),[&](int id){return requested.count(id)>0;}))continue;if(comp.size()<2)continue;report.components++;
         Vec center;for(int id:comp)center=center+d.atom(id)->p;center=center*(1./comp.size());bool protect=false,explicitProtect=false,stereo=false;std::vector<double> lengths;auto rings=cycles(d,comp);auto targets=bondTargets(d,rings);
@@ -664,6 +665,7 @@ static CleanupReport cleanStructureCandidate(Document& d,const std::vector<int>&
         if(protect&&rings.size()>1&&!explicitProtect&&!stereo&&publicationChelate(d,comp,rings)){report.regularRings++;readableRings(d,comp,rings);continue;}
         bool simpleChelate=rings.size()==1&&rings[0].size()==5&&!explicitProtect&&!stereo;
         if(protect&&!simpleChelate){report.protectedComponents++;if(!explicitProtect)readableRings(d,comp,rings);continue;}
+        if(useReferences&&!protect&&applyLayoutReference(d,comp)){referenceSeeds.insert(seed.id);++report.referenceComponents;report.regularRings+=int(rings.size());readableRings(d,comp,rings);continue;}
         if(planarLayout(d,comp,rings)){report.regularRings+=int(rings.size());readableRings(d,comp,rings);continue;}
         std::map<int,Vec> ringTargets;std::map<int,int> count;
         for(auto& ring:rings){Vec c;double area=0;for(size_t i=0;i<ring.size();i++){Vec a=d.atom(ring[i])->p,b=d.atom(ring[(i+1)%ring.size()])->p;c=c+a;area+=a.x*b.y-a.y*b.x;}c=c*(1./ring.size());double turn=(area>0?1:-1)*2*pi/ring.size(),radius=(benzeneRing(d,ring)?d.style.bondLength*benzeneBondScale:d.style.bondLength)/(2*std::sin(pi/ring.size()));double dot=0,cross=0;
@@ -716,8 +718,8 @@ static std::set<std::pair<int,int>> cleanupCollisions(const Document& d){
     }
     return result;
 }
-CleanupReport cleanStructure(Document& d,const std::vector<int>& selection,bool preserveProjection){
-    Document original=d;auto before=cleanupCollisions(original);auto report=cleanStructureCandidate(d,selection,preserveProjection);
+CleanupReport cleanStructure(Document& d,const std::vector<int>& selection,bool preserveProjection,bool useReferences){
+    Document original=d;auto before=cleanupCollisions(original);std::set<int> referenceSeeds;auto report=cleanStructureCandidate(d,selection,preserveProjection,useReferences,referenceSeeds);
     auto after=cleanupCollisions(d);std::set<int> rejected;
     for(auto pair:after)if(!before.count(pair))for(int id:{pair.first,pair.second}){
         int seed=d.atom(id)?id:d.bond(id)?d.bond(id)->a:0;if(!seed)continue;
@@ -727,7 +729,7 @@ CleanupReport cleanStructure(Document& d,const std::vector<int>& selection,bool 
     // collisions; other independently selected structures may still improve.
     std::set<int> restored;
     for(int id:rejected){if(restored.count(id))continue;auto comp=d.component(id);bool moved=false;
-        for(int atom:comp){moved=moved||(d.atom(atom)->p-original.atom(atom)->p).length()>.001;*d.atom(atom)=*original.atom(atom);restored.insert(atom);}
+        for(int atom:comp){moved=moved||(d.atom(atom)->p-original.atom(atom)->p).length()>.001;*d.atom(atom)=*original.atom(atom);restored.insert(atom);report.referenceComponents-=int(referenceSeeds.count(atom));}
         if(moved){report.protectedComponents++;report.regularRings=std::max(0,report.regularRings-int(cycles(d,comp).size()));}
     }
     return report;

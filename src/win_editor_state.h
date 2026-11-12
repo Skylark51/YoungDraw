@@ -4,7 +4,7 @@
 
 namespace yd::editor {
 
-enum Tool{Select,Single,Double,Triple,Wedge,Hash,Ring5,Ring6,Benzene,Erase,Arrow,Curve,Fishhook,Text,ImageTool,Straight,Resonance,Delocalized,Orbital,Interaction};
+enum Tool{Select,Single,Double,Triple,Wedge,Hash,Ring5,Ring6,Benzene,Erase,Arrow,Curve,Fishhook,Text,ImageTool,Straight,Resonance,Delocalized,Orbital,Interaction,DottedBond};
 
 // Active document and selection
 extern HWND win;

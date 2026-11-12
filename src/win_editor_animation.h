@@ -9,6 +9,7 @@ struct AnimationStage {
     std::string structureName, stageName, energies, transitionEnergies;
     int arrowGrowth=72,arrowHold=65; // Centiseconds for the outgoing transition.
     std::optional<int> morphTime;
+    bool intermediate=false;
 };
 std::vector<AnimationStage> animationMechanismStages(const Document& source,const Reaction& reaction,
                                                     const std::vector<size_t>& route={});

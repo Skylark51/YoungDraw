@@ -3,6 +3,8 @@
 #include "win_editor_images.h"
 #include "win_editor_plot.h"
 #include "win_editor_reaction.h"
+#include "win_editor_render.h"
+#include "structure_templates.h"
 #include "win_editor_state.h"
 #include "win_editor_structure.h"
 #include "win_editor_text.h"
@@ -15,6 +17,86 @@
 #include <sstream>
 
 namespace yd::editor {
+
+void editMullikenSpin(){
+    if(selection.empty()||activeStructureTarget())
+        throw std::runtime_error("스핀 값을 표시할 원자를 선택하세요. 구조 칸은 독립 편집 창에서 원자를 선택할 수 있습니다.");
+    auto selected=doc.subset(groupedSelection(selection));
+    ui::Table rows;
+    std::vector<int> ids;
+    for(const auto& a:selected.atoms){
+        if(doc.isLocked(a.id))continue;
+        rows.push_back({std::to_string(a.id),symbol(a.element),a.mullikenSpin?number(*a.mullikenSpin):""});
+        ids.push_back(a.id);
+    }
+    if(rows.empty())throw std::runtime_error("스핀 값을 표시할 원자를 선택하세요.");
+    auto read=[](const std::string& value)->std::optional<double>{
+        const auto first=value.find_first_not_of(" \\t\\r\\n");
+        if(first==std::string::npos)return {};
+        const auto last=value.find_last_not_of(" \\t\\r\\n");
+        return numeric(value.substr(first,last-first+1),-1000,1000);
+    };
+    auto result=ui::table(win,L"Mulliken 스핀 밀도", {L"원자 번호",L"원소",L"스핀 값"},rows,
+        [&](const ui::Table& data)->std::wstring{
+            if(data.size()!=rows.size())return L"선택된 원자 행을 유지하세요.";
+            for(size_t i=0;i<data.size();++i){
+                if(data[i][0]!=rows[i][0]||data[i][1]!=rows[i][1])return L"스핀 값 열만 편집하세요.";
+                read(data[i][2]);
+            }
+            return {};
+        },false,L"선택 원자에 계산 결과를 입력하거나 값 열에 붙여넣으세요. 빈칸이면 해당 원자의 표시를 지웁니다.");
+    if(!result)return;
+    Document candidate=doc;
+    bool updated=false;
+    for(size_t i=0;i<ids.size();++i){
+        auto& spin=candidate.atom(ids[i])->mullikenSpin;
+        auto value=read((*result)[i][2]);
+        if((*result)[i][2]==rows[i][2])continue;
+        updated|=spin!=value;
+        spin=value;
+    }
+    if(updated){history.checkpoint(doc);doc=std::move(candidate);changed();}
+}
+
+void abbreviateGroups(){
+    if(selection.empty())throw std::runtime_error("약어로 바꿀 작용기가 들어 있는 구조를 선택하세요.");
+    auto ids=groupedSelection(selection);
+    if(activeStructureTarget()){
+        if(auto* r=reaction(targetContainer))ids=r->slots.at(targetSlot).members;
+        if(auto* p=plot(targetContainer))ids=targetAbove?p->states.at(targetSlot).above:p->states.at(targetSlot).below;
+    }
+    std::vector<std::wstring> names={L"모든 지원 작용기",L"Ph · Phenyl"};
+    for(const auto& entry:functionalGroups())names.push_back(ui::wide(entry.abbreviation)+L" · "+ui::wide(entry.name));
+    const Document before=doc;
+    Document candidate=before;
+    int count=0;
+    auto preview=[&](const auto& values)->std::wstring{
+        const size_t index=std::stoul(values.front());
+        candidate=before;
+        count=0;
+        if(index<2)count+=collapsePhenyl(candidate,ids);
+        if(index!=1)count+=collapseFunctionalGroups(candidate,ids,index==0?"":functionalGroups().at(index-2).abbreviation);
+        doc=candidate;
+        hoverAtom=hoverBond=0;
+        redraw();UpdateWindow(win);
+        return count?L"":L"선택한 범위에서 일치하는 작용기를 찾지 못했습니다.";
+    };
+    auto result=ui::form(win,L"작용기 약어 · 미리보기",{{L"바꿀 작용기","0",false,names}},preview);
+    doc=before;
+    if(result){
+        preview(*result);
+        doc=before;
+        if(count){
+            history.checkpoint(before);
+            doc=std::move(candidate);
+            auto remaining=doc.allIds();
+            selection.erase(std::remove_if(selection.begin(),selection.end(),[&](int id){return !contains(remaining,id);}),selection.end());
+            status=L"작용기 "+std::to_wstring(count)+L"개를 약어로 바꿨습니다. Ctrl+Z: 되돌리기";
+            changed();
+        }
+    }
+    redraw();
+}
 
 void clean(){
     Document before=doc;auto originalSelection=selection;auto chosen=selection;
@@ -31,7 +113,7 @@ void clean(){
     if(components.empty())throw std::runtime_error("정리할 구조의 원자·결합 또는 구조 삽입 영역을 선택하세요.");
     CleanupReport report;
     auto update=[&](const std::vector<std::string>& values)->std::wstring{
-        Document candidate=before;normalizeChemicalLabels(candidate,chosen);report=cleanStructure(candidate,chosen,values[0]=="0");double degrees=numeric(values[1],-36000,36000);
+        Document candidate=before;normalizeChemicalLabels(candidate,chosen);report=cleanStructure(candidate,chosen,values[0]=="1",values[0]=="0");double degrees=numeric(values[1],-36000,36000);
         std::vector<int> members;for(auto& ids:components)members.insert(members.end(),ids.begin(),ids.end());
         if(degrees||values[3]!="0")transformStructures(candidate,members,degrees,values[3]=="1",values[3]=="2");
         double factor=numeric(values[2],1,1000)/100.;if(factor!=1)scaleStructures(candidate,members,factor);
@@ -40,10 +122,38 @@ void clean(){
         for(auto& r:affected)optimizeMechanism(candidate,{r.first},r.second);
         doc=std::move(candidate);redraw();UpdateWindow(win);return {};
     };
-    auto result=ui::form(win,L"구조 정리 · 미리보기",{{L"정리 방식","0",false,{L"원본 형태·방향 우선 / 필요 시 크기 맞춤",L"2D 결합·고리 정리 / 정돈된 배치 보존"}},{L"추가 회전 (도, +: 시계방향)","0"},{L"배율 (%)","100"},{L"반전","0",false,{L"없음",L"좌우",L"상하"}}},update);
+    std::vector<int> compared;
+    for(const auto& comp:components)compared.insert(compared.end(),comp.begin(),comp.end());
+    auto drawComparison=[&](HDC dc,const RECT& box,const auto&){
+        Graphics g(dc);
+        g.SetSmoothingMode(SmoothingModeAntiAlias);
+        const auto& palette=appearance::palette();
+        const float width=float(box.right-box.left)/2, height=float(box.bottom-box.top)-28;
+        const auto original=makeScene(before.subset(compared),measure);
+        const auto revised=makeScene(doc.subset(compared),measure);
+        const float scale=float(std::min({2.,(width-28)/std::max({1.,original.bounds.w,revised.bounds.w}),
+                                            (height-12)/std::max({1.,original.bounds.h,revised.bounds.h})}));
+        const auto draw=[&](const Scene& sc,float x,const std::wstring& title){
+            ui::drawLabel(g,title,{x,float(box.top),width,24},12,palette.text,true);
+            auto saved=g.Save();
+            const auto& b=sc.bounds;
+            g.TranslateTransform(x+width/2,float(box.top)+26+height/2);
+            g.ScaleTransform(scale,scale);
+            g.TranslateTransform(float(-b.x-b.w/2),float(-b.y-b.h/2));
+            render(g,sc,false,true);
+            g.Restore(saved);
+        };
+        draw(original,float(box.left),L"정리 전");
+        auto title=report.referenceComponents?L"적용 미리보기 · 기준 그림 "+std::to_wstring(report.referenceComponents)+L"개":L"적용 미리보기";
+        draw(revised,float(box.left)+width,title);
+    };
+    auto result=ui::form(win,L"구조 정리 · 미리보기",{
+        {L"정리 방식","0",false,{L"권장 · 일치하는 고리 기준 그림 + 2D 정리",L"원본 형태·방향 우선 / 크기 맞춤",L"2D 결합·고리 정리"}},
+        {L"추가 회전 (도, +: 시계방향)","0"},{L"배율 (%)","100"},{L"반전","0",false,{L"없음",L"좌우",L"상하"}}
+    },update,{},drawComparison);
     if(!result){doc=before;selection=originalSelection;redraw();return;}
     update(*result);if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();}
-    status=L"구조 "+std::to_wstring(report.components)+L"개 정리 · 원본 배치 "+std::to_wstring(report.protectedComponents)+L"개 보호 · Ctrl+Z: 되돌리기";redraw();
+    status=L"구조 "+std::to_wstring(report.components)+L"개 정리 · 기준 그림 "+std::to_wstring(report.referenceComponents)+L"개 적용 · 원본 배치 "+std::to_wstring(report.protectedComponents)+L"개 보호 · Ctrl+Z: 되돌리기";redraw();
 }
 // Keep selection feedback consistent with the model's group-aware move/copy/delete.
 std::vector<int> groupedSelection(std::vector<int> ids){
@@ -119,7 +229,7 @@ bool activeStructureTarget(){
     if(auto* p=plot(targetContainer))return targetSlot<p->states.size();
     return false;
 }
-std::optional<Document> runStructureEditor(const Document& fragment){
+std::optional<Document> runStructureEditor(const Document& fragment,HWND owner){
     wchar_t temporary[32768]{},name[32768]{},exe[32768]{};
     if(!GetTempPathW(32768,temporary)||!GetTempFileNameW(temporary,L"YDS",0,name)||!GetModuleFileNameW(nullptr,exe,32768))throw std::runtime_error("구조 편집용 임시 파일을 만들 수 없습니다.");
     fs::path folder(name);fs::remove(folder);fs::create_directory(folder);
@@ -128,18 +238,18 @@ std::optional<Document> runStructureEditor(const Document& fragment){
     std::wstring commandLine=L"\""+std::wstring(exe)+L"\" --edit-structure \""+input.wstring()+L"\" \""+result.wstring()+L"\"";
     MONITORINFO monitor{sizeof(monitor)};
     int width=1440,height=940;
-    if(GetMonitorInfoW(MonitorFromWindow(win,MONITOR_DEFAULTTONEAREST),&monitor)){
+    if(GetMonitorInfoW(MonitorFromWindow(owner,MONITOR_DEFAULTTONEAREST),&monitor)){
         width=std::min(width,int(monitor.rcWork.right-monitor.rcWork.left));
         height=std::min(height,int(monitor.rcWork.bottom-monitor.rcWork.top));
     }
-    const RECT placement=ui::ownedWindowRect(win,width,height);
+    const RECT placement=ui::ownedWindowRect(owner,width,height);
     STARTUPINFOW startup{};startup.cb=sizeof(startup);
     startup.dwFlags=STARTF_USESHOWWINDOW|STARTF_USEPOSITION|STARTF_USESIZE;
     startup.wShowWindow=SW_SHOWNORMAL;startup.dwX=placement.left;startup.dwY=placement.top;
     startup.dwXSize=width;startup.dwYSize=height;
     PROCESS_INFORMATION process{};
     if(!CreateProcessW(exe,commandLine.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,&startup,&process))throw std::runtime_error("독립 구조 편집 창을 열 수 없습니다.");
-    CloseHandle(process.hThread);EnableWindow(win,FALSE);
+    CloseHandle(process.hThread);EnableWindow(owner,FALSE);
     bool quit=false;int quitCode=0;
     while(WaitForSingleObject(process.hProcess,0)==WAIT_TIMEOUT){
         if(MsgWaitForMultipleObjects(1,&process.hProcess,FALSE,100,QS_ALLINPUT)==WAIT_OBJECT_0+1){MSG message;while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){
@@ -147,12 +257,12 @@ std::optional<Document> runStructureEditor(const Document& fragment){
             TranslateMessage(&message);DispatchMessageW(&message);
         }}
     }
-    DWORD exitCode=0;GetExitCodeProcess(process.hProcess,&exitCode);CloseHandle(process.hProcess);EnableWindow(win,TRUE);SetForegroundWindow(win);SetFocus(win);
+    DWORD exitCode=0;GetExitCodeProcess(process.hProcess,&exitCode);CloseHandle(process.hProcess);EnableWindow(owner,TRUE);SetForegroundWindow(owner);SetFocus(owner);
     if(quit)PostQuitMessage(quitCode);
     if(exitCode)throw std::runtime_error("구조 편집 창이 종료되었습니다. 원래 메커니즘은 유지됩니다.");
     if(!fs::exists(result))return {};return fromNative(readFile(result.wstring()));
 }
-std::function<std::optional<Document>(const Document&)> structureEditor=runStructureEditor;
+std::function<std::optional<Document>(const Document&)> structureEditor=[](const Document& fragment){return runStructureEditor(fragment,win);};
 void editTargetStructure(){
     if(isolatedStructureEditing)return;
     if(!activeStructureTarget()){
