@@ -175,7 +175,7 @@ StartupSplash::~StartupSplash() {
 }
 
 void StartupSplash::finish(HWND mainWindow, int show) {
-    if (window_ && !pumpUntil(started_ + 2000)) return;
+    if (window_ && !pumpUntil(started_ + 500)) return;
     if (window_) SetWindowLongPtrW(window_, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(mainWindow));
     ShowWindow(mainWindow, show);
     UpdateWindow(mainWindow);
