@@ -55,7 +55,7 @@ struct Slot { std::string label; std::vector<int> members; std::string energy; b
 struct CaptionColor { int role=0,index=-1; std::string color; };
 struct Reaction {
     int id=0; Vec p; double spacing=120,slotWidth=64,slotHeight=65;
-    std::vector<Slot> slots; std::vector<std::string> above,below; int arrowType=0; bool cyclic=false; std::string unit="kcal/mol";
+    std::vector<Slot> slots; std::vector<std::string> above,below; int arrowType=0; bool cyclic=false; std::string unit="kcal mol^{-1}";
     std::string centerLabel;
     double captionFontSize=0,cycleRadius=0; // 0 uses automatic sizing.
     std::vector<int> hiddenArrows; // Connector indices omitted from the ring.
@@ -148,6 +148,8 @@ struct Document {
 struct CleanupReport { int regularRings=0,protectedComponents=0,components=0,referenceComponents=0; };
 bool upgradeBondGeometry(Document& d);
 CleanupReport cleanStructure(Document& d,const std::vector<int>& selection={},bool preserveProjection=false,bool useReferences=false);
+// Keep unselected atoms and the selected attachment atoms fixed.
+CleanupReport cleanSelectedStructure(Document& d,const std::vector<int>& selection,bool preserveProjection=false,bool useReferences=false,double degrees=0,double factor=1,bool flipX=false,bool flipY=false);
 size_t reactionRow(const Reaction& r,size_t index);
 Vec reactionSlot(const Reaction& r,size_t index);
 void appendMechanismStage(Reaction& r,bool below=false,size_t source=size_t(-1));
@@ -164,6 +166,7 @@ void normalizeChemicalLabels(Document& d,const std::vector<int>& selection={});
 bool atomLabelHasCharge(const Atom& a);
 Document chairTemplate();
 Document mechanismDemo();
+Document mechanismGuide();
 Document catalyticCycleDemo();
 Document coordinateDemo();
 void applyHouseStyle(Document& d);

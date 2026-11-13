@@ -228,9 +228,9 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
     for(auto& a:d.atoms)if(!seen.count(a.id)&&!owned.count(a.id)){auto ids=d.component(a.id);seen.insert(ids.begin(),ids.end());if(!selected(ids))continue;auto b=bounds(d,ids);Part p{ids,b,center(b)};if(ids.size()==1&&a.element==1)notations.push_back(p);else parts.push_back(p);}
     for(auto& o:d.objects)if(o.kind==ObjectKind::Image&&!owned.count(o.id)&&!d.isLocked(o.id)&&selected({o.id})){auto b=bounds(d,{o.id});parts.push_back({{o.id},b,center(b)});}
     std::vector<const Object*> arrows,stems;
-    for(auto& o:d.objects)if(o.kind==ObjectKind::Line&&o.points.size()>=2&&!owned.count(o.id)&&selected({o.id})){
+    for(auto& o:d.objects)if((o.kind==ObjectKind::Line||o.kind==ObjectKind::Curve)&&o.points.size()>=2&&!owned.count(o.id)&&selected({o.id})){
         if(o.head)arrows.push_back(&o);
-        else if(!o.dash&&std::abs(o.points.front().x-o.points.back().x)<.1)stems.push_back(&o);
+        else if(o.kind==ObjectKind::Line&&!o.dash&&std::abs(o.points.front().x-o.points.back().x)<.1)stems.push_back(&o);
     }
     // A state may contain disconnected molecules/ions. Merge nearby components
     // only inside the same arrow-delimited region; never across a reaction arrow.

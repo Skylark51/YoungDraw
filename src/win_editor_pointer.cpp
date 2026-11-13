@@ -210,7 +210,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
     if(owner){insertMechanismLinkStage(owner,edge);return;}
  }
  if(beginMechanismConnection(p))return;selectedCycleOwner=0;selectedCycleArrow=-1;
- if((tool==Select&&!(GetKeyState(VK_MENU)&0x8000))||tool==Erase)if(auto hit=cycleArrowAt(world(p))){selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;selection={hit->first};targetContainer=0;if(tool==Erase)deleteSelectedCycleArrow();else{status=L"반응 화살표 선택 · 우클릭: 중앙 X 설정 · Ctrl+Z: 되돌리기";redraw();}return;}
+ if((tool==Select&&!(GetKeyState(VK_MENU)&0x8000))||tool==Erase)if(auto hit=cycleArrowAt(world(p))){selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;selection={hit->first};targetContainer=0;if(tool==Erase)deleteSelectedCycleArrow();else{status=L"화살표 선택 · Del: 연결 삭제 · 양끝 원 드래그: 연결 변경·길이 조절 · 우클릭: 추가 편집";redraw();}return;}
  if(snapPlot){
     auto* graph=plot(snapPlot);if(!graph||doc.isLocked(snapPlot)){snapPlot=0;snapStart.reset();return;}
     auto hit=nearestPlotSnap(scene(),p);if(!hit){status=L"표시된 준위의 점 가까이를 클릭하세요. Esc: 취소";redraw();return;}
@@ -220,7 +220,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
     history.checkpoint(doc);if(snapStage<0)graph->stages.push_back(label);else graph->stages.at(size_t(snapStage))=label;
     snapPlot=0;snapStart.reset();status=L"준위에 맞춰 반응 이름·양쪽 화살표를 배치했습니다. Ctrl+Z: 되돌리기";changed();return;
  }
- if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000))for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id) ){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=!r.explicitConnections()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});if(!terminal)continue;for(bool below:{false,true}){if(below&&r.vertical)continue;if((p-mechanismAddPosition(r,below,slot)).length()<=13){selection={r.id};targetContainer=r.id;targetSlot=slot;command(below?128:122);return;}}}}
+ if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000))for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id) ){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=!r.explicitConnections()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});for(bool below:{false,true}){if((!terminal&&!below)||(below&&r.vertical))continue;if((p-mechanismAddPosition(r,below,slot)).length()<=13){selection={r.id};targetContainer=r.id;targetSlot=slot;command(below?128:122);return;}}}}
  if(tool==Select){
     auto sc=scene();
     const auto w=world(p);

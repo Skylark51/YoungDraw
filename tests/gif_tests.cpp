@@ -194,7 +194,7 @@ static void checkMechanismAnimation(){
     }
     auto stages=animationMechanismStages(source,source.reactions.front());
     check(stages.size()==3&&stages[0].structureName=="Reactant"&&stages[1].stageName=="TS1"&&
-          stages[0].energies=="M=1: 0 / M=2: 12.5 kcal/mol"&&stages[1].structure.bonds.empty(),
+          stages[0].energies=="M=1: 0 / M=2: 12.5 kcal mol^{-1}"&&stages[1].structure.bonds.empty(),
           "mechanism slot order, structures, transition titles and multiplicities populate the GIF");
     auto branched=source.reactions.front();
     branched.links={{0,2,{}},{0,1,{}}};

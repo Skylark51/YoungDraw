@@ -206,5 +206,30 @@ int main(){try{
             check((reactionSlot(r,i)-Vec{b.x+b.w/2,b.y+b.h/2}).length()<1e-6,"frame remains centered on the original structure");
         }
     }
+    {
+        Document d;int a=d.addAtom({0,0}),b=d.addAtom({18,12}),c=d.addAtom({38,4}),outside=d.addAtom({-30,0});
+        d.addBond(outside,a);d.addBond(a,b);d.addBond(b,c);auto original=d;
+        auto report=cleanSelectedStructure(d,{a,b,c},false,false);
+        check(report.components==1&&(d.atom(outside)->p-original.atom(outside)->p).length()<1e-9,"partial cleanup fixes all unselected atoms");
+        check((d.atom(a)->p-original.atom(a)->p).length()<1e-9,"partial cleanup anchors attachment atom");
+        check((d.atom(c)->p-original.atom(c)->p).length()>1e-3,"partial cleanup improves selected geometry");
+        check(d.bonds.size()==original.bonds.size(),"partial cleanup preserves connectivity");
+    }
+    {
+        auto linear=mechanismDemo();check(linear.reactions[0].unit=="kcal mol^{-1}","default mechanism unit uses inverse mol");
+        auto withoutState=[](std::string xml){auto at=xml.find("<annotation");if(at!=std::string::npos)xml.erase(at,xml.find("/>",at)+2-at);return xml;};
+        auto xml=toCdxml(linear);auto visible=fromCdxml(withoutState(xml));
+        int arrows=0;for(auto& object:visible.objects)if(object.head)arrows++;
+        check(arrows==2,"plain CDXML contains actual editable reaction arrows");
+        const auto& expected=linear.atoms.front();const auto* label=visible.atom(expected.id);
+        check(label&&std::abs(label->labelSize.value_or(visible.style.fontSize)*label->drawingScale-expected.labelSize.value_or(linear.style.fontSize)*expected.drawingScale)<1e-7&&label->labelFace.value_or(visible.style.labelFace)==expected.labelFace.value_or(linear.style.labelFace),"scaled implicit atom labels retain their ChemDraw size and weight");
+        auto cycle=catalyticCycleDemo();auto cycleXml=toCdxml(cycle);auto external=fromCdxml(withoutState(cycleXml));arrows=0;
+        for(auto& object:external.objects)if(object.head&&object.kind==ObjectKind::Curve)arrows++;
+        check(arrows==3,"curved cycle arrows remain native editable curves without smart metadata");
+        auto guide=mechanismGuide();check(guide.reactions.size()==4&&guide.objects.size()>=10,"help document covers four mechanism topologies with instructions");
+        std::ofstream("mechanism-chemdraw-linear.cdxml")<<xml;
+        std::ofstream("mechanism-chemdraw-cycle.cdxml")<<cycleXml;
+        std::ofstream("mechanism-help.cdxml")<<toCdxml(guide);
+    }
     std::cout<<"Mechanism editing regressions passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

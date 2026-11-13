@@ -173,7 +173,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  if(wh-bottom<drawingPanelBottom)text(g,L"↕ 휠",float(left-46),89,10,muted);
 
  auto cb=canvasBox();if(appearance::settings().theme==6)SetTimer(win,913,40,nullptr);else KillTimer(win,913);appearance::background(g,cb);auto state=g.Save();g.SetClip(cb);g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));const Scene& sc=sceneForPaint(reuseScene);animationVisible=false;animationDelay=1000;render(g,sc,true,true);auto draggedEnergy=energyDragPreview(sc);if(!draggedEnergy.items.empty())render(g,draggedEnergy,false,true);if(animationVisible)SetTimer(win,912,animationDelay,nullptr);else KillTimer(win,912);g.Restore(state);
- state=g.Save();g.SetClip(cb);auto guide=[&](Vec c,double w,double h,std::wstring label,int owner,size_t index,bool above){Vec p=screen(c);RectF r(float(p.x-w*zoom/2),float(p.y-h*zoom/2),float(w*zoom),float(h*zoom));bool active=targetContainer==owner&&targetSlot==index&&targetAbove==above;Pen pen(active?accent:Color(255,201,215,223),active?1.6f:1);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,r);text(g,label,r.X+3,r.Y+3,10,appearance::palette().canvasInk);};
+ state=g.Save();g.SetClip(cb);auto guide=[&](Vec c,double w,double h,std::wstring label,int owner,size_t index,bool above){Vec p=screen(c);RectF r(float(p.x-w*zoom/2),float(p.y-h*zoom/2),float(w*zoom),float(h*zoom));bool active=targetContainer==owner&&targetSlot==index&&targetAbove==above;Pen pen(active?accent:Color(255,201,215,223),active?1.6f:1);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,r);auto clip=g.Save();g.SetClip(RectF(r.X+2,r.Y+2,std::max(1.f,r.Width-4),std::max(1.f,r.Height-4)),CombineModeIntersect);ui::drawLabel(g,label,{r.X+3,r.Y+3,std::max(1.f,r.Width-6),std::max(1.f,r.Height-6)},std::min(10.f,std::max(6.f,r.Width/9)),appearance::palette().canvasInk,false,true);g.Restore(clip);};
  if(snapPlot){
     auto hovered=nearestPlotSnap(sc,mouse);auto found=sc.plotSnapPoints.find(snapPlot);
     if(found!=sc.plotSnapPoints.end())for(auto& pt:found->second){Vec at=screen(pt.p);Pen pen(accent,1.5f);SolidBrush body(white);g.FillEllipse(&body,float(at.x-4),float(at.y-4),8.f,8.f);g.DrawEllipse(&pen,float(at.x-4),float(at.y-4),8.f,8.f);}
@@ -204,7 +204,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
         text(g,std::to_wstring(i+1),frame.X+3,frame.Y-17,11,selected?accent:appearance::palette().canvasInk,true);
     }
  }
- if(guides&&!snapPlot){for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();i++)guide(reactionSlot(r,i),r.slotWidth,r.slotHeight,(mechanismConnecting?std::to_wstring(i+1)+L" · ":L"")+(r.slots[i].members.empty()?L"구조를 삽입하세요":L""),r.id,i,false);for(auto& p:doc.plots)if(!doc.isLocked(p.id))for(size_t i=0;i<p.states.size();i++){guide(plotAnchor(p,i,true),48,55,p.states[i].above.empty()?L"+ 구조 삽입":L"",p.id,i,true);guide(plotAnchor(p,i,false),48,55,p.states[i].below.empty()?L"+ 구조 삽입":L"",p.id,i,false);}}
+ if(guides&&!snapPlot){for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();i++)guide(reactionSlot(r,i),r.slotWidth,r.slotHeight,(mechanismConnecting?std::to_wstring(i+1)+L" · ":L"")+(r.slots[i].members.empty()?L"그림 영역":L""),r.id,i,false);for(auto& p:doc.plots)if(!doc.isLocked(p.id))for(size_t i=0;i<p.states.size();i++){guide(plotAnchor(p,i,true),48,55,p.states[i].above.empty()?L"+ 구조 삽입":L"",p.id,i,true);guide(plotAnchor(p,i,false),48,55,p.states[i].below.empty()?L"+ 구조 삽입":L"",p.id,i,false);}}
  if(tool==Select&&!inlineEdit){
     auto plus=[&](Vec p,float radius){
         SolidBrush body(white);Pen outline(accent,1.8f);
@@ -218,8 +218,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
             for(const auto& button:mechanismSplitButtons(r))plus(button.second,9);
         for(size_t slot=0;slot<r.slots.size();slot++){
             bool terminal=!r.explicitConnections()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});
-            if(!terminal)continue;
-            for(bool below:{false,true})if(!below||!r.vertical)plus(mechanismAddPosition(r,below,slot),12);
+            for(bool below:{false,true})if((terminal||below)&&(!below||!r.vertical))plus(mechanismAddPosition(r,below,slot),12);
         }
     }
  }
@@ -290,10 +289,10 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
     tile(recognizeMechanismCommand,L"현재 파일 → 메커니즘 편집",{rx+12,235,237,55},true);
     heading(sidebarPage==0?L"메커니즘 도구":L"그래프 도구",303);
     if(sidebarPage==0){
-        row(323,{{120,L"새 메커니즘"},{140,L"예제 열기"},{121,L"단계 편집표"}});
-        row(376,{{143,L"단계 추가"},{144,L"단계 삭제"},{146,L"단계 합치기"}});
+        row(323,{{120,L"새 메커니즘"},{140,L"예제 열기"},{121,L"메커니즘 편집"}});
+        row(376,{{146,L"단계 합치기"},{169,L"분기 추가"}});
         row(429,{{145,L"단계 연결",mechanismConnecting},{147,L"연결 삭제"},{149,L"화살표 길이"}});
-        row(482,{{127,L"배치·단위"},{125,L"크기·간격"}});
+        row(482,{{127,L"배치·단위"},{125,L"자동 정렬"}});
     }else{
         row(323,{{130,L"새 그래프"},{141,L"예제 열기"},{131,L"에너지 표"}});
         row(376,{{132,L"경로 추가"},{135,L"왼쪽 분기"},{133,L"경로 스타일"}});
@@ -301,8 +300,8 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
         row(482,{{137,L"제목·축"},{151,L"스핀 교차점"},{spinMultiplicityPlotCommand,L"다중도 비교"}});
     }
     text(g,sidebarPage==0?L"Alt+드래그: 단계 자유 배치":L"준위 드래그: 에너지 · Alt: 가로",rx+16,531,11,muted);
-    heading(L"구조 넣기 · 선택한 삽입 칸",550);
-    row(567,{{134,L"삽입 칸 표시",guides},{123,L"붙여넣기"},{124,L"파일로 채움"}});
+    heading(L"구조 넣기 · 선택한 그림 영역",550);
+    row(567,{{134,L"그림 영역",guides},{123,L"붙여넣기"},{124,L"파일로 채움"}});
     if(sidebarPage==0)row(620,{{186,L"구조 편집"},{113,L"파일 삽입"}});
     else row(620,{{186,L"구조 편집"},{113,L"파일 삽입"},{138,L"출판용 정돈"}});
  }

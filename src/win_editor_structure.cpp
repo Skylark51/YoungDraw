@@ -113,10 +113,15 @@ void clean(){
     if(components.empty())throw std::runtime_error("정리할 구조의 원자·결합 또는 구조 삽입 영역을 선택하세요.");
     CleanupReport report;
     auto update=[&](const std::vector<std::string>& values)->std::wstring{
-        Document candidate=before;normalizeChemicalLabels(candidate,chosen);report=cleanStructure(candidate,chosen,values[0]=="1",values[0]=="0");double degrees=numeric(values[1],-36000,36000);
+        Document candidate=before;double degrees=numeric(values[1],-36000,36000),factor=numeric(values[2],1,1000)/100.;
+        if(values[4]=="0"&&!chosen.empty()){
+            report=cleanSelectedStructure(candidate,chosen,values[0]=="1",values[0]=="0",degrees,factor,values[3]=="1",values[3]=="2");
+            doc=std::move(candidate);redraw();UpdateWindow(win);return {};
+        }
+        normalizeChemicalLabels(candidate,chosen);report=cleanStructure(candidate,chosen,values[0]=="1",values[0]=="0");
         std::vector<int> members;for(auto& ids:components)members.insert(members.end(),ids.begin(),ids.end());
         if(degrees||values[3]!="0")transformStructures(candidate,members,degrees,values[3]=="1",values[3]=="2");
-        double factor=numeric(values[2],1,1000)/100.;if(factor!=1)scaleStructures(candidate,members,factor);
+        if(factor!=1)scaleStructures(candidate,members,factor);
         std::vector<std::pair<int,bool>> affected;
         for(auto& r:candidate.reactions){bool changedSlot=false;for(auto& slot:r.slots)for(int id:slot.members)if(auto* a=candidate.atom(id);a&&before.atom(id)&&(a->p-before.atom(id)->p).length()>.001)changedSlot=true;if(changedSlot)affected.push_back({r.id,r.cyclic});}
         for(auto& r:affected)optimizeMechanism(candidate,{r.first},r.second);
@@ -149,7 +154,8 @@ void clean(){
     };
     auto result=ui::form(win,L"구조 정리 · 미리보기",{
         {L"정리 방식","0",false,{L"권장 · 일치하는 고리 기준 그림 + 2D 정리",L"원본 형태·방향 우선 / 크기 맞춤",L"2D 결합·고리 정리"}},
-        {L"추가 회전 (도, +: 시계방향)","0"},{L"배율 (%)","100"},{L"반전","0",false,{L"없음",L"좌우",L"상하"}}
+        {L"추가 회전 (도, +: 시계방향)","0"},{L"배율 (%)","100"},{L"반전","0",false,{L"없음",L"좌우",L"상하"}},
+        {L"정리 범위",chosen.empty()?"1":"0",false,{L"선택한 부분만 · 연결 경계와 나머지 원자 고정",L"선택한 부분이 속한 분자 전체"}}
     },update,{},drawComparison);
     if(!result){doc=before;selection=originalSelection;redraw();return;}
     update(*result);if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();}

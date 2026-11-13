@@ -35,6 +35,7 @@ using namespace yd::editor;
 #include <iostream>
 #include "mechanism_layout_fixture.h"
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+static void neutralMechanismClick(Vec point){BYTE keys[256]{};SetKeyboardState(keys);mouseDown(point);}
 static void dropFiles(HWND hwnd,std::initializer_list<std::wstring> paths){
     size_t characters=1;
     for(const auto& path:paths)characters+=path.size()+1;
@@ -163,10 +164,10 @@ static void CALLBACK driveNewMechanism(HWND parent,UINT,UINT_PTR timer,DWORD){
         PostMessageW(dialog,WM_COMMAND,IDOK,0);
         return;
     }
-    if(std::wstring(name)!=L"YoungDrawGrid")return;
+    if(std::wstring(name)!=L"YoungDrawMechanismEditor")return;
     KillTimer(parent,timer);
     mechanismDraftHidden=toNative(doc)==formBefore;
-    if(mechanismGridAction)PostMessageW(dialog,WM_COMMAND,22,0);
+    if(mechanismGridAction)PostMessageW(dialog,WM_COMMAND,IDOK,0);
     else PostMessageW(dialog,WM_CLOSE,0,0);
 }
 static void checkNewMechanism(HWND hwnd){
@@ -212,24 +213,31 @@ static void checkNewMechanism(HWND hwnd){
 }
 static bool recognizedTableOpened=false;
 static void CALLBACK driveSidebarRecognition(HWND parent,UINT,UINT_PTR timer,DWORD){
-    auto table=FindWindowW(L"YoungDrawGrid",L"메커니즘 분기·프레임 편집");
-    if(table&&GetWindow(table,GW_OWNER)==parent){
-        KillTimer(parent,timer);
-        recognizedTableOpened=true;
-        PostMessageW(table,WM_CLOSE,0,0);
-        return;
-    }
-    auto form=FindWindowW(L"YoungDrawForm",L"화살표 사이 구조 묶음 정리 · 미리보기");
-    if(form&&GetWindow(form,GW_OWNER)==parent)PostMessageW(form,WM_COMMAND,IDOK,0);
+    auto editor=FindWindowW(L"YoungDrawMechanismEditor",nullptr);
+    if(editor&&GetWindow(editor,GW_OWNER)==parent){KillTimer(parent,timer);recognizedTableOpened=true;PostMessageW(editor,WM_COMMAND,IDOK,0);}
 }
+
 static void CALLBACK driveTextPalette(HWND parent,UINT,UINT_PTR timer,DWORD){
     HWND dialog=GetLastActivePopup(parent);wchar_t name[64]{};GetClassNameW(dialog,name,64);if(std::wstring(name)!=L"#32770")return;
     KillTimer(parent,timer);paletteDriven=true;
     SendMessageW(dialog,RegisterWindowMessageW(L"commdlg_SetRGBColor"),0,RGB(35,90,225));
     PostMessageW(dialog,WM_COMMAND,IDOK,0);
 }
+static void CALLBACK driveMechanismAdvanced(HWND parent,UINT,UINT_PTR timer,DWORD){
+    HWND dialog=nullptr;
+    while((dialog=FindWindowExW(nullptr,dialog,L"YoungDrawForm",L"여백·글자·자동 길이"))){if(GetWindow(dialog,GW_OWNER)==parent)break;}
+    if(!dialog)return;
+    KillTimer(parent,timer);SetDlgItemTextW(dialog,100,L"180");PostMessageW(dialog,WM_COMMAND,IDOK,0);
+}
 static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
-    HWND dialog=GetLastActivePopup(parent);wchar_t name[64]{};GetClassNameW(dialog,name,64);if(std::wstring(name)!=L"YoungDrawForm")return;
+    HWND dialog=GetLastActivePopup(parent);wchar_t name[64]{};GetClassNameW(dialog,name,64);
+    if(std::wstring(name)==L"YoungDrawMechanismEditor"&&(formAction==3||formAction==4||formAction==26)){
+        KillTimer(parent,timer);formDriven=true;previewObserved=toNative(doc)==formBefore;
+        SendDlgItemMessageW(dialog,11,CB_SETCURSEL,formAction==26?5:2,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(11,CBN_SELCHANGE),0);
+        if(formAction!=26){SetDlgItemTextW(dialog,19,L"2");SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(19,EN_KILLFOCUS),0);SetTimer(dialog,902,10,driveMechanismAdvanced);SendMessageW(dialog,WM_COMMAND,35,0);KillTimer(dialog,902);}
+        PostMessageW(dialog,WM_COMMAND,formAction==3?IDCANCEL:IDOK,0);return;
+    }
+    if(std::wstring(name)!=L"YoungDrawForm")return;
     KillTimer(parent,timer);formDriven=true;
     if(formAction>=20&&formAction<=24){
         if(formAction<=22){SendDlgItemMessageW(dialog,101,CB_SETCURSEL,formAction==22?0:1,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,101));}
@@ -311,6 +319,7 @@ static void graphUnitChecks(HWND hwnd){
     std::cout<<"Graph energy unit selection, preview, cancellation, undo and export checks passed\n";
 }
 int main(int argc,char** argv){
+    BYTE initialKeys[256]{};SetKeyboardState(initialKeys);
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
     int result=0;
     try{
@@ -376,6 +385,17 @@ int main(int argc,char** argv){
         }
         checkNewMechanism(hwnd);
         {
+            doc=mechanismDemo();history.clear();tool=Select;selection.clear();fit();
+            auto before=toNative(doc);int owner=doc.reactions.front().id;
+            neutralMechanismClick(mechanismAddPosition(doc.reactions.front(),true,0));
+            check(doc.reactions.front().slots.size()==4&&doc.reactions.front().links.back().from==0,"canvas plus branches from the first step without removing the main path");
+            check(history.undo(doc)&&toNative(doc)==before,"early canvas branching undoes in one step");
+            auto atoms=doc.atoms.size();selection={owner};targetContainer=owner;targetSlot=1;
+            check(deleteSelectedMechanismStage()&&doc.reactions.front().slots.size()==2&&doc.atoms.size()<atoms,"direct stage deletion removes just the selected stage and its structure");
+            check(history.undo(doc)&&toNative(doc)==before,"direct stage Delete can be undone exactly");
+            doc={};selection.clear();targetContainer=0;history.clear();dirty=false;
+        }
+        {
             // Hover-only paint reuse must keep geometry, while any document redraw
             // must invalidate the cached scene (including Undo and tab switches).
             auto previousDoc=doc;
@@ -397,7 +417,7 @@ int main(int argc,char** argv){
             Object arrow;arrow.id=doc.nextId++;arrow.points={{70,0},{120,0}};doc.objects.push_back(arrow);
             int outsider=doc.addAtom({170,100});
             selection={bond,label.id,arrow.id};
-            BYTE previous[256]{};GetKeyboardState(previous);BYTE keys[256];memcpy(keys,previous,sizeof(keys));keys[VK_CONTROL]=0x80;keys[VK_SHIFT]=0;SetKeyboardState(keys);key('G');SetKeyboardState(previous);
+            BYTE previous[256]{};GetKeyboardState(previous);BYTE keys[256];memcpy(keys,previous,sizeof(keys));keys[VK_CONTROL]=0x80;keys[VK_SHIFT]=0;keys[VK_MENU]=0;SetKeyboardState(keys);key('G');SetKeyboardState(previous);
             check(doc.groups.size()==1&&contains(selection,a)&&contains(selection,b),"Ctrl+G groups bonds with endpoints, text and arrows");
             auto grouped=toNative(doc);command(198);check(doc.groups.size()==1&&toNative(doc)==grouped,"repeated grouping creates no duplicate group");
             BYTE dragKeys[256]{};SetKeyboardState(dragKeys);
@@ -409,7 +429,7 @@ int main(int argc,char** argv){
             check(history.undo(doc)&&toNative(doc)==grouped,"group movement can be undone");
             auto loaded=fromNative(grouped),xml=fromCdxml(toCdxml(doc));check(loaded.groups.size()==1&&xml.groups.size()==1,"native and CDXML round trips retain user groups");
             auto fragment=doc.subset({a});Document pasted;pasted.append(fragment,{10,10});check(pasted.groups.size()==1&&pasted.objects.size()==2,"copying a member preserves and remaps its whole group");
-            selection={a};memcpy(keys,previous,sizeof(keys));keys[VK_CONTROL]=keys[VK_SHIFT]=0x80;SetKeyboardState(keys);key('G');SetKeyboardState(previous);
+            selection={a};memcpy(keys,previous,sizeof(keys));keys[VK_CONTROL]=keys[VK_SHIFT]=0x80;keys[VK_MENU]=0;SetKeyboardState(keys);key('G');SetKeyboardState(previous);
             check(doc.groups.empty(),"Ctrl+Shift+G ungroups a selected member");check(history.undo(doc)&&doc.groups.size()==1,"ungroup can be undone");
             check(history.undo(doc)&&doc.groups.empty(),"group creation can be undone");
             selection.clear();dirty=false;command(198);check(doc.groups.empty()&&!dirty,"empty grouping does not dirty the document");
@@ -426,8 +446,8 @@ int main(int argc,char** argv){
             auto hit=[&](int id)->RectF{for(auto& h:hits)if(h.id==id)return h.box;return {};};
             auto present=[&](int id){return hit(id).Width>0;};
             sidebarPage=0;showLayers=false;repaint();
-            check(present(140)&&present(143)&&present(144)&&present(145)&&present(146)&&present(147)&&present(149)&&!present(122)&&!present(126)&&!present(148)&&!present(141),"mechanism sidebar consolidates stage addition, table editing and layout controls");
-            check(hit(recognizeMechanismCommand).Y<hit(120).Y&&hit(120).Y==hit(121).Y&&hit(121).Y<hit(143).Y&&hit(145).Y<hit(127).Y&&hit(127).Y<hit(134).Y,"mechanism sidebar follows creation, editing, layout and structure insertion");
+            check(present(140)&&!present(143)&&!present(144)&&present(169)&&present(145)&&present(146)&&present(147)&&present(149)&&!present(122)&&!present(126)&&!present(148)&&!present(141),"mechanism sidebar consolidates stage addition, table editing and layout controls");
+            check(hit(recognizeMechanismCommand).Y<hit(120).Y&&hit(120).Y==hit(121).Y&&hit(121).Y<hit(146).Y&&hit(145).Y<hit(127).Y&&hit(127).Y<hit(134).Y,"mechanism sidebar follows creation, editing, layout and structure insertion");
             const auto structureRow=hit(134).Y;
             for(int id:{100,101,102,104,105,107,125,155,156,170,171,172,173,174,160,161,162,163,164}){
                 check(present(id)&&hit(id).Y==hit(100).Y&&hit(id).Width==44&&hit(id).GetBottom()<89,"icon toolbar fits one row above document tabs");
@@ -815,7 +835,7 @@ int main(int argc,char** argv){
             SetTimer(hwnd,901,10,driveSidebarRecognition);
             SendMessageW(hwnd,WM_COMMAND,recognizeMechanismCommand,0);
             check(recognizedTableOpened&&sidebarPage==0&&doc.reactions.size()==1&&doc.reactions[0].links.size()==2,
-                  "current-file recognition works from the graph sidebar and opens the editable mechanism table");
+                  "current-file recognition works from the graph sidebar and opens the editable draft preview");
             check(history.undo(doc)&&toNative(doc)==formBefore,"sidebar recognition can be undone in one step");
             selection.clear();targetContainer=0;doc={};history.clear();
         }
@@ -823,7 +843,7 @@ int main(int argc,char** argv){
         {
             doc={};Object label;label.id=doc.nextId++;label.kind=ObjectKind::Text;label.points={{30,30}};label.text="H2";doc.objects.push_back(label);
             formAction=0;SetTimer(hwnd,901,10,driveForm);editObject(label.id);check(formDriven&&doc.objects[0].text=="H_{2}\r\nWater","subscript and Alt+Enter work in the actual text properties dialog");
-            doc={};int a=doc.addAtom({0,0}),b=doc.addAtom({13,3}),c=doc.addAtom({26,0});doc.addBond(a,b);doc.addBond(b,c);selection={a};history.clear();dirty=false;
+            doc={};int a=doc.addAtom({0,0}),b=doc.addAtom({13,3}),c=doc.addAtom({26,0});doc.addBond(a,b);doc.addBond(b,c);selection={a,b,c};history.clear();dirty=false;
             formBefore=toNative(doc);formAction=1;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);clean();
             check(formDriven&&previewObserved&&toNative(doc)==formBefore,"cleanup previews the chosen rotation and Cancel restores the exact original");
             formAction=2;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);clean();
@@ -873,10 +893,10 @@ int main(int argc,char** argv){
         {
             doc={};history.clear();selection.clear();tool=Text;dirty=false;
             beginInline({},Vec{40,40});SetWindowTextW(inlineEdit,L"First");SendMessageW(inlineEdit,EM_SETSEL,5,5);
-            BYTE beforeAlt[256]{};GetKeyboardState(beforeAlt);BYTE altKeys[256];memcpy(altKeys,beforeAlt,sizeof(altKeys));altKeys[VK_MENU]=0x80;SetKeyboardState(altKeys);
+            BYTE beforeAlt[256]{};GetKeyboardState(beforeAlt);BYTE altKeys[256]{};altKeys[VK_MENU]=0x80;SetKeyboardState(altKeys);
             SendMessageW(inlineEdit,WM_SYSKEYDOWN,VK_RETURN,0);SendMessageW(inlineEdit,WM_SYSCHAR,VK_RETURN,0);SetKeyboardState(beforeAlt);
             check(inlineEdit&&GetWindowTextLengthW(inlineEdit)==7,"Alt+Enter keeps inline text editing and inserts one newline");
-            SendMessageW(inlineEdit,EM_REPLACESEL,TRUE,(LPARAM)L"Second");SendMessageW(inlineEdit,WM_KEYDOWN,VK_RETURN,0);
+            SendMessageW(inlineEdit,EM_REPLACESEL,TRUE,(LPARAM)L"Second");BYTE plainKeys[256]{};SetKeyboardState(plainKeys);SendMessageW(inlineEdit,WM_KEYDOWN,VK_RETURN,0);SetKeyboardState(beforeAlt);
             check(!inlineEdit&&doc.objects[0].text=="First\r\nSecond","Enter commits multiline inline text");
             auto saved=toNative(doc);check(fromNative(saved).objects[0].text==doc.objects[0].text,"multiline text survives native save");
             check(history.undo(doc)&&doc.objects.empty(),"multiline text edit undoes in one step");
@@ -885,25 +905,25 @@ int main(int argc,char** argv){
         {
             doc=mechanismDemo();history.clear();selection.clear();tool=Select;fit();
             int id=doc.reactions[0].id;auto count=doc.reactions[0].slots.size();auto before=toNative(doc);
-            mouseDown(mechanismAddPosition(doc.reactions[0]));
+            neutralMechanismClick(mechanismAddPosition(doc.reactions[0]));
             check(doc.reactions[0].slots.size()==count+1&&doc.reactions[0].above.size()==count,"circular plus adds a structure and transition");
             check(history.undo(doc)&&toNative(doc)==before,"circular plus can be undone exactly");
-            mouseDown(mechanismAddPosition(doc.reactions[0],true));
+            neutralMechanismClick(mechanismAddPosition(doc.reactions[0],true));
             check(doc.reactions[0].slots.size()==count+1&&doc.reactions[0].slots.back().startsRow,"bottom plus starts a manual row");
             auto lower=reactionSlot(doc.reactions[0],count);
             check(mechanismAddPosition(doc.reactions[0]).x<screen(lower).x,"second row displays the horizontal plus on the left");
-            mouseDown(mechanismAddPosition(doc.reactions[0]));
+            neutralMechanismClick(mechanismAddPosition(doc.reactions[0]));
             check(reactionSlot(doc.reactions[0],count+1).x<lower.x,"left plus extends the second row leftward");
-            mouseDown(mechanismAddPosition(doc.reactions[0],true));
+            neutralMechanismClick(mechanismAddPosition(doc.reactions[0],true));
             auto bottom=reactionSlot(doc.reactions[0],count+2);
             check(bottom.y>lower.y&&mechanismAddPosition(doc.reactions[0]).x>screen(bottom).x,"third row displays the plus on the right");
-            mouseDown(mechanismAddPosition(doc.reactions[0]));
+            neutralMechanismClick(mechanismAddPosition(doc.reactions[0]));
             check(reactionSlot(doc.reactions[0],count+3).x>bottom.x,"right plus extends the third row rightward");
             writePreview(L"mechanism-manual-zigzag.png",doc);
             for(int i=0;i<4;i++)check(history.undo(doc),"manual plus click is undoable");
             check(toNative(doc)==before,"undoing manual rows restores the original exactly");
             doc.reactions[0].vertical=true;optimizeMechanism(doc,{id});fit();before=toNative(doc);
-            mouseDown(mechanismAddPosition(doc.reactions[0]));
+            neutralMechanismClick(mechanismAddPosition(doc.reactions[0]));
             check(doc.reactions[0].vertical&&doc.reactions[0].slots.size()==count+1&&reactionSlot(doc.reactions[0],count).y>reactionSlot(doc.reactions[0],count-1).y,"vertical plus extends downward");
             check(history.undo(doc)&&toNative(doc)==before,"vertical plus can be undone exactly");
             writePreview(L"mechanism-vertical.png",doc);

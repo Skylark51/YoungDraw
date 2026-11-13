@@ -33,5 +33,6 @@ void finishMechanismConnection(Vec point);
 std::optional<std::pair<int,int>> cycleArrowAt(Vec p);
 void mechanismContextMenu(Vec at);
 bool deleteSelectedCycleArrow();
+bool deleteSelectedMechanismStage();
 
 } // namespace yd::editor

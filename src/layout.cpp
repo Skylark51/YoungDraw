@@ -734,6 +734,32 @@ CleanupReport cleanStructure(Document& d,const std::vector<int>& selection,bool 
     }
     return report;
 }
+CleanupReport cleanSelectedStructure(Document& d,const std::vector<int>& selection,bool preserveProjection,bool useReferences,double degrees,double factor,bool flipX,bool flipY){
+    if(selection.empty())return cleanStructure(d,{},preserveProjection,useReferences);
+    std::set<int> chosen,anchors;
+    for(int id:selection)if(d.atom(id)&&!d.isLocked(id))chosen.insert(id);
+    for(const auto& bond:d.bonds)if(has(selection,bond.id)&&!d.isLocked(bond.id)){if(!d.isLocked(bond.a))chosen.insert(bond.a);if(!d.isLocked(bond.b))chosen.insert(bond.b);}
+    for(const auto& bond:d.bonds){if(chosen.count(bond.a)&&!chosen.count(bond.b))anchors.insert(bond.a);if(chosen.count(bond.b)&&!chosen.count(bond.a))anchors.insert(bond.b);}
+    Document fragment;fragment.style=d.style;fragment.nextId=d.nextId;fragment.bondGeometryVersion=d.bondGeometryVersion;
+    for(auto atom:d.atoms)if(chosen.count(atom.id))fragment.atoms.push_back(atom);
+    for(auto bond:d.bonds)if(chosen.count(bond.a)&&chosen.count(bond.b))fragment.bonds.push_back(bond);
+    if(fragment.atoms.empty())throw std::runtime_error("정리할 원자나 결합을 선택하세요.");
+    auto report=cleanStructure(fragment,{},preserveProjection,useReferences);
+    const auto ids=fragment.allIds();
+    if(degrees||flipX||flipY)transformStructures(fragment,ids,degrees,flipX,flipY);
+    if(factor!=1)scaleStructures(fragment,ids,factor);
+    if(!anchors.empty()){
+        Vec oldCenter,newCenter;for(int id:anchors){oldCenter=oldCenter+d.atom(id)->p;newCenter=newCenter+fragment.atom(id)->p;}
+        oldCenter=oldCenter*(1./anchors.size());newCenter=newCenter*(1./anchors.size());double dot=0,cross=0;
+        for(int id:anchors){Vec a=fragment.atom(id)->p-newCenter,b=d.atom(id)->p-oldCenter;dot+=a.x*b.x+a.y*b.y;cross+=a.x*b.y-a.y*b.x;}
+        double angle=anchors.size()>1?std::atan2(cross,dot):0,cosine=std::cos(angle),sine=std::sin(angle);
+        for(auto& atom:fragment.atoms){auto p=atom.p-newCenter;atom.p=oldCenter+Vec{cosine*p.x-sine*p.y,sine*p.x+cosine*p.y};if(anchors.count(atom.id))atom.p=d.atom(atom.id)->p;}
+    }
+    Document candidate=d;for(auto& atom:fragment.atoms)*candidate.atom(atom.id)=atom;
+    auto before=cleanupCollisions(d),after=cleanupCollisions(candidate);
+    for(const auto& collision:after)if(!before.count(collision)){report.protectedComponents++;return report;}
+    d=std::move(candidate);return report;
+}
 Document chairTemplate(){Document d;std::vector<Vec> points={{-45,-24},{-25,6},{20,6},{45,24},{25,-6},{-20,-6}};for(auto p:points){int id=d.addAtom(p);d.atom(id)->protect=true;}for(size_t i=0;i<points.size();i++)d.addBond(d.atoms[i].id,d.atoms[(i+1)%points.size()].id,i==1?BondKind::Bold:BondKind::Single);std::vector<double> lengths;Vec center;for(auto& a:d.atoms)center=center+a.p;center=center*(1./d.atoms.size());for(auto& b:d.bonds)lengths.push_back((d.atom(b.a)->p-d.atom(b.b)->p).length());std::sort(lengths.begin(),lengths.end());double scale=d.style.bondLength/lengths[lengths.size()/2];for(auto& a:d.atoms)a.p=center+(a.p-center)*scale;return d;}
 Document mechanismDemo(){Document d;Reaction r;r.id=d.nextId++;r.p={65,80};r.slots={{"Reactant",{}},{"Intermediate",{}},{"Product",{}}};r.above={"Nucleophilic attack","C–O bond cleavage"};r.below={"37.2","17.7"};d.reactions.push_back(r);fillSlot(d,demo(),r.id,0);Document b=demo();b.atom(b.atoms.back().id)->element=8;fillSlot(d,b,r.id,1);fillSlot(d,demo(),r.id,2);optimizeMechanism(d,{r.id});return d;}
 // Editable, intentionally generic hydrogenation cycle: no metal, ligand or
@@ -771,6 +797,27 @@ Document catalyticCycleDemo(){
     for(size_t i=0;i<r.slots.size();i++)fillSlot(d,fragment(int(i)),r.id,i);
     optimizeMechanism(d,{r.id},true);
     return d;
+}
+Document mechanismGuide(){
+    Document guide;double y=20;
+    auto text=[&](Vec p,const std::string& value,double size){Object o;o.id=guide.nextId++;o.kind=ObjectKind::Text;o.points={p};o.text=value;o.font="Malgun Gothic";o.fontSize=size;o.face=0;o.centerText=false;guide.objects.push_back(o);};
+    text({30,y},"YoungDraw · 메커니즘 예제와 편집 안내",24);y+=48;
+    text({30,y},"예제의 그림 영역을 선택하고 메커니즘 편집을 여세요. 변경은 적용 전까지 원본에 반영되지 않습니다.",12);y+=42;
+    auto panel=[&](const std::string& title,const std::string& help,Document sample){
+        text({30,y},title,19);y+=34;text({30,y},help,12);y+=66;
+        auto bounds=makeScene(sample).bounds;sample.translate(sample.allIds(),{45-bounds.x,y-bounds.y});
+        guide.append(sample);y+=bounds.h+76;
+    };
+    panel("1 · 직선형 메커니즘", "단계의 아래 +로 앞쪽 반응에서도 분기할 수 있습니다. 화살표 옆 +는 중간체 삽입입니다.\n화살표 클릭 → Del: 연결 삭제 · 그림 영역 클릭 → Del: 단계 제거 · Ctrl+Z: 되돌리기",mechanismDemo());
+    panel("2 · 촉매 순환", "배치에서 촉매 순환을 선택할 수 있습니다. 이름과 에너지는 더블클릭으로 수정하세요.\n그림 영역을 선택한 뒤 붙여넣기 또는 파일로 채움으로 구조를 교체할 수 있습니다. (일반적인 설명용 예제)",catalyticCycleDemo());
+    for(auto layout:{MechanismTemplate::FeedIntoCycle,MechanismTemplate::SplitAndMerge}){
+        Document sample;auto r=mechanismTemplate(layout);r.id=sample.nextId++;r.p={0,0};sample.reactions.push_back(r);
+        for(size_t i=0;i<r.slots.size();++i)fillSlot(sample,demo(),r.id,i);optimizeMechanism(sample,{r.id});
+        panel(layout==MechanismTemplate::FeedIntoCycle?"3 · 직선에서 순환으로 이어지는 경로":"4 · 분기와 합류",
+            "연결하기: 시작 그림 영역 → 도착 그림 영역을 클릭하거나 드래그하세요. 그림 영역을 직접 끌어 배치할 수 있습니다.\n화살표 길이는 슬라이더로 조절하고 자동 정렬로 여백을 정돈하세요. 기본 단위: kcal mol^{-1} (단위 변경은 표시만 변경)",sample);
+    }
+    text({30,y},"Ctrl+Shift+K · 선택한 부분 구조 정리 | F2 / 더블클릭 · 이름·에너지 편집 | 그림 영역 · 화면 안내만 표시",12);
+    return guide;
 }
 Document coordinateDemo(){Document d;EnergyPlot p;p.id=d.nextId++;p.p={25,90};p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#000000",{0,37.2,17.7,27.3,-9.9},1,3.5}};d.plots.push_back(p);fillSlot(d,demo(),p.id,0,true);fillSlot(d,chairTemplate(),p.id,4,false);d.plots.front().stages=defaultMechanismStages();return d;}
 void applyHouseStyle(Document& d){

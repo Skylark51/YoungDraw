@@ -366,12 +366,13 @@ int main(){try{
  int direct=joined.addBond(4,8,BondKind::Dative);
  int bridgeStart=joined.addBond(9,bridge),bridgeEnd=joined.addBond(bridge,11);
  auto joinedXml=strip(toCdxml(fromNative(toNative(joined))));
- auto start=joinedXml.find("<fragment id=\"2\">"),end=joinedXml.find("</fragment>",start);
+ auto fragmentAt=[&](int id){size_t at=0;while((at=joinedXml.find("<fragment",at))!=std::string::npos){auto end=joinedXml.find('>',at);if(joinedXml.substr(at,end-at).find(" id=\""+std::to_string(id)+"\"")!=std::string::npos)return at;++at;}return std::string::npos;};
+ auto start=fragmentAt(2),end=joinedXml.find("</fragment>",start);
  check(start!=std::string::npos&&end!=std::string::npos,"merged CDXML fragment retains its original ID");
  auto contents=joinedXml.substr(start,end-start);
  for(int id:{3,4,5,8,9,10,11,bridge,direct,bridgeStart,bridgeEnd})
      check(contents.find(" id=\""+std::to_string(id)+"\"")!=std::string::npos,"merged fragment contains every original and new atom and bond");
- check(joinedXml.find("<fragment id=\"7\"")==std::string::npos&&joinedXml.find("<fragment id=\"12\"")!=std::string::npos,
+ check(fragmentAt(7)==std::string::npos&&fragmentAt(12)!=std::string::npos,
        "only joined source fragments merge");
  check(joinedXml.find("ReactionStepReactants=\"2 12\"")!=std::string::npos&&joinedXml.find("ReactionStepProducts=\"2\"")!=std::string::npos,
        "reaction references follow the merged fragment");
@@ -415,7 +416,7 @@ int main(){try{
      for(auto& slot:r.slots){slot.label="Intermediate\nName";slot.energy="-12.5";}
      ring.reactions.push_back(r);optimizeMechanism(ring,{r.id},true);auto picture=makeScene(ring);
      std::vector<Rect> captions;
-     for(auto& item:picture.items)if(item.type==Primitive::Text&&!item.text.empty()){
+     for(auto& item:picture.items)if(item.type==Primitive::Text&&!item.text.empty()&&item.textRole!=0){
          check(std::abs(item.fontSize-font)<.01,"all cycle captions including center use the same size");
          Rect box{item.points[0].x,item.points[0].y,item.text.size()*font*.62,font};
          for(auto& other:captions)check(box.x+box.w<=other.x||other.x+other.w<=box.x||box.y+box.h<=other.y||other.y+other.h<=box.y,"cycle captions never overlap");
@@ -437,7 +438,7 @@ int main(){try{
  Document imageDoc;Object image;image.id=imageDoc.nextId++;image.kind=ObjectKind::Image;image.imageHex="89504e470d0a1a0a";image.points={{0,0},{1000,500}};imageDoc.objects.push_back(image);Document target=coordinateDemo();fillSlot(target,imageDoc,target.plots[0].id,2,true);auto& inserted=target.objects.back();check(inserted.imageHex==image.imageHex&&(inserted.points[1]-inserted.points[0]).length()<130,"slot image scales presentation without changing source bytes");
 #ifdef TEST_CDXML
  for(auto restored:{fromNative(toNative(cycle)),fromCdxml(toCdxml(cycle))})check(restored.reactions[0].centerLabel=="Catalytic cycle"&&restored.reactions[0].slots[0].energy=="-12.5","cycle text survives native and CDXML roundtrip");
- auto copyCycle=fromNative(toNative(cycle));check(copyCycle.reactions[0].cyclic&&copyCycle.reactions[0].unit=="kcal/mol","cycle settings persist");auto copyGraph=fromNative(toNative(profile));check(copyGraph.plots[0].xLabel=="H_{2} + x^{2}"&&copyGraph.plots[0].xColor=="#aa1133","axis formatting persists");check(toCdxml(profile).find("RotationAngle=\"-5898240\"")!=std::string::npos,"axis rotation exports to CDXML");
+ auto copyCycle=fromNative(toNative(cycle));check(copyCycle.reactions[0].cyclic&&copyCycle.reactions[0].unit=="kcal mol^{-1}","cycle settings persist");auto copyGraph=fromNative(toNative(profile));check(copyGraph.plots[0].xLabel=="H_{2} + x^{2}"&&copyGraph.plots[0].xColor=="#aa1133","axis formatting persists");check(toCdxml(profile).find("RotationAngle=\"-5898240\"")!=std::string::npos,"axis rotation exports to CDXML");
 #endif
  Object straight;straight.id=500;straight.head=1;straight.points={{0,0},{60,0}};auto arrowParts=arrowPrimitives(straight);check(arrowParts.size()==2&&arrowParts[1].points.size()==3,"full arrowhead is a filled triangle");check(arrowParts[0].points.back().x<55&&arrowParts[1].points.front().x==60&&arrowParts[0].flatEnd,"shaft stops before sharp tip");
  straight.head=2;arrowParts=arrowPrimitives(straight);auto head=arrowParts[1].points;check(arrowParts[1].type==Primitive::Line&&head.size()==2&&arrowParts[1].width==straight.width,"fishhook is one barb with the same weight as its shaft");check((arrowParts[0].points.back()-head.back()).length()<1e-8&&head.back().x==60,"fishhook shaft and barb meet at the original tip");

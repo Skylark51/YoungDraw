@@ -28,6 +28,7 @@ if(WIN32)
     src/win_editor_tabs.cpp
     src/win_editor_text.cpp
     src/win_editor_reaction.cpp
+    src/win_mechanism_editor.cpp
     src/win_editor_plot.cpp
     src/win_editor_structure.cpp
     src/win_editor_commands.cpp
@@ -81,6 +82,7 @@ if(WIN32)
   add_executable(document_tabs_tests tests/document_tabs_tests.cpp)
   target_link_libraries(document_tabs_tests PRIVATE youngdraw_editor)
   add_test(NAME document_tabs COMMAND document_tabs_tests)
+  set_tests_properties(document_tabs PROPERTIES TIMEOUT 90)
   add_test(NAME graph_energy_units COMMAND document_tabs_tests --plot-units-only)
   add_executable(theme_tests tests/theme_tests.cpp resources/youngdraw.rc)
   target_include_directories(theme_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources")
@@ -97,6 +99,10 @@ if(WIN32)
   add_executable(mechanism_edit_tests tests/mechanism_edit_tests.cpp)
   target_link_libraries(mechanism_edit_tests PRIVATE youngdraw_cdxml)
   add_test(NAME mechanism_editing COMMAND mechanism_edit_tests)
+  add_executable(mechanism_editor_ui_tests tests/mechanism_editor_ui_tests.cpp)
+  target_link_libraries(mechanism_editor_ui_tests PRIVATE youngdraw_editor)
+  add_test(NAME mechanism_editor_ui COMMAND mechanism_editor_ui_tests)
+  set_tests_properties(mechanism_editor_ui PROPERTIES TIMEOUT 30)
   add_executable(mechanism_graph_tests tests/mechanism_graph_tests.cpp)
   target_link_libraries(mechanism_graph_tests PRIVATE youngdraw_cdxml)
   add_test(NAME mechanism_graph_editing COMMAND mechanism_graph_tests)
