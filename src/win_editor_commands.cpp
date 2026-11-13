@@ -5,6 +5,7 @@
 #include "win_editor_files.h"
 #include "win_editor_plot.h"
 #include "win_editor_reaction.h"
+#include "win_mechanism_editor.h"
 #include "win_editor_shortcuts.h"
 #include "win_editor_state.h"
 #include "win_editor_structure.h"
@@ -94,7 +95,17 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  case 112:saveCurrentTemplate();break;
  case 113:{auto p=fileDialog(false);if(p)insert(fromCdxml(readFile(*p)),center());break;}
  case 120:newReaction();break;
- case 121:if(reaction(primary()))editReaction(primary());else edit();break;case 122:case 128:{auto* r=reaction(primary());if(!r)throw std::runtime_error("반응 메커니즘을 선택하세요.");if(r->slots.size()>=40)throw std::runtime_error("메커니즘은 최대 40칸까지 추가할 수 있습니다.");history.checkpoint(doc);appendMechanismStage(*r,id==128,targetContainer==r->id?targetSlot:size_t(-1));optimizeMechanism(doc,{r->id},r->cyclic);changed();fit();break;}case 123:fillTarget(false);break;case 124:fillTarget(true);break;
+ case 121:if(reaction(primary()))editReaction(primary());else edit();break;case 122:case 128:{
+     auto* r=reaction(primary());if(!r||doc.isLocked(r->id)||r->slots.empty()||r->slots.size()>=40||r->links.size()>=100)break;
+     const int owner=r->id;const size_t source=targetContainer==owner?std::min(targetSlot,r->slots.size()-1):r->slots.size()-1;
+     const bool branch=!r->cyclic&&source+1!=r->slots.size();
+     auto details=branch?mechanismAdditionDetails(win,*r,source,true):std::optional<std::vector<std::string>>{};
+     if(branch&&!details)break;
+     Document candidate=doc;auto& edited=*std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[&](auto& row){return row.id==owner;});
+     if(edited.cyclic&&!edited.explicitConnections())splitMechanismLink(edited,source);else appendMechanismStage(edited,id==128,source);
+     if(details){edited.slots[source].label=(*details)[0];edited.slots[source].energy=(*details)[1];edited.slots.back().label=(*details)[2];edited.slots.back().energy=(*details)[3];edited.above.back()=(*details)[4];edited.below.back()=(*details)[5];}
+     optimizeMechanism(candidate,{owner},edited.cyclic);history.checkpoint(doc);doc=std::move(candidate);changed();fit();break;
+ }case 123:fillTarget(false);break;case 124:fillTarget(true);break;
  case 130:case spinMultiplicityPlotCommand:{
      sidebarPage=1;history.checkpoint(doc);
      EnergyPlot p;

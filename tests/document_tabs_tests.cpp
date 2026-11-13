@@ -35,7 +35,12 @@ using namespace yd::editor;
 #include <iostream>
 #include "mechanism_layout_fixture.h"
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
-static void neutralMechanismClick(Vec point){BYTE keys[256]{};SetKeyboardState(keys);mouseDown(point);}
+static void CALLBACK applyBranchDetails(HWND parent,UINT,UINT_PTR timer,DWORD){
+    HWND form=nullptr;while((form=FindWindowExW(nullptr,form,L"YoungDrawForm",L"분기 이름·에너지")))if(GetWindow(form,GW_OWNER)==parent)break;
+    if(!form)return;KillTimer(parent,timer);
+    SetDlgItemTextW(form,101,L"-4.5");SetDlgItemTextW(form,104,L"TS-branch");SetDlgItemTextW(form,105,L"17.2");PostMessageW(form,WM_COMMAND,IDOK,0);
+}
+static void neutralMechanismClick(Vec point){BYTE keys[256]{};SetKeyboardState(keys);SetTimer(win,990,10,applyBranchDetails);mouseDown(point);KillTimer(win,990);}
 static void dropFiles(HWND hwnd,std::initializer_list<std::wstring> paths){
     size_t characters=1;
     for(const auto& path:paths)characters+=path.size()+1;
@@ -198,11 +203,11 @@ static void checkNewMechanism(HWND hwnd){
             for(size_t edge=0;edge<r.links.size();edge++){
                 fit();
                 auto buttons=mechanismSplitButtons(doc.reactions.front());
-                check(buttons.size()==r.links.size()&&buttons[edge].first==edge,"each connection has an insertion button");
-                mouseDown(buttons[edge].second);
+                check(buttons.empty(),"transition states never expose branch plus buttons");
+                insertMechanismLinkStage(r.id,edge);
                 const auto& added=doc.reactions.front();
                 check(added.slots.size()==r.slots.size()+1&&added.links[edge].to==int(r.slots.size())&&
-                      added.links.back().to==r.links[edge].to,"clicking a canvas plus splits exactly its connection");
+                      added.links.back().to==r.links[edge].to,"explicit intermediate insertion splits exactly its connection");
                 check(history.undo(doc)&&toNative(doc)==before,"connection insertion is undone in one step");
             }
         }
@@ -389,6 +394,7 @@ int main(int argc,char** argv){
             auto before=toNative(doc);int owner=doc.reactions.front().id;
             neutralMechanismClick(mechanismAddPosition(doc.reactions.front(),true,0));
             check(doc.reactions.front().slots.size()==4&&doc.reactions.front().links.back().from==0,"canvas plus branches from the first step without removing the main path");
+            check(doc.reactions.front().slots[0].energy=="-4.5"&&doc.reactions.front().above.back()=="TS-branch"&&doc.reactions.front().below.back()=="17.2","canvas branch prompts and stores source energy and TS metadata");
             check(history.undo(doc)&&toNative(doc)==before,"early canvas branching undoes in one step");
             auto atoms=doc.atoms.size();selection={owner};targetContainer=owner;targetSlot=1;
             check(deleteSelectedMechanismStage()&&doc.reactions.front().slots.size()==2&&doc.atoms.size()<atoms,"direct stage deletion removes just the selected stage and its structure");

@@ -9,6 +9,24 @@
 using namespace yd;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 int main(){try{
+    // Native cycles must never be flattened by + / Delete, including the closing edge.
+    for(size_t edge=0;edge<3;++edge){
+        auto d=mechanismDemo();auto& r=d.reactions[0];r.cyclic=true;
+        r.above={"TS-a","TS-b","TS-close"};r.below={"1","2","3"};
+        r.hiddenArrows={2};auto old=r;auto inserted=splitMechanismLink(r,edge);
+        check(inserted==edge+1&&r.cyclic&&!r.explicitConnections()&&r.slots.size()==4,"cycle insertion retains native ring and inserts after selected source");
+        check(r.above[edge]==old.above[edge]&&r.below[edge]==old.below[edge],"cycle insertion preserves selected TS metadata");
+        check(r.hiddenArrows[0]==(edge<2?3:2),"cycle insertion remaps hidden closing arrow");
+        optimizeMechanism(d,{r.id},true);
+        auto saved=fromCdxml(toCdxml(d));check(saved.reactions[0].cyclic&&saved.reactions[0].slots.size()==4,"expanded cycle saves and loads");
+        removeMechanismStage(d,r.id,inserted,-1,true);
+        check(d.reactions[0].cyclic&&!d.reactions[0].explicitConnections()&&d.reactions[0].above==old.above&&d.reactions[0].below==old.below,"deleting inserted cycle intermediate restores original TS labels and energies");
+    }
+    {
+        auto d=mechanismDemo();auto before=toNative(d);bool rejected=false;
+        try{splitMechanismLink(d.reactions[0],99);}catch(const std::out_of_range&){rejected=true;}
+        check(rejected&&toNative(d)==before,"invalid insertion cannot partially mutate a mechanism");
+    }
     for(auto layout:{MechanismTemplate::FeedIntoCycle,MechanismTemplate::SplitAndMerge}){
         Document d;
         auto r=mechanismTemplate(layout);

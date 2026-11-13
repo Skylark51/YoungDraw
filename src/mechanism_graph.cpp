@@ -185,18 +185,32 @@ std::optional<MechanismArc> mechanismLinkArc(const Reaction& r,size_t index,cons
 
 size_t splitMechanismLink(Reaction& r,size_t edge){
     if(r.slots.size()>=40||r.links.size()>=100)throw std::runtime_error("구조는 최대 40개, 화살표는 최대 100개입니다.");
-    const auto link=r.links.at(edge);
+    Reaction result=r;
+    if(!result.explicitConnections()){
+        const auto count=result.slots.empty()?0:result.slots.size()-(result.cyclic?0:1);
+        if(edge>=count)throw std::out_of_range("mechanism connection");
+        const auto stage=edge+1;
+        result.slots.insert(result.slots.begin()+stage,Slot{"Intermediate "+std::to_string(stage+1),{}});
+        result.above.resize(count);result.below.resize(count);
+        result.above.insert(result.above.begin()+stage,"TS"+std::to_string(count+1));
+        result.below.insert(result.below.begin()+stage,"");
+        for(auto& c:result.captionColors)if((c.role==1||c.role==9)?c.index>=int(stage):c.index>int(edge))++c.index;
+        for(auto& c:result.crosses)if(c.index>int(edge))++c.index;
+        for(auto& hidden:result.hiddenArrows)if(hidden>int(edge))++hidden;
+        r=std::move(result);return stage;
+    }
+    const auto link=result.links.at(edge);
     if(link.from<0)throw std::runtime_error("시작 구조가 있는 화살표를 선택하세요.");
-    const size_t stage=r.slots.size();
-    r.slots.push_back({"Intermediate "+std::to_string(stage+1),{}});
-    r.slotGrid.push_back((r.slotGrid.at(link.from)+r.slotGrid.at(link.to))*.5);
-    r.links[edge].to=int(stage);
-    r.links.push_back({int(stage),link.to,{},link.bend});
-    r.above.resize(r.links.size());
-    r.below.resize(r.links.size());
-    r.above.back()="TS"+std::to_string(r.links.size());
-    return stage;
+    const size_t stage=result.slots.size();
+    result.slots.push_back({"Intermediate "+std::to_string(stage+1),{}});
+    result.slotGrid.push_back((result.slotGrid.at(link.from)+result.slotGrid.at(link.to))*.5);
+    result.links[edge].to=int(stage);
+    result.links.push_back({int(stage),link.to,{},link.bend});
+    result.above.resize(result.links.size());result.below.resize(result.links.size());
+    result.above.back()="TS"+std::to_string(result.links.size());
+    r=std::move(result);return stage;
 }
+
 void makeMechanismGraph(Reaction& r){
     if(r.explicitConnections()){r.manualConnections=true;return;}
     std::vector<Vec> frames;double pitch=r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80);
@@ -300,6 +314,7 @@ void removeMechanismStage(Document& d,int owner,size_t stage,int mergeInto,bool 
     auto r=std::find_if(d.reactions.begin(),d.reactions.end(),[&](const Reaction& r){return r.id==owner;});
     if(r==d.reactions.end()||stage>=r->slots.size()||d.isLocked(owner))throw std::runtime_error("제거할 단계를 선택하세요.");
     if(mergeInto>=int(r->slots.size())||mergeInto==int(stage))throw std::runtime_error("합칠 다른 단계를 지정하세요.");
+    const Reaction original=*r;const bool keepCycle=r->cyclic&&!r->explicitConnections()&&mergeInto<0;
     makeMechanismGraph(*r);auto members=r->slots[stage].members;
     if(mergeInto<0&&circularMergePaths(*r)){
         auto incoming=std::find_if(r->links.begin(),r->links.end(),[=](const MechanismLink& l){return l.to==int(stage);});
@@ -320,6 +335,18 @@ void removeMechanismStage(Document& d,int owner,size_t stage,int mergeInto,bool 
     r->slots.erase(r->slots.begin()+stage);r->slotGrid.erase(r->slotGrid.begin()+stage);
     r->captionColors.erase(std::remove_if(r->captionColors.begin(),r->captionColors.end(),[&](const CaptionColor& c){return (c.role==1||c.role==9)&&c.index==int(stage);}),r->captionColors.end());
     for(auto& c:r->captionColors)if((c.role==1||c.role==9)&&c.index>int(stage))c.index--;
+    if(keepCycle&&!r->slots.empty()){
+        r->cyclic=true;r->manualConnections=false;r->fixedFrames=false;r->links.clear();r->slotGrid.clear();
+        r->above=original.above;r->below=original.below;
+        r->above.resize(original.slots.size());r->below.resize(original.slots.size());
+        r->above.erase(r->above.begin()+stage);r->below.erase(r->below.begin()+stage);
+        r->captionColors=original.captionColors;
+        r->captionColors.erase(std::remove_if(r->captionColors.begin(),r->captionColors.end(),[&](auto& c){return c.index==int(stage);}),r->captionColors.end());
+        for(auto& c:r->captionColors)if(c.index>int(stage))--c.index;
+        r->crosses=original.crosses;r->crosses.erase(std::remove_if(r->crosses.begin(),r->crosses.end(),[&](auto& c){return c.index==int(stage);}),r->crosses.end());
+        for(auto& c:r->crosses)if(c.index>int(stage))--c.index;
+        r->hiddenArrows.clear();for(int i:original.hiddenArrows)if(i!=int(stage))r->hiddenArrows.push_back(i>int(stage)?i-1:i);
+    }
     if(deleteContents){for(auto& g:d.groups)g.members.erase(std::remove_if(g.members.begin(),g.members.end(),[&](int id){return std::find(members.begin(),members.end(),id)!=members.end();}),g.members.end());d.erase(members);}
     if(r->slots.empty()){d.reactions.erase(std::remove_if(d.reactions.begin(),d.reactions.end(),[&](const Reaction& value){return value.id==owner;}),d.reactions.end());for(auto& g:d.groups)g.members.erase(std::remove(g.members.begin(),g.members.end(),owner),g.members.end());}
 }

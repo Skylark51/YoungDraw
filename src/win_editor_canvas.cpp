@@ -213,7 +213,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
         g.DrawEllipse(&outline,x-radius,y-radius,2*radius,2*radius);
         g.DrawLine(&outline,x-5,y,x+5,y);g.DrawLine(&outline,x,y-5,x,y+5);
     };
-    for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id)){
+    for(auto& r:doc.reactions)if(!r.cyclic&&!r.circularMerge&&r.slots.size()<40&&r.links.size()<100&&!r.slots.empty()&&!doc.isLocked(r.id)){
         if(!mechanismConnecting&&!mechanismConnectionDrag&&!stageCopyOwner&&!isolatedStructureEditing)
             for(const auto& button:mechanismSplitButtons(r))plus(button.second,9);
         for(size_t slot=0;slot<r.slots.size();slot++){

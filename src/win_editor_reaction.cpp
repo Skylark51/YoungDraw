@@ -157,10 +157,8 @@ void editArrowCross(){
     if(result){update(*result);if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
 }
 void branchMechanism(){
-    auto* r=reaction(primary());if(!r)throw std::runtime_error("분기를 추가할 메커니즘을 선택하세요.");
-    auto value=ui::form(win,L"메커니즘 분기 추가",{{L"분기 시작 구조 번호 (1부터)",std::to_string(targetContainer==r->id?targetSlot+1:1)},{L"추가할 분기 수","2"}});if(!value)return;
-    double source=numeric((*value)[0],1,double(r->slots.size()));if(source!=std::floor(source))throw std::runtime_error("구조 번호는 정수입니다.");
-    Document candidate=doc;double count=numeric((*value)[1],1,20);if(count!=std::floor(count))throw std::runtime_error("분기 수는 정수입니다.");for(auto& item:candidate.reactions)if(item.id==r->id)for(int i=0;i<int(count);i++)addMechanismBranch(item,size_t(source)-1);optimizeMechanism(candidate,{r->id},false);history.checkpoint(doc);doc=std::move(candidate);changed();fit();
+    auto* r=reaction(primary());if(!r)r=reaction(targetContainer);if(!r)return;
+    editReaction(r->id);
 }
 void externalMechanism(){
     auto values=ui::form(win,L"첫 구조 없이 세로선에서 분기",{{L"분기 수 (2~20)","3"}});if(!values)return;
@@ -288,7 +286,7 @@ void editMechanismControls(int id){
             }else if(row.circularMerge){
                 std::vector<size_t> incoming;
                 for(size_t i=0;i<row.links.size();i++)if(row.links[i].to==int(position))incoming.push_back(i);
-                if(incoming.size()>1)throw std::runtime_error("합류점 앞에 삽입할 경로의 + 버튼을 선택하세요.");
+                if(incoming.size()>1)throw std::runtime_error("삽입할 TS 연결을 선택한 뒤 중간체 삽입을 사용하세요.");
                 if(incoming.empty())insertMechanismStage(row,position);
                 else newStage=splitMechanismLink(row,incoming.front());
             }else insertMechanismStage(row,position);
@@ -315,21 +313,8 @@ Vec mechanismAddPosition(const Reaction& r,bool below,size_t slot){
     return screen(last+Vec{direction*r.slotWidth/2,0})+Vec{direction*(r.fixedFrames?48:28),0};
 }
 std::vector<std::pair<size_t,Vec>> mechanismSplitButtons(const Reaction& r){
-    std::vector<std::pair<size_t,Vec>> buttons;
-    if(!r.circularMerge||doc.isLocked(r.id)||r.slots.size()>=40||r.links.size()>=100)return buttons;
-    for(size_t i=0;i<r.links.size();i++){
-        if(r.links[i].from<0||contains(r.hiddenArrows,int(i)))continue;
-        if(auto arc=mechanismLinkArc(r,i,doc.style)){
-            const double angle=(arc->start+arc->end)/2;
-            buttons.push_back({i,screen(arc->point(angle))-Vec{std::cos(angle),std::sin(angle)}*20});
-        }else{
-            auto path=mechanismLinkPath(r,i,doc.style);
-            const Vec a=path[path.size()-2],b=path.back(),v=b-a;
-            Vec offset=std::abs(v.x)>std::abs(v.y)?Vec{0,20}:Vec{-20,0};
-            buttons.push_back({i,screen((a+b)*.5)+offset});
-        }
-    }
-    return buttons;
+    // Transition states are selected as connections; insertion is an explicit editor action.
+    return {};
 }
 void insertMechanismLinkStage(int owner,size_t edge){
     auto* original=reaction(owner);

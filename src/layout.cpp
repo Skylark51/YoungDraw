@@ -808,7 +808,7 @@ Document mechanismGuide(){
         auto bounds=makeScene(sample).bounds;sample.translate(sample.allIds(),{45-bounds.x,y-bounds.y});
         guide.append(sample);y+=bounds.h+76;
     };
-    panel("1 · 직선형 메커니즘", "단계의 아래 +로 앞쪽 반응에서도 분기할 수 있습니다. 화살표 옆 +는 중간체 삽입입니다.\n화살표 클릭 → Del: 연결 삭제 · 그림 영역 클릭 → Del: 단계 제거 · Ctrl+Z: 되돌리기",mechanismDemo());
+    panel("1 · 직선형 메커니즘", "단계의 아래 +로 앞쪽 반응에서도 분기할 수 있습니다. TS 연결 선택 → 중간체 삽입으로 단계를 넣습니다.\n그림 영역 더블클릭 → 구조 그리기 · 붙여넣기 / 파일 넣기: 구조 입력\n화살표 클릭 → Del: 연결 삭제 · 그림 영역 클릭 → Del: 단계 제거 · Ctrl+Z: 되돌리기",mechanismDemo());
     panel("2 · 촉매 순환", "배치에서 촉매 순환을 선택할 수 있습니다. 이름과 에너지는 더블클릭으로 수정하세요.\n그림 영역을 선택한 뒤 붙여넣기 또는 파일로 채움으로 구조를 교체할 수 있습니다. (일반적인 설명용 예제)",catalyticCycleDemo());
     for(auto layout:{MechanismTemplate::FeedIntoCycle,MechanismTemplate::SplitAndMerge}){
         Document sample;auto r=mechanismTemplate(layout);r.id=sample.nextId++;r.p={0,0};sample.reactions.push_back(r);

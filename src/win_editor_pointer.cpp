@@ -220,7 +220,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
     history.checkpoint(doc);if(snapStage<0)graph->stages.push_back(label);else graph->stages.at(size_t(snapStage))=label;
     snapPlot=0;snapStart.reset();status=L"준위에 맞춰 반응 이름·양쪽 화살표를 배치했습니다. Ctrl+Z: 되돌리기";changed();return;
  }
- if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000))for(auto& r:doc.reactions)if(!r.cyclic&&!r.slots.empty()&&!doc.isLocked(r.id) ){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=!r.explicitConnections()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});for(bool below:{false,true}){if((!terminal&&!below)||(below&&r.vertical))continue;if((p-mechanismAddPosition(r,below,slot)).length()<=13){selection={r.id};targetContainer=r.id;targetSlot=slot;command(below?128:122);return;}}}}
+ if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000))for(auto& r:doc.reactions)if(!r.cyclic&&!r.circularMerge&&r.slots.size()<40&&r.links.size()<100&&!r.slots.empty()&&!doc.isLocked(r.id) ){for(size_t slot=0;slot<r.slots.size();slot++){bool terminal=!r.explicitConnections()?slot+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](const MechanismLink& l){return l.from==int(slot);});for(bool below:{false,true}){if((!terminal&&!below)||(below&&r.vertical))continue;if((p-mechanismAddPosition(r,below,slot)).length()<=13){selection={r.id};targetContainer=r.id;targetSlot=slot;command(below?128:122);return;}}}}
  if(tool==Select){
     auto sc=scene();
     const auto w=world(p);

@@ -89,6 +89,7 @@ void icon(Graphics& g,int id,RectF box,Color color){
         break;
     case 182:arrow();g.DrawEllipse(&pen,-19.f,-19.f,10.f,10.f);g.DrawEllipse(&pen,9.f,9.f,10.f,10.f);break;
     case 183:line(-19,-18,-19,18);line(-19,18,21,18);line(-15,9,-3,-9);line(-3,-9,7,3);line(7,3,19,-14);break;
+    case 169:line(-22,0,-5,0);line(-5,0,15,-15);line(-5,0,15,15);line(15,-15,6,-15);line(15,-15,15,-6);line(15,15,6,15);line(15,15,15,6);break;
     case 143:case 144:
         g.DrawRectangle(&pen,-18.f,-15.f,36.f,30.f);line(-8,0,8,0);
         if(id==143)line(0,-8,0,8);
