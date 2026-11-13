@@ -91,6 +91,27 @@ int main(){
         check(fs::exists(imported.folder/imported.items[0].file),"import is independent of transferred source");
         auto before=read(p.folder/L"project.ydproject");loaded.name=L" ";rejected=false;try{loaded.save();}catch(...){rejected=true;}check(rejected&&read(p.folder/L"project.ydproject")==before,"invalid edit preserves saved manifest");
         auto corrupt=Project::create(temp/L"projects",L"경로 검사");yd::storage::writeAtomic((corrupt.folder/L"project.ydproject").wstring(),"YoungDrawProject 1\n\"test\" \"\"\n\"../escape.cdxml\" \"name\" \"\"\n");rejected=false;try{Project::load(corrupt.folder);}catch(...){rejected=true;}check(rejected,"manifest traversal rejected");
+        {
+            auto tree=Project::create(temp/L"projects",L"폴더 회귀");auto f=tree.addFolder(L"Normal");auto folder=tree.items[f].file;
+            auto nested=tree.addFolder(L"하위 폴더",folder);auto child=tree.items[nested].file;
+            auto a=tree.addDrawing(L"A",yd::toCdxml(drawing));auto aFile=tree.items[a].file;
+            auto b=tree.addDrawing(L"B",yd::toCdxml(drawing));auto bFile=tree.items[b].file;
+            tree.relocate({a,b},folder,tree.items.size());tree=Project::load(tree.folder);
+            check(tree.items[2].parent==folder&&tree.items[3].parent==folder,"multi move and Unicode folder reload");
+            auto before=read(tree.folder/L"project.ydproject");bool cycle=false;
+            try{tree.relocate({0},child,tree.items.size());}catch(...){cycle=true;}
+            check(cycle&&read(tree.folder/L"project.ydproject")==before&&tree.items[0].parent.empty(),"folder cycles rejected and memory rolled back");
+            tree.relocate({3},L"",2);check(tree.items[2].file==bFile&&tree.items[2].parent.empty()&&tree.items[3].file==aFile,"filtered multi move insertion preserves order");
+            auto copy=tree.copyTo(temp/L"folder copy");check(copy.items.size()==4&&copy.items[1].parent==folder&&copy.items[3].parent==folder,"portable copy retains hierarchy");
+            auto exportedTree=tree.exportTo(temp/L"folder export",[](const fs::path&,const fs::path& png){yd::storage::writeAtomic(png.wstring(),"png");});
+            check(exportedTree.items[1].parent==folder&&exportedTree.items[3].parent==folder,"PNG export retains virtual folders");
+            auto subset=tree.copySelectionTo(temp/L"selection copy",{3});check(subset.items.size()==2&&subset.items[0].isFolder&&subset.items[1].file==aFile,"selection export includes ancestors without unrelated siblings");
+            auto duplicates=tree.duplicate({0});check(duplicates.size()==3&&tree.items[duplicates[1]].parent==tree.items[duplicates[0]].file&&tree.items[duplicates[2]].parent==tree.items[duplicates[0]].file,"folder duplication remaps descendants");
+            check(read(tree.folder/tree.items[duplicates[2]].file)==read(tree.folder/aFile),"duplication preserves original document bytes");
+            tree.items[3].parent=L"missing.ydfolder";bool missingFolder=false;try{tree.save();}catch(...){missingFolder=true;}check(missingFolder,"missing folder rejected");
+            auto legacy=Project::create(temp/L"projects",L"v1");yd::storage::writeAtomic((legacy.folder/L"project.ydproject").wstring(),"YoungDrawProject 1\n\"legacy\" \"note\"\n\"a.cdxml\" \"drawing\" \"memo\"\n");
+            auto old=Project::load(legacy.folder);check(old.items.size()==1&&old.items[0].parent.empty()&&!old.items[0].isFolder,"v1 project reads without hierarchy");
+        }
         checkExport(temp,drawing);
         fs::remove_all(temp);std::cout<<"PASS: project assets, CDXML, image bytes, names, notes, order and recovery\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}
