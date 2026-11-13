@@ -56,6 +56,8 @@ struct CaptionColor { int role=0,index=-1; std::string color; };
 struct Reaction {
     int id=0; Vec p; double spacing=120,slotWidth=64,slotHeight=65;
     std::vector<Slot> slots; std::vector<std::string> above,below; int arrowType=0; bool cyclic=false; std::string unit="kcal mol^{-1}";
+    std::vector<int> arrowTypes; // Per-connection override: -1 inherits arrowType, 0 forward, 1 equilibrium.
+    std::vector<int> cycleStages; // Ordered circular backbone in an explicit graph with external branches.
     std::string centerLabel;
     double captionFontSize=0,cycleRadius=0; // 0 uses automatic sizing.
     std::vector<int> hiddenArrows; // Connector indices omitted from the ring.

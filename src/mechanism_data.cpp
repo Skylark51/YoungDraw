@@ -288,6 +288,11 @@ Reaction mechanismGridData(const Reaction& original,const MechanismRows& rows){
         }else{result.above.push_back(row[1]);result.below.push_back(energy);}
         expectState=!expectState;
     }
+    result.arrowTypes.assign(result.above.size(),-1);result.hiddenArrows.clear();
+    for(size_t n=0;n<result.above.size()&&n<matchedSlots.size();++n){size_t old=matchedSlots[n];if(old>=original.slots.size())continue;
+        bool same=(n+1<matchedSlots.size()&&matchedSlots[n+1]==old+1)||(original.cyclic&&n+1==matchedSlots.size()&&old+1==original.slots.size());
+        if(same){result.arrowTypes[n]=mechanismArrowType(original,old);if(std::find(original.hiddenArrows.begin(),original.hiddenArrows.end(),int(old))!=original.hiddenArrows.end())result.hiddenArrows.push_back(int(n));}
+    }
     for(auto& color:original.captionColors){
         if(color.role==10){result.captionColors.push_back(color);continue;}
         for(size_t n=0;n<matchedSlots.size();n++)if(matchedSlots[n]==size_t(color.index)){

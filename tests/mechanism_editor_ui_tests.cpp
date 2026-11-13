@@ -2,6 +2,7 @@
 #include "win_editor_state.h"
 #include "mechanism_data.h"
 #include "cdxml.h"
+#include "win_theme.h"
 #include <commctrl.h>
 #include <windowsx.h>
 #include <iostream>
@@ -20,7 +21,8 @@ struct Picture {
     static int width(HWND h){RECT r{};GetClientRect(h,&r);return r.right;}
     static int height(HWND h){RECT r{};GetClientRect(h,&r);return r.bottom;}
     bool teal(int x,int y){Gdiplus::Color c;bitmap.GetPixel(x,y,&c);return c.GetR()<45&&c.GetG()>110&&c.GetG()<165&&c.GetB()>95&&c.GetB()<155;}
-    POINT selectedFrame(HWND editor){auto banner=childRect(editor,22);for(int y=banner.bottom+12;y<int(bitmap.GetHeight())-100;++y)for(int x=banner.left+12;x<int(bitmap.GetWidth())-30;++x){if(!teal(x,y)||!teal(x+20,y)||!teal(x,y+20)||!teal(x,y+40))continue;int right=x;while(right<int(bitmap.GetWidth())-1&&teal(right,y))++right;int bottom=y;while(bottom<int(bitmap.GetHeight())-1&&teal(x,bottom))++bottom;if(right-x>50&&bottom-y>40)return {(x+right)/2,(y+bottom)/2};}throw std::runtime_error("selected picture frame is fully visible");}
+    RECT selectedBox(HWND editor){auto banner=childRect(editor,22);for(int y=banner.bottom+12;y<int(bitmap.GetHeight())-100;++y)for(int x=banner.left+12;x<int(bitmap.GetWidth())-30;++x){if(!teal(x,y)||!teal(x+20,y)||!teal(x,y+20)||!teal(x,y+40))continue;int right=x;while(right<int(bitmap.GetWidth())-1&&teal(right,y))++right;int bottom=y;while(bottom<int(bitmap.GetHeight())-1&&teal(x,bottom))++bottom;if(right-x>50&&bottom-y>40)return {x,y,right,bottom};}throw std::runtime_error("selected picture frame is fully visible");}
+    POINT selectedFrame(HWND editor){auto box=selectedBox(editor);return {(box.left+box.right)/2,(box.top+box.bottom)/2};}
     std::vector<POINT> pluses(HWND editor){std::vector<POINT> result;auto banner=childRect(editor,22);for(int y=banner.bottom+18;y<int(bitmap.GetHeight())-72;++y)for(int x=banner.left+12;x<int(bitmap.GetWidth())-22;++x){if(!teal(x,y)||!teal(x-3,y)||!teal(x+3,y)||!teal(x,y-3)||!teal(x,y+3)||teal(x+3,y+3)||!teal(x-9,y)||!teal(x+9,y))continue;if(std::none_of(result.begin(),result.end(),[&](POINT p){return std::abs(p.x-x)<10&&std::abs(p.y-y)<10;}))result.push_back({x,y});}return result;}
 };
 void CALLBACK fillMetadata(HWND editor,UINT,UINT_PTR timer,DWORD){
@@ -43,7 +45,37 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
             check(pluses.size()==3,"cycle exposes only its three supported stage plus buttons, no TS plus");
             SetTimer(editor,2,20,fillMetadata);SendMessageW(editor,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(pluses[0].x,pluses[0].y));
             check(SendMessageW(list,LB_GETCOUNT,0,0)==4,"clicking actual cycle plus adds a stage without invalid errors");
-            check(!IsWindowEnabled(GetDlgItem(editor,33)),"cycle never enables unsupported branch action");
+            check(IsWindowEnabled(GetDlgItem(editor,33)),"selected cycle stage enables external branching");
+            PostMessageW(editor,WM_COMMAND,IDOK,0);return;
+        }
+        if(phase==5||phase==6){
+            select(editor,0);Picture frame(editor);auto box=frame.selectedBox(editor);auto source=mechanismDemo();if(phase==5)source.reactions[0].cyclic=true;
+            auto& r=source.reactions[0];double scale=double(box.right-box.left)/r.slotWidth;auto origin=Vec{double(box.left+box.right)/2,double(box.top+box.bottom)/2}-reactionSlot(r,0)*scale;
+            auto scene=makeScene(source,measure);bool clicked=false;
+            for(const auto& item:scene.items)if(item.owner==r.id&&item.reactionArrow==0&&(item.type==Primitive::Line||item.type==Primitive::Bezier)){
+                Vec at=item.type==Primitive::Bezier?item.points[0]*.125+item.points[1]*.375+item.points[2]*.375+item.points[3]*.125:(item.points.front()+item.points.back())*.5;auto point=at*scale+origin;
+                SendMessageW(editor,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(int(point.x),int(point.y)));SendMessageW(editor,WM_LBUTTONUP,0,MAKELPARAM(int(point.x),int(point.y)));clicked=true;break;
+            }
+            check(clicked&&IsWindowEnabled(GetDlgItem(editor,15)),"clicking an actual connection enables its individual arrow style");
+            check(!IsWindowEnabled(GetDlgItem(editor,33)),"selecting a TS connection never enables branching");
+            SendDlgItemMessageW(editor,15,CB_SETCURSEL,1,0);SendMessageW(editor,WM_COMMAND,MAKEWPARAM(15,CBN_SELCHANGE),0);
+            if(phase==5){select(editor,0);check(IsWindowEnabled(GetDlgItem(editor,33)),"cycle stage supports external branches");addBranch(editor);
+                check(SendMessageW(list,LB_GETCOUNT,0,0)==4,"cycle branch adds a single external intermediate");
+                SendDlgItemMessageW(editor,64,BM_SETCHECK,BST_UNCHECKED,0);command(editor,64);
+                RECT outer{};GetWindowRect(editor,&outer);Gdiplus::Bitmap full(outer.right-outer.left,outer.bottom-outer.top,PixelFormat32bppARGB);{Gdiplus::Graphics graphics(&full);auto dc=graphics.GetHDC();SendMessageW(editor,WM_PRINT,(WPARAM)dc,PRF_CLIENT|PRF_CHILDREN|PRF_ERASEBKGND);graphics.ReleaseHDC(dc);}
+                CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};full.Save(L"mechanism-editor-ring-branch.png",&png);
+                // Owner-drawn buttons must paint every corner in dark themes.
+                auto button=GetDlgItem(editor,60);Gdiplus::Bitmap tile(76,54,PixelFormat32bppARGB);{Gdiplus::Graphics graphics(&tile);auto dc=graphics.GetHDC();DRAWITEMSTRUCT item{};item.CtlType=ODT_BUTTON;item.CtlID=60;item.hwndItem=button;item.hDC=dc;item.rcItem={0,0,76,54};SendMessageW(editor,WM_DRAWITEM,60,(LPARAM)&item);graphics.ReleaseHDC(dc);}Gdiplus::Color corner;tile.GetPixel(0,0,&corner);check(corner.GetValue()==appearance::palette().panel.GetValue(),"dark toolbar tiles have no white corner artifacts");
+            }
+            PostMessageW(editor,WM_COMMAND,IDOK,0);return;
+        }
+        if(phase==7){
+            SendDlgItemMessageW(editor,11,CB_SETCURSEL,6,0);SendMessageW(editor,WM_COMMAND,MAKEWPARAM(11,CBN_SELCHANGE),0);
+            check(SendDlgItemMessageW(editor,64,BM_GETCHECK,0,0)==BST_UNCHECKED,"open circular layout explicitly disables its final arrow");
+            Picture picture(editor);auto pluses=picture.pluses(editor);check(pluses.size()==3,"open circular layout keeps stage additions available");
+            auto last=*std::min_element(pluses.begin(),pluses.end(),[](POINT a,POINT b){return a.x<b.x;});
+            SetTimer(editor,2,20,fillMetadata);SendMessageW(editor,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(last.x,last.y));
+            check(SendDlgItemMessageW(editor,64,BM_GETCHECK,0,0)==BST_UNCHECKED,"adding after the last circular stage keeps the path open");
             PostMessageW(editor,WM_COMMAND,IDOK,0);return;
         }
         if(phase==3){
@@ -100,6 +132,7 @@ int main(){
         auto cycle=source;cycle.reactions[0].cyclic=true;phase=2;auto cycled=run(owner,cycle);
         check(cycled&&cycled->reactions[0].cyclic&&!cycled->reactions[0].explicitConnections()&&cycled->reactions[0].slots.size()==4,"cycle plus preserves cyclic representation and closing arrow");
         auto roundtrip=fromCdxml(toCdxml(*cycled));check(roundtrip.reactions[0].cyclic&&roundtrip.reactions[0].slots.size()==4,"cycle addition round-trips through CDXML");
+        phase=7;auto opened=run(owner,cycle);check(opened&&opened->reactions[0].cyclic&&!opened->reactions[0].explicitConnections()&&opened->reactions[0].slots.size()==4&&opened->reactions[0].hiddenArrows==std::vector<int>({3}),"open circular layout remains open after its final stage is extended");
         phase=3;Document fragment;fragment.addAtom({0,0},8);MechanismEditorCallbacks callbacks;
         callbacks.editStructure=[&](const Document& original,HWND editor)->std::optional<Document>{check(GetWindow(editor,GW_OWNER)==owner,"structure editor is owned by draft editor");++drawCalls;if(drawCalls==1)return fragment;check(!original.atoms.empty(),"existing frame contents supplied for structure editing");return {};};
         callbacks.clipboard=[&]()->std::optional<Document>{fragment.atoms[0].element=7;return fragment;};
@@ -110,7 +143,16 @@ int main(){
         check(untouched.atoms.size()==expected.atoms.size()&&untouched.bonds.size()==expected.bonds.size(),"cancelling structure editing preserves sibling chemistry");
         check(toNative(source)==before,"all structure operations remain isolated from source");
         phase=4;run(owner,source);
-        std::cout<<"PASS: cycle plus clicks, supported controls, branch metadata, isolated drawing/paste/file, small display, undo and cancellation\n";
+        phase=6;auto mixed=run(owner,source);check(mixed&&mechanismArrowType(mixed->reactions[0],0)==1&&mechanismArrowType(mixed->reactions[0],1)==0,"individual equilibrium editing leaves other connections forward");
+        // Registry redirection is process-local: dark rendering never changes user preferences.
+        HKEY isolated=nullptr;auto registry=L"Software\\YoungDraw\\MechanismEditorTest-"+std::to_wstring(GetCurrentProcessId());
+        check(RegCreateKeyExW(HKEY_CURRENT_USER,registry.c_str(),0,nullptr,REG_OPTION_VOLATILE,KEY_ALL_ACCESS,nullptr,&isolated,nullptr)==ERROR_SUCCESS,"create isolated appearance settings");
+        check(RegOverridePredefKey(HKEY_CURRENT_USER,isolated)==ERROR_SUCCESS,"redirect test appearance settings");HKEY look=nullptr;check(RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Appearance",0,nullptr,REG_OPTION_VOLATILE,KEY_SET_VALUE,nullptr,&look,nullptr)==ERROR_SUCCESS,"create dark appearance key");DWORD theme=5;check(RegSetValueExW(look,L"Theme",0,REG_DWORD,(BYTE*)&theme,sizeof(theme))==ERROR_SUCCESS,"set dark theme");RegCloseKey(look);appearance::load();check(appearance::settings().theme==5,"dark appearance is active during toolbar regression");
+        phase=5;auto branched=run(owner,cycle);
+        RegOverridePredefKey(HKEY_CURRENT_USER,nullptr);RegCloseKey(isolated);RegDeleteTreeW(HKEY_CURRENT_USER,registry.c_str());
+        check(branched&&branched->reactions[0].cycleStages==std::vector<int>({0,1,2})&&branched->reactions[0].links.size()==4,"external branch preserves the three-node circular backbone");
+        auto& ring=branched->reactions[0];check(contains(ring.hiddenArrows,2)&&mechanismArrowType(ring,0)==1&&mechanismArrowType(ring,1)==0,"open circular path and individual equilibrium settings coexist with branching");
+        std::cout<<"PASS: grouped toolbar, individual equilibrium, open circular path, external cycle branches, cycle plus clicks, supported controls, branch metadata, isolated drawing/paste/file, small display, undo and cancellation\n";
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';result=1;}
     KillTimer(owner,1);DestroyWindow(owner);GdiplusShutdown(token);OleUninitialize();return result;
 }

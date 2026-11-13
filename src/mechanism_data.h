@@ -34,6 +34,9 @@ using MechanismRows=std::vector<std::vector<std::string>>;
 // Each row is one intermediate or transition state: kind, name, S values, energies.
 MechanismRows mechanismRows(const Reaction& reaction);
 Reaction mechanismGridData(const Reaction& original,const MechanismRows& rows);
+int mechanismArrowType(const Reaction&,size_t edge);
+void setMechanismArrowType(Reaction&,size_t edge,int type);
+void arrangeCycleBranches(Reaction&,const Style&);
 void makeMechanismGraph(Reaction& reaction);
 enum class MechanismTemplate { Linear, FeedIntoCycle, SplitAndMerge, CatalyticCycle };
 Reaction mechanismTemplate(MechanismTemplate layout,int horizontal=1,int left=2,int right=1);

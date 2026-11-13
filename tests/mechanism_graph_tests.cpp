@@ -9,6 +9,36 @@
 using namespace yd;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 int main(){try{
+    {
+        auto d=mechanismDemo();auto& r=d.reactions[0];setMechanismArrowType(r,0,1);
+        auto heads=[&](const Document& doc,int edge){int n=0;for(const auto& item:makeScene(doc).items)if(item.owner==doc.reactions[0].id&&item.reactionArrow==edge&&item.type==Primitive::Polygon)++n;return n;};
+        check(heads(d,0)==2&&heads(d,1)==1,"equilibrium applies to one connection only");
+        r.arrowType=1;setMechanismArrowType(r,1,0);check(heads(d,0)==2&&heads(d,1)==1,"individual forward override works with inherited equilibrium default");
+        for(auto saved:{fromNative(toNative(d)),fromCdxml(toCdxml(d))})check(heads(saved,0)==2&&heads(saved,1)==1,"mixed arrow styles survive native and CDXML save");
+        makeMechanismGraph(r);removeMechanismConnection(r,0);check(mechanismArrowType(r,0)==0,"connection deletion remaps individual arrow style");
+    }
+    {
+        auto d=mechanismDemo();auto& r=d.reactions[0];r.cyclic=true;r.above={"TS1","TS2","TS-close"};r.below={"1","2","3"};setMechanismArrowType(r,0,1);
+        addMechanismBranch(r,0);r.slots.back().label="Outside";r.slots.back().energy="-8";r.above.back()="TS-out";r.below.back()="14.2";
+        optimizeMechanism(d,{r.id});
+        check(r.cycleStages==std::vector<int>({0,1,2})&&r.links.size()==4,"cycle branching preserves its circular backbone and closing link");
+        for(size_t edge=0;edge<3;edge++)check(mechanismLinkArc(r,edge,d.style).has_value(),"every original cycle connection remains a circular arc");
+        check(!mechanismLinkArc(r,3,d.style)&& (reactionSlot(r,3)-r.p).length()>r.cycleRadius+r.slotHeight,"new branch is placed outside the circle");
+        r.hiddenArrows={2};
+        MechanismRows rows;for(size_t i=0;i<r.slots.size();++i)rows.push_back({"구조",std::to_string(i+1),std::to_string(r.slotGrid[i].x),std::to_string(r.slotGrid[i].y),r.slots[i].label,r.slots[i].energy});
+        for(size_t i=0;i<r.links.size();++i)rows.push_back({"화살표",std::to_string(i+1),std::to_string(r.links[i].from+1),std::to_string(r.links[i].to+1),r.above[i],r.below[i]});
+        auto table=mechanismGraphData(r,rows);check(table.hiddenArrows==r.hiddenArrows&&table.cycleStages==r.cycleStages&&mechanismArrowType(table,0)==1,"editing the graph table keeps open closure, backbone and individual equilibrium settings");
+        for(auto saved:{fromNative(toNative(d)),fromCdxml(toCdxml(d))}){
+            const auto& ring=saved.reactions[0];check(ring.cycleStages==r.cycleStages&&ring.links.size()==4&&mechanismArrowType(ring,0)==1,"cycle backbone and mixed arrows round-trip");
+            bool closing=false,outside=false,label=false;int forward=0,equilibrium=0;
+            for(const auto& item:makeScene(saved).items){if(item.owner!=ring.id)continue;if(item.reactionArrow==2&&(item.type==Primitive::Polygon||item.type==Primitive::Bezier))closing=true;if(item.reactionArrow==3&&item.type==Primitive::Polygon)outside=true;if(item.text=="TS-close")label=true;if(item.type==Primitive::Polygon){if(item.reactionArrow==0)equilibrium++;if(item.reactionArrow==1)forward++;}}
+            check(!closing&&!label&&outside&&equilibrium==2&&forward==1,"open circular path omits only final arrow and its TS label, keeps outside branch");
+        }
+        auto inserted=splitMechanismLink(r,0);optimizeMechanism(d,{r.id});check(r.cycleStages.size()==4&&r.cycleStages[1]==int(inserted),"inserting an intermediate extends the cycle backbone without losing branches");
+        removeMechanismStage(d,r.id,inserted,-1,true);optimizeMechanism(d,{d.reactions[0].id});check(d.reactions[0].cycleStages.size()==3&&d.reactions[0].links.size()==4,"deleting cycle intermediate reconnects the circular backbone and keeps outside branch");
+        auto all=copyMechanismStages(d,d.reactions[0].id,{0,1,2,3});check(fromNative(toNative(all)).reactions[0].cycleStages.size()==3,"copying full branched cycle preserves backbone");
+        auto part=copyMechanismStages(d,d.reactions[0].id,{0,3});check(fromNative(toNative(part)).reactions[0].cycleStages.empty(),"copying a partial branch drops incomplete backbone references");
+    }
     // Native cycles must never be flattened by + / Delete, including the closing edge.
     for(size_t edge=0;edge<3;++edge){
         auto d=mechanismDemo();auto& r=d.reactions[0];r.cyclic=true;

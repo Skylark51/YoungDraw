@@ -332,6 +332,7 @@ void optimizeMechanism(Document& d,const std::vector<int>& selection,bool cyclic
             r.spacing=tallest+mechanismCaptionHeight(r,d.style)+2*mechanismArrowMargin(r,d.style)+mechanismArrowLength(r,d.style);
         }
         if(r.circularMerge)arrangeCircularMerge(r,d.style);
+        if(!r.cycleStages.empty())arrangeCycleBranches(r,d.style);
         for(size_t i=0;i<r.slots.size();i++)if(!r.slots[i].members.empty()){auto b=frameBounds(r.slots[i].members);d.translate(r.slots[i].members,reactionSlot(r,i)-Vec{b.x+b.w/2,b.y+b.h/2});}
         for(size_t e=0;e<r.links.size();e++){auto& l=r.links[e];if(!l.members.empty()){auto b=frameBounds(l.members);Vec mid=mechanismLinkCaption(r,e,d.style);d.translate(l.members,mid-Vec{0,mechanismFontSize(r,d.style)*3+b.h/2}-Vec{b.x+b.w/2,b.y+b.h/2});}}
     }
@@ -809,7 +810,7 @@ Document mechanismGuide(){
         guide.append(sample);y+=bounds.h+76;
     };
     panel("1 · 직선형 메커니즘", "단계의 아래 +로 앞쪽 반응에서도 분기할 수 있습니다. TS 연결 선택 → 중간체 삽입으로 단계를 넣습니다.\n그림 영역 더블클릭 → 구조 그리기 · 붙여넣기 / 파일 넣기: 구조 입력\n화살표 클릭 → Del: 연결 삭제 · 그림 영역 클릭 → Del: 단계 제거 · Ctrl+Z: 되돌리기",mechanismDemo());
-    panel("2 · 촉매 순환", "배치에서 촉매 순환을 선택할 수 있습니다. 이름과 에너지는 더블클릭으로 수정하세요.\n그림 영역을 선택한 뒤 붙여넣기 또는 파일로 채움으로 구조를 교체할 수 있습니다. (일반적인 설명용 예제)",catalyticCycleDemo());
+    panel("2 · 촉매 순환", "그림 영역 선택 → 분기 추가: 원 밖으로 새 경로를 만듭니다. 이름·에너지는 F2로 수정합니다.\n마지막 → 처음 연결을 끄면 열린 원형 경로가 됩니다. 화살표 클릭 → 모양: 선택한 연결만 평형으로 변경",catalyticCycleDemo());
     for(auto layout:{MechanismTemplate::FeedIntoCycle,MechanismTemplate::SplitAndMerge}){
         Document sample;auto r=mechanismTemplate(layout);r.id=sample.nextId++;r.p={0,0};sample.reactions.push_back(r);
         for(size_t i=0;i<r.slots.size();++i)fillSlot(sample,demo(),r.id,i);optimizeMechanism(sample,{r.id});

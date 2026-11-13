@@ -147,7 +147,42 @@ bool arrangeCircularMerge(Reaction& r,const Style& style){
     return true;
 }
 
+int mechanismArrowType(const Reaction& r,size_t edge){return edge<r.arrowTypes.size()&&r.arrowTypes[edge]>=0?r.arrowTypes[edge]:r.arrowType;}
+void setMechanismArrowType(Reaction& r,size_t edge,int type){
+    const size_t count=r.explicitConnections()?r.links.size():r.slots.empty()?0:r.slots.size()-(r.cyclic?0:1);
+    if(edge>=count||type<0||type>1)throw std::runtime_error("화살표를 선택하세요.");
+    r.arrowTypes.resize(count,-1);r.arrowTypes[edge]=type;
+}
+void arrangeCycleBranches(Reaction& r,const Style& style){
+    if(r.cycleStages.size()<2)return;
+    Reaction ring=r;ring.slots.clear();for(int stage:r.cycleStages)ring.slots.push_back(r.slots.at(size_t(stage)));
+    ring.cyclic=true;ring.links.clear();ring.manualConnections=false;ring.slotGrid.clear();
+    r.cycleRadius=mechanismCycleRadius(ring,style);r.fixedFrames=true;
+    const double pitch=r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80);
+    std::vector<Vec> positions(r.slots.size());std::set<int> placed;
+    for(size_t i=0;i<r.cycleStages.size();++i){int stage=r.cycleStages[i];double angle=-pi/2+2*pi*i/r.cycleStages.size();positions[stage]=Vec{std::cos(angle),std::sin(angle)}*r.cycleRadius;placed.insert(stage);}
+    const double gap=std::max(r.spacing,pitch+mechanismCaptionHeight(r,style)+50);
+    for(size_t pass=0;pass<r.slots.size();++pass){bool changed=false;
+        for(const auto& link:r.links)if(link.from>=0&&placed.count(link.from)&&!placed.count(link.to)){
+            auto parent=positions[link.from];double angle=parent.x<-.01?pi:0;Vec candidate;
+            for(int attempt=0;attempt<40;++attempt){double offset=(attempt%2?1.:-1.)*double((attempt+1)/2)*pi/10;
+                candidate=parent+Vec{std::cos(angle+offset),std::sin(angle+offset)}*(gap*(1+attempt/12));
+                if(std::none_of(placed.begin(),placed.end(),[&](int stage){auto delta=candidate-positions[stage];return std::abs(delta.x)<r.slotWidth+mechanismArrowMargin(r,style)*2&&std::abs(delta.y)<pitch;}))break;
+            }
+            positions[link.to]=candidate;placed.insert(link.to);changed=true;
+        }if(!changed)break;
+    }
+    r.slotGrid.resize(r.slots.size());for(int stage:placed)r.slotGrid[stage]={positions[stage].x/r.spacing,positions[stage].y/pitch};
+}
 std::optional<MechanismArc> mechanismLinkArc(const Reaction& r,size_t index,const Style& style){
+    if(!r.cycleStages.empty()){
+        const auto& link=r.links.at(index);auto from=std::find(r.cycleStages.begin(),r.cycleStages.end(),link.from);
+        if(from!=r.cycleStages.end()&&r.cycleStages[(size_t(from-r.cycleStages.begin())+1)%r.cycleStages.size()]==link.to){
+            const double start=-pi/2+2*pi*double(from-r.cycleStages.begin())/r.cycleStages.size(),step=2*pi/r.cycleStages.size();
+            double trim=std::asin(std::min(.95,(mechanismCycleNodeRadius(r,style)+mechanismFontSize(r,style)*.5)/std::max(1.,r.cycleRadius)));
+            trim=std::min(trim,step*.45);return MechanismArc{r.p,r.cycleRadius,start+trim,start+step-trim};
+        }
+    }
     const auto paths=circularMergePaths(r);
     if(!paths)return {};
     const auto& link=r.links.at(index);
@@ -194,6 +229,7 @@ size_t splitMechanismLink(Reaction& r,size_t edge){
         result.above.resize(count);result.below.resize(count);
         result.above.insert(result.above.begin()+stage,"TS"+std::to_string(count+1));
         result.below.insert(result.below.begin()+stage,"");
+        result.arrowTypes.resize(count,-1);result.arrowTypes.insert(result.arrowTypes.begin()+stage,-1);
         for(auto& c:result.captionColors)if((c.role==1||c.role==9)?c.index>=int(stage):c.index>int(edge))++c.index;
         for(auto& c:result.crosses)if(c.index>int(edge))++c.index;
         for(auto& hidden:result.hiddenArrows)if(hidden>int(edge))++hidden;
@@ -204,24 +240,27 @@ size_t splitMechanismLink(Reaction& r,size_t edge){
     const size_t stage=result.slots.size();
     result.slots.push_back({"Intermediate "+std::to_string(stage+1),{}});
     result.slotGrid.push_back((result.slotGrid.at(link.from)+result.slotGrid.at(link.to))*.5);
+    auto ringFrom=std::find(result.cycleStages.begin(),result.cycleStages.end(),link.from);
+    if(ringFrom!=result.cycleStages.end()&&result.cycleStages[(size_t(ringFrom-result.cycleStages.begin())+1)%result.cycleStages.size()]==link.to)result.cycleStages.insert(ringFrom+1,int(stage));
     result.links[edge].to=int(stage);
     result.links.push_back({int(stage),link.to,{},link.bend});
     result.above.resize(result.links.size());result.below.resize(result.links.size());
-    result.above.back()="TS"+std::to_string(result.links.size());
+    result.above.back()="TS"+std::to_string(result.links.size());result.arrowTypes.resize(result.links.size(),-1);
     r=std::move(result);return stage;
 }
 
 void makeMechanismGraph(Reaction& r){
     if(r.explicitConnections()){r.manualConnections=true;return;}
+    if(r.cyclic){r.cycleStages.resize(r.slots.size());std::iota(r.cycleStages.begin(),r.cycleStages.end(),0);r.fixedFrames=true;}
     std::vector<Vec> frames;double pitch=r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80);
     for(size_t i=0;i<r.slots.size();i++){auto p=reactionSlot(r,i)-r.p;frames.push_back({p.x/r.spacing,p.y/pitch});}
     for(size_t i=0;i<r.slots.size();i++)if(i+1<r.slots.size()||r.cyclic)r.links.push_back({int(i),int((i+1)%r.slots.size()),{}});
     r.slotGrid=std::move(frames);r.manualConnections=true;r.cyclic=false;r.vertical=false;r.wrapColumns=0;
 }
 static void remapEdges(Reaction& r,const std::vector<int>& keep){
-    auto before=r;r.links.clear();r.above.clear();r.below.clear();r.hiddenArrows.clear();r.crosses.clear();
+    auto before=r;r.links.clear();r.above.clear();r.below.clear();r.hiddenArrows.clear();r.crosses.clear();r.arrowTypes.clear();
     r.captionColors.erase(std::remove_if(r.captionColors.begin(),r.captionColors.end(),[](const CaptionColor& c){return c.role==2||c.role==3||c.role==11;}),r.captionColors.end());
-    for(size_t n=0;n<keep.size();n++){size_t old=size_t(keep[n]);r.links.push_back(before.links.at(old));r.above.push_back(old<before.above.size()?before.above[old]:"");r.below.push_back(old<before.below.size()?before.below[old]:"");
+    for(size_t n=0;n<keep.size();n++){size_t old=size_t(keep[n]);r.links.push_back(before.links.at(old));r.arrowTypes.push_back(old<before.arrowTypes.size()?before.arrowTypes[old]:-1);r.above.push_back(old<before.above.size()?before.above[old]:"");r.below.push_back(old<before.below.size()?before.below[old]:"");
         if(std::find(before.hiddenArrows.begin(),before.hiddenArrows.end(),int(old))!=before.hiddenArrows.end())r.hiddenArrows.push_back(int(n));
         for(auto mark:before.crosses)if(mark.index==int(old)){mark.index=int(n);r.crosses.push_back(mark);}
         for(auto color:before.captionColors)if((color.role==2||color.role==3||color.role==11)&&color.index==int(old)){color.index=int(n);r.captionColors.push_back(color);}
@@ -245,6 +284,7 @@ Document copyMechanismStages(const Document& document,int owner,const std::set<s
         stageMap[i]=int(r.slots.size());
         r.slots.push_back(original.slots[i]);
     }
+    r.cycleStages.clear();if(std::all_of(original.cycleStages.begin(),original.cycleStages.end(),[&](int node){return stages.count(size_t(node));}))for(int node:original.cycleStages)r.cycleStages.push_back(stageMap.at(size_t(node)));
     // Keep the copied molecules aligned with the frames even if caption height changes.
     const double pitch=r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80);
     for(size_t i:stages){
@@ -306,6 +346,7 @@ void insertMechanismStage(Reaction& r,size_t before){
     for(size_t i=before;i<r.slotGrid.size();i++)r.slotGrid[i].x++;
     for(auto& link:r.links){if(link.from>=int(before))link.from++;if(link.to>=int(before))link.to++;}
     for(auto& c:r.captionColors)if((c.role==1||c.role==9)&&c.index>=int(before))c.index++;
+    for(auto& stage:r.cycleStages)if(stage>=int(before))++stage;
     r.slots.insert(r.slots.begin()+before,Slot{});r.slotGrid.insert(r.slotGrid.begin()+before,p);
     if(before+1<r.slots.size()){for(auto& link:r.links)if(link.to==int(before)+1)link.to=int(before);connectMechanismStages(r,int(before),int(before)+1);}
     else if(before>0)connectMechanismStages(r,int(before)-1,int(before));
@@ -316,6 +357,11 @@ void removeMechanismStage(Document& d,int owner,size_t stage,int mergeInto,bool 
     if(mergeInto>=int(r->slots.size())||mergeInto==int(stage))throw std::runtime_error("합칠 다른 단계를 지정하세요.");
     const Reaction original=*r;const bool keepCycle=r->cyclic&&!r->explicitConnections()&&mergeInto<0;
     makeMechanismGraph(*r);auto members=r->slots[stage].members;
+    if(mergeInto<0&&!keepCycle&&r->cycleStages.size()>2){auto node=std::find(r->cycleStages.begin(),r->cycleStages.end(),int(stage));if(node!=r->cycleStages.end()){
+        auto index=size_t(node-r->cycleStages.begin()),n=r->cycleStages.size();int before=r->cycleStages[(index+n-1)%n],after=r->cycleStages[(index+1)%n];
+        bool outgoing=std::any_of(r->links.begin(),r->links.end(),[&](auto& link){return link.from==int(stage)&&link.to==after;});
+        if(outgoing)for(auto& link:r->links)if(link.from==before&&link.to==int(stage))link.to=after;
+    }}
     if(mergeInto<0&&circularMergePaths(*r)){
         auto incoming=std::find_if(r->links.begin(),r->links.end(),[=](const MechanismLink& l){return l.to==int(stage);});
         auto outgoing=std::find_if(r->links.begin(),r->links.end(),[=](const MechanismLink& l){return l.from==int(stage);});
@@ -332,11 +378,12 @@ void removeMechanismStage(Document& d,int owner,size_t stage,int mergeInto,bool 
         if(link.from==link.to||!pairs.insert({link.from,link.to}).second)continue;keep.push_back(int(i));}
     remapEdges(*r,keep);
     for(auto& link:r->links){if(link.from>int(stage))link.from--;if(link.to>int(stage))link.to--;}
+    r->cycleStages.erase(std::remove(r->cycleStages.begin(),r->cycleStages.end(),int(stage)),r->cycleStages.end());for(auto& node:r->cycleStages)if(node>int(stage))--node;if(r->cycleStages.size()<2)r->cycleStages.clear();
     r->slots.erase(r->slots.begin()+stage);r->slotGrid.erase(r->slotGrid.begin()+stage);
     r->captionColors.erase(std::remove_if(r->captionColors.begin(),r->captionColors.end(),[&](const CaptionColor& c){return (c.role==1||c.role==9)&&c.index==int(stage);}),r->captionColors.end());
     for(auto& c:r->captionColors)if((c.role==1||c.role==9)&&c.index>int(stage))c.index--;
     if(keepCycle&&!r->slots.empty()){
-        r->cyclic=true;r->manualConnections=false;r->fixedFrames=false;r->links.clear();r->slotGrid.clear();
+        r->cyclic=true;r->cycleStages.clear();r->arrowTypes=original.arrowTypes;if(stage<r->arrowTypes.size())r->arrowTypes.erase(r->arrowTypes.begin()+stage);r->manualConnections=false;r->fixedFrames=false;r->links.clear();r->slotGrid.clear();
         r->above=original.above;r->below=original.below;
         r->above.resize(original.slots.size());r->below.resize(original.slots.size());
         r->above.erase(r->above.begin()+stage);r->below.erase(r->below.begin()+stage);
@@ -399,7 +446,7 @@ void arrangeMechanismGraph(Reaction& r){
     }
 }
 Reaction mechanismGraphData(const Reaction& original,const MechanismRows& rows){
-    Reaction result=original;makeMechanismGraph(result);auto base=result;result.slots.clear();result.slotGrid.clear();result.links.clear();result.above.clear();result.below.clear();result.hiddenArrows.clear();result.crosses.clear();result.captionColors.clear();
+    Reaction result=original;makeMechanismGraph(result);auto base=result;result.slots.clear();result.slotGrid.clear();result.links.clear();result.above.clear();result.below.clear();result.hiddenArrows.clear();result.crosses.clear();result.captionColors.clear();result.arrowTypes.clear();result.cycleStages.clear();
     std::map<int,int> states,edgeMap;std::set<int> usedEdges;
     auto integer=[](const std::string& s,int min,int max){size_t n=0;int v=std::stoi(s,&n);if(n!=s.size()||v<min||v>max)throw std::runtime_error("올바른 단계·연결 번호를 입력하세요.");return v;};
     auto decimal=[](const std::string& s,double limit){
@@ -423,9 +470,10 @@ Reaction mechanismGraphData(const Reaction& original,const MechanismRows& rows){
         MechanismLink l{a,b,{}};int old=row[1].empty()?-1:integer(row[1],1,int(base.links.size()))-1;
         if(old>=0){if(!usedEdges.insert(old).second)throw std::runtime_error("복제한 새 화살표의 번호는 비워 두세요.");l.members=base.links[size_t(old)].members;l.bend=base.links[size_t(old)].bend;}
         if(row.size()==7)l.bend=row[6].empty()?0:decimal(row[6],2);
-        result.links.push_back(l);result.above.push_back(row[4]);result.below.push_back(row[5]);if(result.links.size()>100)throw std::runtime_error("화살표 연결은 최대 100개입니다.");if(old>=0)edgeMap[old]=int(result.links.size()-1);
+        result.links.push_back(l);result.arrowTypes.push_back(old>=0?mechanismArrowType(base,size_t(old)):-1);result.above.push_back(row[4]);result.below.push_back(row[5]);if(result.links.size()>100)throw std::runtime_error("화살표 연결은 최대 100개입니다.");if(old>=0){edgeMap[old]=int(result.links.size()-1);if(std::find(base.hiddenArrows.begin(),base.hiddenArrows.end(),old)!=base.hiddenArrows.end())result.hiddenArrows.push_back(int(result.links.size()-1));}
         if(old>=0)for(auto mark:base.crosses)if(mark.index==old){mark.index=int(result.links.size()-1);result.crosses.push_back(mark);}
     }
+    for(int stage:base.cycleStages){if(!states.count(stage+1)){result.cycleStages.clear();break;}result.cycleStages.push_back(states[stage+1]);}
     for(auto c:base.captionColors){if((c.role==1||c.role==9)&&states.count(c.index+1)){c.index=states[c.index+1];result.captionColors.push_back(c);}else if((c.role==2||c.role==3||c.role==11)&&edgeMap.count(c.index)){c.index=edgeMap[c.index];result.captionColors.push_back(c);}else if(c.role==10)result.captionColors.push_back(c);}
     return result;
 }

@@ -211,11 +211,13 @@ std::vector<int> addBranchArrows(Document& d,Vec top,double height,double length
     Group group;group.id=d.nextId++;group.members=ids;d.groups.push_back(group);return ids;
 }
 void addMechanismBranch(Reaction& r,size_t source){
-    if(r.cyclic||r.vertical)throw std::runtime_error("분기는 가로 메커니즘에서 추가하세요.");
+    if(r.vertical)throw std::runtime_error("가로 또는 원형 배치에서 분기할 수 있습니다.");
     if(source>=r.slots.size()||r.slots.size()>=40)throw std::runtime_error("분기 시작 단계와 최대 40칸을 확인하세요.");
+    if(r.cyclic)makeMechanismGraph(r);
     if(!r.explicitConnections()){
         for(size_t i=0;i<r.slots.size();i++){Vec p=reactionSlot(r,i)-r.p;r.slotGrid.push_back({p.x/r.spacing,p.y/(r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80))});if(i)r.links.push_back({int(i)-1,int(i),{}});}
     }
+    r.above.resize(r.links.size());r.below.resize(r.links.size());
     Vec p=r.slotGrid.at(source)+Vec{1,1};bool occupied=true;while(occupied){occupied=false;for(auto q:r.slotGrid)if((p-q).length()<.5){p.y++;occupied=true;break;}}
     r.links.push_back({int(source),int(r.slots.size()),{}});r.slotGrid.push_back(p);r.slots.push_back({"",{},""});r.above.push_back("");r.below.push_back("");
 }
