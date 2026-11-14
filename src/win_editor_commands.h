@@ -13,6 +13,7 @@ inline constexpr int abbreviateGroupsCommand = 226;
 inline constexpr int mullikenSpinCommand = 227;
 inline constexpr int spinMultiplicityPlotCommand = 228;
 inline constexpr int dottedBondCommand = 229;
+inline constexpr int thirdPartyNoticesCommand = 234;
 
 void command(int id);
 

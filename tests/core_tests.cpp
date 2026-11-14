@@ -146,7 +146,7 @@ int main(){try{
   std::vector<int> aryl;for(Vec p:std::vector<Vec>{{140,71},{177,71},{195,100},{176,130},{140,130},{122,100}})aryl.push_back(d.addAtom(p));
   for(int i=0;i<6;i++)d.addBond(aryl[i],aryl[(i+1)%6],i%2?BondKind::Single:BondKind::Double);d.addBond(side,aryl[0]);
   auto original=d;auto report=cleanStructure(d);auto scene=makeScene(d);auto a=scene.objectBounds.at(co),b=scene.objectBounds.at(h);
-  check(report.protectedComponents==1,"reject the reported open-chain rearrangement that stacks LCo and OH");
+  check(report.protectedComponents==0,"bond-flip refinement rescues the reported open-chain LCo/OH collision");
   check(std::min(a.x+a.w,b.x+b.w)<=std::max(a.x,b.x)||std::min(a.y+a.h,b.y+b.h)<=std::max(a.y,b.y),"open colored chain never overlaps LCo oxidation label with OH hydrogen");
   if(report.protectedComponents){for(auto& atom:original.atoms)check((d.atom(atom.id)->p-atom.p).length()<1e-8,"collision rejection restores the complete original projection");}
   auto stable=d;cleanStructure(d);for(auto& atom:stable.atoms)check((d.atom(atom.id)->p-atom.p).length()<1e-5,"collision-aware open-chain cleanup is stable");

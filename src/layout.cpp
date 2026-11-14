@@ -3,6 +3,7 @@
 #include "plot_data.h"
 #include "scene.h"
 #include "mechanism_data.h"
+#include "layout_refine.h"
 #include <map>
 #include <queue>
 #include <numeric>
@@ -690,7 +691,7 @@ static CleanupReport cleanStructureCandidate(Document& d,const std::vector<int>&
 }
 // Validate the rendered labels, including oxidation superscripts and manually
 // offset text. Atom-centre repulsion alone cannot detect LCo/H overlaps.
-static std::set<std::pair<int,int>> cleanupCollisions(const Document& d){
+detail::LayoutCollisions detail::layoutCollisions(const Document& d){
     auto scene=makeScene(d);std::set<std::pair<int,int>> result;
     auto overlaps=[](Rect a,Rect b){return std::min(a.x+a.w,b.x+b.w)-std::max(a.x,b.x)>.5&&std::min(a.y+a.h,b.y+b.h)-std::max(a.y,b.y)>.5;};
     for(size_t i=0;i<d.atoms.size();i++)for(size_t j=i+1;j<d.atoms.size();j++){
@@ -719,9 +720,45 @@ static std::set<std::pair<int,int>> cleanupCollisions(const Document& d){
     }
     return result;
 }
+// A bond reflection changes the drawing's branch directions, not its local
+// geometry. If an already tidy drawing is no worse than the new candidate,
+// retain its orientation instead of walking through equivalent conformations
+// on repeated cleanup.
+static bool sameCleanupGeometry(const Document& a,const Document& b,const std::vector<int>& comp){
+    std::map<int,std::vector<int>> neighbors;
+    for(const auto& edge:a.bonds)if(has(comp,edge.a)){
+        const double first=(a.atom(edge.a)->p-a.atom(edge.b)->p).length();
+        const double second=(b.atom(edge.a)->p-b.atom(edge.b)->p).length();
+        if(std::abs(first-second)>1e-5)return false;
+        neighbors[edge.a].push_back(edge.b);neighbors[edge.b].push_back(edge.a);
+    }
+    for(const auto& entry:neighbors)for(size_t i=0;i<entry.second.size();++i)for(size_t j=0;j<i;++j){
+        auto cosine=[&](const Document& d){Vec u=d.atom(entry.second[i])->p-d.atom(entry.first)->p,v=d.atom(entry.second[j])->p-d.atom(entry.first)->p;
+            const double product=u.length()*v.length();return product<1e-8?2.:(u.x*v.x+u.y*v.y)/product;};
+        if(std::abs(cosine(a)-cosine(b))>1e-6)return false;
+    }
+    return true;
+}
 CleanupReport cleanStructure(Document& d,const std::vector<int>& selection,bool preserveProjection,bool useReferences){
-    Document original=d;auto before=cleanupCollisions(original);std::set<int> referenceSeeds;auto report=cleanStructureCandidate(d,selection,preserveProjection,useReferences,referenceSeeds);
-    auto after=cleanupCollisions(d);std::set<int> rejected;
+    Document original=d;auto before=detail::layoutCollisions(original);std::set<int> referenceSeeds;auto report=cleanStructureCandidate(d,selection,preserveProjection,useReferences,referenceSeeds);
+    if(!preserveProjection){
+        std::set<int> visited;
+        for(const auto& atom:d.atoms){
+            if(visited.count(atom.id))continue;
+            auto comp=d.component(atom.id);visited.insert(comp.begin(),comp.end());
+            // Refine only changed candidates, preserving unselected molecules and
+            // explicit reference-template geometry exactly.
+            if(std::any_of(comp.begin(),comp.end(),[&](int id){return referenceSeeds.count(id)>0;}))continue;
+            if(!std::any_of(comp.begin(),comp.end(),[&](int id){return (d.atom(id)->p-original.atom(id)->p).length()>.001;}))continue;
+            detail::refineLayoutCollisions(d,comp,before);
+            if(sameCleanupGeometry(original,d,comp)){
+                std::set<int> owners(comp.begin(),comp.end());for(const auto& b:d.bonds)if(owners.count(b.a))owners.insert(b.id);
+                auto count=[&](const detail::LayoutCollisions& collisions){return std::count_if(collisions.begin(),collisions.end(),[&](const auto& p){return owners.count(p.first)||owners.count(p.second);});};
+                if(count(before)<=count(detail::layoutCollisions(d)))for(int id:comp)*d.atom(id)=*original.atom(id);
+            }
+        }
+    }
+    auto after=detail::layoutCollisions(d);std::set<int> rejected;
     for(auto pair:after)if(!before.count(pair))for(int id:{pair.first,pair.second}){
         int seed=d.atom(id)?id:d.bond(id)?d.bond(id)->a:0;if(!seed)continue;
         auto comp=d.component(seed);rejected.insert(comp.begin(),comp.end());
@@ -757,7 +794,7 @@ CleanupReport cleanSelectedStructure(Document& d,const std::vector<int>& selecti
         for(auto& atom:fragment.atoms){auto p=atom.p-newCenter;atom.p=oldCenter+Vec{cosine*p.x-sine*p.y,sine*p.x+cosine*p.y};if(anchors.count(atom.id))atom.p=d.atom(atom.id)->p;}
     }
     Document candidate=d;for(auto& atom:fragment.atoms)*candidate.atom(atom.id)=atom;
-    auto before=cleanupCollisions(d),after=cleanupCollisions(candidate);
+    auto before=detail::layoutCollisions(d),after=detail::layoutCollisions(candidate);
     for(const auto& collision:after)if(!before.count(collision)){report.protectedComponents++;return report;}
     d=std::move(candidate);return report;
 }
