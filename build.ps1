@@ -25,7 +25,7 @@ try {
     if ($LASTEXITCODE) { throw 'Build failed' }
     if ($HeadlessTests) {
         # Only console tests: omit editor, dialog, theme and Office UI coverage.
-        ctest --test-dir $outputDir --output-on-failure -R '^(core_tests|layout_refinement|atomic_file_save|mechanism_regression|mechanism_editing|mechanism_graph_editing|cdx_import|plot_layout|november_complex_graphs)$'
+        ctest --test-dir $outputDir --output-on-failure -R '^(core_tests|layout_refinement|atomic_file_save|mechanism_regression|mechanism_editing|mechanism_graph_editing|cdx_import|plot_layout|november_complex_graphs|office_storage_roundtrip)$'
     } else {
         ctest --test-dir $outputDir --output-on-failure
     }
