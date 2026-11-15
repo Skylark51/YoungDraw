@@ -42,6 +42,16 @@ int main(){try{
         auto xml=toCdxml(d);auto start=xml.rfind("<annotation");xml.erase(start,xml.find("/>",start)-start+2);
         auto restored=fromCdxml(xml);check(restored.objects.size()==1&&restored.objects[0].id==1,"retained scheme container cannot collide with editable arrow identity");
     }
+    {
+        auto d=fromCdxml("<CDXML><page id='1'><curve id='2' CurvePoints='0 0 0 0 30 70 70 70 100 0 100 0' ArrowHeadHead='Full' ArrowHeadTail='Full'/></page></CDXML>");
+        check(d.objects.size()==1&&d.objects[0].head==3,"both curve arrowheads import");
+        auto parts=arrowPrimitives(d.objects[0]);
+        check(parts.size()==3&&parts[0].type==Primitive::Bezier,"double-headed curve is not flattened");
+        check(parts[1].points[0].x==0&&parts[2].points[0].x==100,"curved arrowheads retain both original tips");
+        auto xml=toCdxml(d);auto start=xml.rfind("<annotation");xml.erase(start,xml.find("/>",start)-start+2);
+        auto visible=fromCdxml(xml);check(visible.objects.size()==1&&visible.objects[0].head==3&&visible.objects[0].kind==ObjectKind::Curve,"external CDXML retains double-headed curve");
+        check(visible.objects[0].points.size()==4&&visible.objects[0].points[1].y==70,"external curved arrow retains Bezier controls");
+    }
     auto document=mechanismDemo();auto original=document.reactions[0];auto rows=mechanismRows(original);
     check(rows.size()==5&&rows[0][0]=="중간체"&&rows[1][0]=="TS"&&rows[2][0]=="중간체","rows explicitly distinguish intermediates and transition states");
     rows[0]={"중간체","Reactant","0 / 2","-3.0 / 4.4"};

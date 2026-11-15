@@ -54,7 +54,16 @@ std::vector<Vec> routeArrow(const Document& d,const Object& o,const std::map<int
     }
     return std::vector<Vec>(best.begin(),best.end());
 }
-std::vector<Primitive> arrowPrimitives(const Object& o){
+static std::vector<Primitive> arrowParts(const Object& o,double maxHeadFraction){
+    if(o.head==3&&o.kind==ObjectKind::Curve&&o.points.size()>=4&&(o.points.size()-1)%3==0){
+        Object forward=o;forward.head=1;auto right=arrowParts(forward,.35);
+        if(right.size()!=2)return {};
+        Object reverse=forward;std::reverse(reverse.points.begin(),reverse.points.end());auto left=arrowParts(reverse,.35);
+        reverse.points=right[0].points;std::reverse(reverse.points.begin(),reverse.points.end());auto middle=arrowParts(reverse,.35/.65);
+        if(left.size()!=2||middle.size()!=2)return {};
+        auto shaft=middle[0];std::reverse(shaft.points.begin(),shaft.points.end());shaft.flatStart=true;
+        return {shaft,left[1],right[1]};
+    }
     if(o.head==3&&o.points.size()>=2){
         Vec a=o.points.front(),b=o.points.back(),v=b-a;double len=v.length();if(len<1e-6)return {};Vec u=v*(1/len),n{-u.y,u.x};double h=std::min(std::max(6.,o.width*3.5),len*.35),w=h*.5;
         Primitive shaft;shaft.owner=o.id;shaft.width=o.width;shaft.color=o.color;shaft.dash=o.dash;shaft.flatEnd=true;shaft.points={a+u*h,b-u*h};
@@ -63,7 +72,7 @@ std::vector<Primitive> arrowPrimitives(const Object& o){
     if(o.points.size()<2||!o.head)return {};std::vector<Vec> points=o.points;bool curved=o.kind==ObjectKind::Curve&&points.size()>=4&&(points.size()-1)%3==0;Vec tip=points.back();double total=0;
     if(curved)for(size_t i=0;i+3<points.size();i+=3){Cubic c{points[i],points[i+1],points[i+2],points[i+3]};Vec prev=c[0];for(int j=1;j<=64;j++){Vec p=at(c,j/64.);total+=(p-prev).length();prev=p;}}
     else for(size_t i=1;i<points.size();i++)total+=(points[i]-points[i-1]).length();
-    if(total<1e-6)return {};double headLength=std::min(std::max(6.,o.width*3.5),total*.6),remaining=headLength;
+    if(total<1e-6)return {};double headLength=std::min(std::max(6.,o.width*3.5),total*maxHeadFraction),remaining=headLength;
     if(o.head==2){
         // A fishhook is a continuous shaft and one stroked barb. Align the
         // barb with the endpoint tangent, rather than a chord of the curve.
@@ -88,6 +97,7 @@ std::vector<Primitive> arrowPrimitives(const Object& o){
     Primitive head;head.owner=o.id;head.type=Primitive::Polygon;head.color=o.color;head.filled=true;head.points={tip,base+normal*halfWidth,base-normal*halfWidth};
     return {shaft,head};
 }
+std::vector<Primitive> arrowPrimitives(const Object& o){return arrowParts(o,.6);}
 void appendArrowCross(std::vector<Primitive>& items,const std::vector<Primitive>& shaft,const ArrowCross& mark,int owner){
     if(!mark.enabled)return;
     std::vector<std::pair<Vec,Vec>> segments;double length=0;
