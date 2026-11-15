@@ -114,3 +114,30 @@ CDXML 곡선과 원호의 양끝 Full 화살촉을 인식하도록 보완했다.
 메타데이터 없는 재가져오기에서 양끝 위치·곡선 제어점·양방향 종류를 검사한다.
 
 백그라운드 CTest 10/10, 기존 연구 파일 26개 검사도 통과했다.
+
+## 실제 PowerPoint 백그라운드 저장 검증
+
+설치된 PowerPoint에서 `Presentations.Add(0)` 및 `Presentations.Open(...,0)`으로
+문서 창을 만들지 않고 6개 슬라이드의 저장·재개방·재저장을 실행했다.
+PowerPoint가 만든 EMF 슬라이드에 기존 OLE 원본을 Open XML 개체로 연결하고,
+실제 PowerPoint에서 다시 저장한 PPTX의 6개 `YoungDrawDocument` 스트림 SHA-256이
+입력 원본들과 일치하는지 확인했다. OLE 표시 캐시와 EMF 미리보기도 남아 있다.
+검증 산출물은 `build/powerpoint-background`에 둔다.
+
+재현: 먼저 빌드의 `office_storage_roundtrip`을 실행해 자료를 생성하고 다음을 실행한다.
+Python의 `olefile` 패키지와 Windows PowerPoint가 필요하다.
+
+```powershell
+./tools/test-powerpoint-background.ps1 -Stage Prepare
+python tools/verify-powerpoint-package.py prepare
+./tools/test-powerpoint-background.ps1 -Stage Reopen
+python tools/verify-powerpoint-package.py
+```
+
+이미 실행 중인 PowerPoint가 있으면 기본적으로 중단하여 사용자 세션을 보호한다.
+시험 프로세스 재사용 옵션은 해당 프로세스의 문서와 창이 모두 없는지도 검사한다.
+
+검증 범위는 실제 PowerPoint 저장 후 원본·벡터 표시의 보존이다.
+창 없는 문서에서는 PowerPoint OLE 붙여넣기가 거부되어 통과로 집계하지 않았다.
+직접 OLE 파일 삽입도 지원되지 않았다. 더블클릭 편집은 창을 표시하므로 이번
+백그라운드 검사에는 포함하지 않았다. 최종 스크립트는 클립보드를 사용하지 않는다.
