@@ -103,7 +103,7 @@ Document fromCdxml(const std::string& input){X root=parse(input);if(root.tag=="Y
  if((x.tag=="graphic"||x.tag=="arrow"||x.tag=="curve"||x.tag=="embeddedobject")&&!x.a.count("SupersededBy")){Object o;o.id=id?id:d.nextId++;o.width=number(get(x,"LineWidth"),d.style.lineWidth);o.color=color(x);o.filled=get(x,"FillType")=="Solid"||get(x,"OvalType").find("Solid")!=std::string::npos||get(x,"RectangleType").find("Solid")!=std::string::npos;bool supported=true;
  if(x.tag=="embeddedobject"){o.kind=ObjectKind::Image;o.points=points(get(x,"BoundingBox"));for(auto pair:std::vector<std::pair<std::string,std::string>>{{"PNG","image/png"},{"JPEG","image/jpeg"},{"GIF","image/gif"},{"BMP","image/bmp"},{"TIFF","image/tiff"}})if(x.a.count(pair.first)){o.imageHex=get(x,pair.first);o.mime=pair.second;break;}supported=!o.imageHex.empty();}
  else if(x.tag=="curve"){o.kind=ObjectKind::Curve;o.points=points(get(x,"CurvePoints"));if(o.points.size()%3==0&&o.points.size()>=6){o.points.erase(o.points.begin());o.points.pop_back();}supported=o.points.size()>=4&&(o.points.size()-1)%3==0;auto head=get(x,"ArrowheadHead",get(x,"ArrowHeadHead"));o.head=head=="Full"?1:head.find("Half")!=std::string::npos?2:0;o.dash=get(x,"CurveType").find("Dash")!=std::string::npos?1:0;o.closed=get(x,"Closed")=="yes"||get(x,"CurveType").find("Closed")!=std::string::npos;o.filled=o.filled||get(x,"CurveType").find("Filled")!=std::string::npos;}
- else if(x.tag=="arrow"){Vec a=pos(x,"Tail3D"),b=pos(x,"Head3D");double angle=number(get(x,"AngularSize"));o.head=get(x,"ArrowheadHead")=="Full"?1:get(x,"ArrowheadHead").find("Half")!=std::string::npos?2:0;
+ else if(x.tag=="arrow"){Vec a=pos(x,"Tail3D"),b=pos(x,"Head3D");double angle=number(get(x,"AngularSize"));auto head=get(x,"ArrowheadHead",get(x,"ArrowHeadHead"));o.head=head=="Full"?1:head.find("Half")!=std::string::npos?2:0;o.dash=get(x,"LineType").find("Dash")!=std::string::npos?1:0;if(o.head==1&&get(x,"ArrowheadTail",get(x,"ArrowHeadTail"))=="Full"&&std::abs(angle)<.01)o.head=3;
  if(std::abs(angle)>.01&&x.a.count("Center3D")){Vec c=pos(x,"Center3D"),u=pos(x,"MajorAxisEnd3D")-c,v=pos(x,"MinorAxisEnd3D")-c;double det=u.x*v.y-u.y*v.x;if(std::abs(det)<1e-8){o.points={a,b};}else{Vec q=a-c;double theta=std::atan2((u.x*q.y-u.y*q.x)/det,(q.x*v.y-q.y*v.x)/det),sweep=angle*pi/180;auto at=[&](double t){return c+u*std::cos(t)+v*std::sin(t);};if((at(theta+sweep)-b).length()>(at(theta-sweep)-b).length())sweep=-sweep;int count=std::max(1,int(std::ceil(std::abs(sweep)/(pi/2))));o.kind=ObjectKind::Curve;o.points={a};for(int i=0;i<count;i++){double t=theta+sweep*i/count,z=theta+sweep*(i+1)/count,k=4./3*std::tan((z-t)/4);Vec da=u*(-std::sin(t))+v*std::cos(t),db=u*(-std::sin(z))+v*std::cos(z);o.points.push_back(at(t)+da*k);o.points.push_back(at(z)-db*k);o.points.push_back(i+1==count?b:at(z));}}}else o.points={a,b};}
  else{auto type=get(x,"GraphicType");o.points=points(get(x,"BoundingBox"));if(type=="Line"){if(o.points.size()>1)std::swap(o.points[0],o.points[1]);o.head=!get(x,"ArrowType").empty()&&get(x,"ArrowType")!="NoHead"?1:0;o.dash=get(x,"LineType").find("Dash")!=std::string::npos?1:0;}
  else if(type=="Oval"){o.kind=ObjectKind::Ellipse;if(x.a.count("Center3D")&&x.a.count("MajorAxisEnd3D")&&x.a.count("MinorAxisEnd3D")){Vec c=pos(x,"Center3D"),u=pos(x,"MajorAxisEnd3D")-c,v=pos(x,"MinorAxisEnd3D")-c;o.points={c-Vec{std::hypot(u.x,v.x),std::hypot(u.y,v.y)},c+Vec{std::hypot(u.x,v.x),std::hypot(u.y,v.y)}};}}else if(type=="Rectangle")o.kind=ObjectKind::Rectangle;else supported=false;}
@@ -126,6 +126,14 @@ n.c.push_back(t);}return n;}
 X bondXml(const Bond& b,const Style& style){X x=node("b",{{"id",num(b.id)},{"B",num(b.a)},{"E",num(b.b)},{"Order",b.kind==BondKind::Aromatic?"1.5":b.kind==BondKind::Dative?"dative":num(order(b.kind))}});x.a["Display"]=b.kind==BondKind::Wedge?"WedgeBegin":b.kind==BondKind::Hash?"WedgedHashBegin":b.kind==BondKind::Dash?"Dash":b.kind==BondKind::Dot?"Dot":b.kind==BondKind::Bold?"Bold":b.kind==BondKind::Wavy?"Wavy":"Solid";if(!b.customOrder.empty())x.a["Order"]=b.customOrder;if(!b.customDisplay.empty())x.a["Display"]=b.customDisplay;if(b.doubleSide)x.a["DoublePosition"]=b.doubleSide>0?"Left":"Right";x.a["LineWidth"]=num(b.lineWidth.value_or(style.lineWidth)*b.drawingScale);x.a["BoldWidth"]=num(b.boldWidth.value_or(style.boldWidth)*b.drawingScale);x.a["HashSpacing"]=num(b.hashSpacing.value_or(style.hashSpacing)*b.drawingScale);if(b.doubleGap||b.drawingScale!=1){x.a["BondLength"]=num(style.bondLength);x.a["BondSpacing"]=num(100*b.doubleGap.value_or(style.bondLength*style.bondSpacing)*b.drawingScale/style.bondLength);}return x;}
 }
 std::string toCdxml(const Document& d){X root=d.sourceXml.empty()?node("CDXML",{{"CreationProgram","YoungDraw 0.4"},{"LabelFont","3"},{"LabelFace","96"},{"color","0"},{"bgcolor","1"}}):parse(d.sourceXml);putStyle(root,d.style);root.a["LabelFace"]=num(d.style.labelFace|96);int next=d.nextId+100;
+ // Smart metadata from older saves may allocate model IDs over retained
+ // reaction-scheme container IDs. Reserve the entire source namespace first.
+ std::function<void(const X&)> reserveIds=[&](const X& x){if(x.tag!="font"&&x.tag!="objecttag")next=std::max(next,integer(get(x,"id"))+1);for(auto& child:x.c)reserveIds(child);};reserveIds(root);
+ auto modelIds=d.allIds();for(const auto& group:d.groups)modelIds.push_back(group.id);for(int id:modelIds)next=std::max(next,id+1);
+ std::function<void(X&)> repairContainers=[&](X& x){
+     if((x.tag=="scheme"||x.tag=="step")&&std::find(modelIds.begin(),modelIds.end(),integer(get(x,"id")))!=modelIds.end())x.a["id"]=num(next++);
+     for(auto& child:x.c)repairContainers(child);
+ };repairContainers(root);
  size_t pageIndex=root.c.size();for(size_t i=0;i<root.c.size();i++)if(root.c[i].tag=="page"){pageIndex=i;break;}if(pageIndex==root.c.size())root.c.push_back(node("page",{{"id",num(next++)}}));
  size_t colorIndex=root.c.size();for(size_t i=0;i<root.c.size();i++)if(root.c[i].tag=="colortable"){colorIndex=i;break;}if(colorIndex==root.c.size()){X colors=node("colortable");colors.c.push_back(node("color",{{"r","1"},{"g","1"},{"b","1"}}));colors.c.push_back(node("color",{{"r","0"},{"g","0"},{"b","0"}}));root.c.push_back(colors);}
  bool font=false;for(auto& x:root.c)if(x.tag=="fonttable")font=true;if(!font){X table=node("fonttable");table.c.push_back(node("font",{{"id","3"},{"charset","iso-8859-1"},{"name","Arial"}}));root.c.push_back(table);}
@@ -138,9 +146,30 @@ std::string toCdxml(const Document& d){X root=d.sourceXml.empty()?node("CDXML",{
  else if(p.type==Primitive::Polygon){x=node("curve",{{"id",num(id)},{"CurveType","Closed Filled"},{"Closed","yes"},{"FillType","Solid"},{"color",col},{"LineWidth","0"}});std::vector<Vec> ps{a,a};for(size_t i=0;i<p.points.size();i++){Vec b=p.points[(i+1)%p.points.size()];ps.push_back(p.points[i]);ps.push_back(b);ps.push_back(b);}ps.push_back(a);x.a["CurvePoints"]=plist(ps);}
  else{x=node("graphic",{{"id",num(id)},{"GraphicType",p.type==Primitive::Ellipse?"Oval":p.type==Primitive::Box?"Rectangle":"Line"},{"color",col},{"LineWidth",num(p.width)}});auto ps=p.points;if(p.type==Primitive::Line&&ps.size()>1)std::swap(ps[0],ps[1]);x.a["BoundingBox"]=plist(ps);if(p.filled){x.a["FillType"]="Solid";x.a[p.type==Primitive::Ellipse?"OvalType":"RectangleType"]="Solid";}if(p.dash)x.a["LineType"]="Dashed";}return x;};
  auto scene=makeScene(d);std::map<int,std::vector<Primitive>> visuals;for(auto& p:scene.items)visuals[p.owner].push_back(p);std::set<int> written;
+ // Standalone arrows must remain actual arrows in external editors too.
+ auto appendObject=[&](X& group,const Object& o){
+     if(o.head&&(o.kind==ObjectKind::Line||o.kind==ObjectKind::Curve)&&o.points.size()>=2){
+         auto found=scene.arrowPaths.find(o.id);
+         auto path=found==scene.arrowPaths.end()?o.points:found->second;
+         X arrow;
+         if(o.kind==ObjectKind::Curve&&path.size()>=4&&(path.size()-1)%3==0&&o.head!=3){
+             auto controls=path;controls.insert(controls.begin(),controls.front());controls.push_back(controls.back());
+             arrow=node("curve",{{"id",num(next++)},{"CurvePoints",plist(controls)},{"CurveType",o.dash?"Dashed":"Plain"},
+                 {"ArrowHeadHead",o.head==2?"HalfLeft":"Full"},{"ArrowHeadTail","None"},{"ArrowHeadType","Solid"}});
+         }else{
+             arrow=node("arrow",{{"id",num(next++)},{"Tail3D",point(path.front())+" 0"},{"Head3D",point(path.back())+" 0"},
+                 {"ArrowheadHead",o.head==2?"HalfLeft":"Full"},{"ArrowheadTail",o.head==3?"Full":"None"},{"ArrowheadType","Solid"}});
+             if(o.dash)arrow.a["LineType"]="Dashed";
+         }
+         arrow.a["color"]=num(color(o.color));arrow.a["LineWidth"]=num(o.width);arrow.a["FillType"]="None";
+         if(!o.cross.enabled)arrow.a["id"]=num(o.id);
+         group.c.push_back(std::move(arrow));
+         if(o.cross.enabled&&visuals[o.id].size()>=2){auto& pieces=visuals[o.id];for(size_t n=pieces.size()-2;n<pieces.size();++n)group.c.push_back(primitive(pieces[n],next++));}
+     }else for(auto& p:visuals[o.id])group.c.push_back(primitive(p,next++));
+ };
  std::function<void(X&)> patch=[&](X& parent){std::vector<X> out;for(auto x:parent.c){if(x.tag=="objecttag"){out.push_back(x);continue;}int id=integer(get(x,"id"));if(d.sourceOwned.count(id)){if(auto a=d.atom(id)){Vec old=pos(x);std::string label;for(auto& t:x.c)if(t.tag=="t")label=flatten(t);bool same=a->drawingScale==1&&label==a->label&&integer(get(x,"Element"),6)==a->element&&integer(get(x,"Charge"))==a->charge&&integer(get(x,"Isotope"))==a->isotope&&get(x,"Radical","")== (a->radical==1?"Singlet":a->radical==2?"Doublet":a->radical==3?"Triplet":"");if(!same)x=atomXml(*a,next,d.style);else{Vec delta=a->p-old;x.a["p"]=point(a->p);std::function<void(X&)> shift=[&](X& t){for(auto key:{"p","BoundingBox"})if(t.a.count(key)){auto ps=points(t.a[key]);for(auto& p:ps)p=p+delta;t.a[key]=plist(ps);}for(auto& c:t.c)shift(c);};for(auto& t:x.c)if(t.tag=="t"){shift(t);size_t run=0;for(auto& span:t.c)if(span.tag=="s"&&run<a->labelRuns.size()){const auto& r=a->labelRuns[run++];span.a["font"]=num(fontId(r.font));span.a["face"]=num(r.face);span.a["size"]=num(r.size);span.a["color"]=num(color(r.color));}}}written.insert(id);out.push_back(x);continue;}
  auto b=std::find_if(d.bonds.begin(),d.bonds.end(),[&](const Bond& b){return b.id==id;});if(b!=d.bonds.end()){auto update=bondXml(*b,d.style);update.a["color"]=num(color(b->color));for(auto& a:update.a)x.a[a.first]=a.second;written.insert(id);out.push_back(x);continue;}
- auto o=std::find_if(d.objects.begin(),d.objects.end(),[&](const Object& o){return o.id==id;});if(o!=d.objects.end()){X group=node("group",{{"id",num(id)}});for(auto& p:visuals[id])group.c.push_back(primitive(p,next++));out.push_back(group);written.insert(id);}continue;}
+ auto o=std::find_if(d.objects.begin(),d.objects.end(),[&](const Object& o){return o.id==id;});if(o!=d.objects.end()){X group=node("group",{{"id",num(id)}});appendObject(group,*o);if(o->head&&!o->cross.enabled&&group.c.size()==1)out.push_back(group.c.front());else out.push_back(group);written.insert(id);}continue;}
  patch(x);if(x.tag=="group"&&d.sourceGroups.count(id)&&std::none_of(d.groups.begin(),d.groups.end(),[&](const Group& g){return g.id==id;})){out.insert(out.end(),x.c.begin(),x.c.end());continue;}if(x.tag=="group"||x.tag=="fragment")x.a.erase("BoundingBox");out.push_back(x);}parent.c=std::move(out);};patch(root.c[pageIndex]);
  std::map<int,int> atomFragment,fragmentParent;
  std::map<int,X> fragmentStyles;
@@ -246,6 +275,8 @@ std::string toCdxml(const Document& d){X root=d.sourceXml.empty()?node("CDXML",{
  std::function<void(X&)> appendTo=[&](X& x){for(auto& c:x.c)appendTo(c);if(x.tag=="fragment"){int id=integer(get(x,"id"));auto it=additions.find(id);if(it!=additions.end()){x.c.insert(x.c.end(),it->second.begin(),it->second.end());additions.erase(it);}}};appendTo(root.c[pageIndex]);for(auto& a:additions){X frag=node("fragment",{{"id",num(a.first)}});frag.c=a.second;root.c[pageIndex].c.push_back(frag);}
  auto addGroup=[&](int id){
      X g=node("group",{{"id",num(id)}});
+     auto object=std::find_if(d.objects.begin(),d.objects.end(),[&](const Object& o){return o.id==id;});
+     if(object!=d.objects.end()){appendObject(g,*object);if(object->head&&!object->cross.enabled&&g.c.size()==1)root.c[pageIndex].c.push_back(std::move(g.c.front()));else root.c[pageIndex].c.push_back(std::move(g));return;}
      const bool mechanism=std::any_of(d.reactions.begin(),d.reactions.end(),[&](const Reaction& r){return r.id==id;});
      std::vector<Primitive> pending;
      auto flush=[&](){for(auto& p:pending)g.c.push_back(primitive(p,next++));pending.clear();};

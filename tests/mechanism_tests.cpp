@@ -25,6 +25,23 @@ int main(){try{
         bool rejected=false;try{fromCdxml("<CDXML><page id='1'><n id='2' p='0 0'/><n id='2' p='10 0'/></page></CDXML>");}catch(...){rejected=true;}
         check(rejected,"duplicate drawing IDs are still rejected");
     }
+    for(bool imported:{false,true})for(int kind:{1,2,3}){
+        Document d;Object arrow;arrow.id=d.nextId++;arrow.head=kind;arrow.color="#b44758";arrow.width=1.25;arrow.dash=1;
+        arrow.kind=kind==2?ObjectKind::Curve:ObjectKind::Line;
+        arrow.points=kind==2?std::vector<Vec>{{10,60},{40,10},{90,10},{120,60}}:std::vector<Vec>{{10,60},{120,60}};
+        d.objects.push_back(arrow);
+        if(imported){d.sourceXml="<CDXML><page id='50'><graphic id='1' GraphicType='Line' BoundingBox='120 60 10 60'/></page></CDXML>";d.sourceOwned.insert(1);d.nextId=51;}
+        auto xml=toCdxml(d);auto start=xml.rfind("<annotation");check(start!=std::string::npos,"smart metadata exists");xml.erase(start,xml.find("/>",start)-start+2);
+        auto visible=fromCdxml(xml);int arrows=0;
+        for(auto& o:visible.objects)if(o.head){++arrows;check(o.id==arrow.id,"external arrow identity is preserved for scheme references");check(o.head==kind&&o.dash==1&&o.color==arrow.color&&std::abs(o.width-arrow.width)<1e-6,"visible CDXML preserves editable arrow style");check((o.points.front()-arrow.points.front()).length()<1e-6&&(o.points.back()-arrow.points.back()).length()<1e-6,"visible CDXML preserves arrow endpoints");}
+        check(arrows==1,"standalone CDXML arrow remains recognizable without YoungDraw metadata");
+    }
+    {
+        Document d;Object arrow;arrow.id=1;arrow.head=1;arrow.points={{10,10},{100,10}};d.objects={arrow};d.nextId=2;
+        d.groups.push_back({1001,{1}});d.sourceXml="<CDXML><page id='50'><scheme id='1'><step id='1001'/></scheme></page></CDXML>";
+        auto xml=toCdxml(d);auto start=xml.rfind("<annotation");xml.erase(start,xml.find("/>",start)-start+2);
+        auto restored=fromCdxml(xml);check(restored.objects.size()==1&&restored.objects[0].id==1,"retained scheme container cannot collide with editable arrow identity");
+    }
     auto document=mechanismDemo();auto original=document.reactions[0];auto rows=mechanismRows(original);
     check(rows.size()==5&&rows[0][0]=="중간체"&&rows[1][0]=="TS"&&rows[2][0]=="중간체","rows explicitly distinguish intermediates and transition states");
     rows[0]={"중간체","Reactant","0 / 2","-3.0 / 4.4"};

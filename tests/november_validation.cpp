@@ -12,6 +12,13 @@ static void roundtrip(const Document& d){
     auto saved=fromCdxml(toCdxml(d));
     check(toNative(saved)==toNative(d),"CDXML editable metadata changed");
     check(toNative(fromNative(toNative(d)))==toNative(d),"project data changed");
+    auto xml=toCdxml(d);auto start=xml.rfind("<annotation");
+    if(start!=std::string::npos)xml.erase(start,xml.find("/>",start)-start+2);
+    auto visible=fromCdxml(xml);
+    for(const auto& arrow:d.objects)if(arrow.head&&!arrow.cross.enabled){
+        auto found=std::find_if(visible.objects.begin(),visible.objects.end(),[&](const Object& o){return o.id==arrow.id;});
+        check(found!=visible.objects.end()&&found->head==arrow.head,"external editor lost standalone arrow identity or head");
+    }
     check(!toSvg(makeScene(saved)).empty(),"empty SVG");
 }
 int wmain(int argc,wchar_t** argv){try{
