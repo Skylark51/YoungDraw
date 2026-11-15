@@ -14,6 +14,8 @@ struct Editor {
 HRESULT start(Editor editor, bool embedding, bool registerClass=true);
 void stop();
 HRESULT exportEmbedded(const Document& document,const wchar_t* storagePath,const wchar_t* imagePath);
+// The same OLE data contract is used by clipboard and file export.
+HRESULT createDataObject(const Document& document,IDataObject** data);
 HRESULT copy(const Document& document);
 Document fromChemDrawEmbedding(const std::string& bytes);
 bool editing();

@@ -76,7 +76,7 @@ public:
     HRESULT STDMETHODCALLTYPE GetMoniker(DWORD,DWORD,IMoniker** m)override{if(m)*m=nullptr;return E_NOTIMPL;}
     HRESULT STDMETHODCALLTYPE InitFromData(IDataObject*,BOOL,DWORD)override{return E_NOTIMPL;}
     HRESULT STDMETHODCALLTYPE GetClipboardData(DWORD,IDataObject** d)override{if(!d)return E_POINTER;*d=new(std::nothrow) Object(current());return *d?S_OK:E_OUTOFMEMORY;}
-    HRESULT STDMETHODCALLTYPE DoVerb(LONG verb,LPMSG,IOleClientSite* client,LONG,HWND,LPCRECT)override{if(verb==OLEIVERB_HIDE)return Close(OLECLOSE_SAVEIFDIRTY);if(verb!=OLEIVERB_PRIMARY&&verb!=OLEIVERB_SHOW&&verb!=OLEIVERB_OPEN&&verb!=0&&verb!=1)return OLEOBJ_E_INVALIDVERB;if(active&&active!=this)return E_UNEXPECTED;if(client)site=client;active=this;visible=true;editor.open(document);ShowWindow(editor.window,SW_SHOWNORMAL);SetForegroundWindow(editor.window);if(site){site->ShowObject();site->OnShowWindow(TRUE);}return S_OK;}
+    HRESULT STDMETHODCALLTYPE DoVerb(LONG verb,LPMSG,IOleClientSite* client,LONG,HWND,LPCRECT)override{if(verb==OLEIVERB_HIDE)return Close(OLECLOSE_SAVEIFDIRTY);if(verb!=OLEIVERB_PRIMARY&&verb!=OLEIVERB_SHOW&&verb!=OLEIVERB_OPEN&&verb!=0&&verb!=1)return OLEOBJ_E_INVALIDVERB;if(active&&active!=this)return E_UNEXPECTED;if(client)site=client;active=this;visible=true;editor.open(document);if(editor.window){ShowWindow(editor.window,SW_SHOWNORMAL);SetForegroundWindow(editor.window);}if(site){site->ShowObject();site->OnShowWindow(TRUE);}return S_OK;}
     HRESULT STDMETHODCALLTYPE EnumVerbs(IEnumOLEVERB** verbs)override{return OleRegEnumVerbs(classId,verbs);}
     HRESULT STDMETHODCALLTYPE Update()override{return S_OK;}
     HRESULT STDMETHODCALLTYPE IsUpToDate()override{return S_OK;}
@@ -125,7 +125,7 @@ HRESULT start(Editor value,bool embedding,bool registerClass){editor=std::move(v
 void stop(){OleFlushClipboard();if(registration)CoRevokeClassObject(registration);registration=0;}
 HRESULT exportEmbedded(const Document& document,const wchar_t* storagePath,const wchar_t* imagePath){
     ComPtr<IDataObject> data;
-    data.Attach(new Object(document));
+    auto created=createDataObject(document,&data);if(FAILED(created))return created;
     FORMATETC format{sourceFormat(),nullptr,DVASPECT_CONTENT,-1,TYMED_ISTORAGE};
     STGMEDIUM medium{};
     auto hr=data->GetData(&format,&medium);
@@ -145,7 +145,11 @@ HRESULT exportEmbedded(const Document& document,const wchar_t* storagePath,const
     DeleteEnhMetaFile(copy);
     return S_OK;
 }
-HRESULT copy(const Document& d){auto object=new(std::nothrow) Object(d);if(!object)return E_OUTOFMEMORY;auto hr=OleSetClipboard(object);object->Release();return hr;}
+HRESULT createDataObject(const Document& d,IDataObject** data){
+    if(!data)return E_POINTER;*data=nullptr;
+    try{*data=new Object(d);return S_OK;}catch(const std::bad_alloc&){return E_OUTOFMEMORY;}catch(...){return E_FAIL;}
+}
+HRESULT copy(const Document& d){ComPtr<IDataObject> object;auto hr=createDataObject(d,&object);return SUCCEEDED(hr)?OleSetClipboard(object.Get()):hr;}
 Document fromChemDrawEmbedding(const std::string& bytes){
     constexpr size_t limit=64*1024*1024;
     if(bytes.empty()||bytes.size()>limit)throw std::runtime_error("ChemDraw 개체는 64 MB까지 열 수 있습니다.");

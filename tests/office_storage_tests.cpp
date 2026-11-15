@@ -10,11 +10,10 @@
 using namespace yd;
 using Microsoft::WRL::ComPtr;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
-static Document readObject(const std::wstring& path){
-    ComPtr<IStorage> storage;check(SUCCEEDED(StgOpenStorage(path.c_str(),nullptr,STGM_READ|STGM_SHARE_EXCLUSIVE,nullptr,0,&storage)),"cannot reopen Office storage");
-    CLSID identity{};check(SUCCEEDED(ReadClassStg(storage.Get(),&identity)),"missing Office object identity");
+static Document readStorage(IStorage* storage){
+    CLSID identity{};check(SUCCEEDED(ReadClassStg(storage,&identity)),"missing Office object identity");
     ComPtr<IOleCache> cache;check(SUCCEEDED(CreateDataCache(nullptr,identity,IID_PPV_ARGS(&cache))),"cannot create Office presentation cache");
-    ComPtr<IPersistStorage> persisted;check(SUCCEEDED(cache.As(&persisted))&&SUCCEEDED(persisted->Load(storage.Get())),"cannot load saved Office presentation");
+    ComPtr<IPersistStorage> persisted;check(SUCCEEDED(cache.As(&persisted))&&SUCCEEDED(persisted->Load(storage)),"cannot load saved Office presentation");
     ComPtr<IDataObject> data;check(SUCCEEDED(cache.As(&data)),"missing Office presentation data");
     FORMATETC format{CF_ENHMETAFILE,nullptr,DVASPECT_CONTENT,-1,TYMED_ENHMF};STGMEDIUM medium{};
     check(SUCCEEDED(data->GetData(&format,&medium)),"Office cannot retrieve cached vector presentation");
@@ -25,6 +24,47 @@ static Document readObject(const std::wstring& path){
     std::string bytes(size_t(info.cbSize.QuadPart),'\0');ULONG read=0;
     check(SUCCEEDED(stream->Read(bytes.data(),ULONG(bytes.size()),&read))&&read==bytes.size(),"truncated Office source");
     return fromNative(bytes);
+}
+static Document readObject(const std::wstring& path){
+    ComPtr<IStorage> storage;check(SUCCEEDED(StgOpenStorage(path.c_str(),nullptr,STGM_READ|STGM_SHARE_EXCLUSIVE,nullptr,0,&storage)),"cannot reopen Office storage");
+    return readStorage(storage.Get());
+}
+class TestSite final:public IOleClientSite {
+    LONG refs=1;
+public:
+    IPersistStorage* object=nullptr;ComPtr<IStorage> storage;int saves=0;
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid,void** out)override{if(!out)return E_POINTER;*out=nullptr;if(iid!=IID_IUnknown&&iid!=IID_IOleClientSite)return E_NOINTERFACE;*out=static_cast<IOleClientSite*>(this);AddRef();return S_OK;}
+    ULONG STDMETHODCALLTYPE AddRef()override{return ULONG(InterlockedIncrement(&refs));}
+    ULONG STDMETHODCALLTYPE Release()override{auto n=InterlockedDecrement(&refs);if(!n)delete this;return ULONG(n);}
+    HRESULT STDMETHODCALLTYPE SaveObject()override{
+        ComPtr<ILockBytes> bytes;auto hr=CreateILockBytesOnHGlobal(nullptr,TRUE,&bytes);if(FAILED(hr))return hr;
+        ComPtr<IStorage> next;hr=StgCreateDocfileOnILockBytes(bytes.Get(),STGM_CREATE|STGM_READWRITE|STGM_SHARE_EXCLUSIVE,0,&next);if(FAILED(hr))return hr;
+        hr=object->Save(next.Get(),FALSE);if(SUCCEEDED(hr))hr=object->SaveCompleted(next.Get());if(SUCCEEDED(hr))hr=next->Commit(STGC_DEFAULT);
+        if(SUCCEEDED(hr)){storage=next;++saves;}return hr;
+    }
+    HRESULT STDMETHODCALLTYPE GetMoniker(DWORD,DWORD,IMoniker** out)override{if(out)*out=nullptr;return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE GetContainer(IOleContainer** out)override{if(out)*out=nullptr;return E_NOINTERFACE;}
+    HRESULT STDMETHODCALLTYPE ShowObject()override{return S_OK;}
+    HRESULT STDMETHODCALLTYPE OnShowWindow(BOOL)override{return S_OK;}
+    HRESULT STDMETHODCALLTYPE RequestNewObjectLayout()override{return E_NOTIMPL;}
+};
+static void editLifecycle(const Document& original,const Document& changed){
+    Document current;int opened=0;
+    check(SUCCEEDED(office::start({nullptr,[&](const Document& d){current=d;++opened;},[&](){return current;},editor::officePicture},false,false)),"headless editor setup failed");
+    ComPtr<IDataObject> data;check(SUCCEEDED(office::createDataObject(original,&data)),"cannot create clipboard data contract");
+    ComPtr<IOleObject> object;ComPtr<IPersistStorage> persist;check(SUCCEEDED(data.As(&object))&&SUCCEEDED(data.As(&persist)),"missing OLE editing interfaces");
+    auto* site=new TestSite;site->object=persist.Get();ComPtr<IOleClientSite> ownedSite;ownedSite.Attach(site);object->SetClientSite(site);
+    check(SUCCEEDED(object->DoVerb(OLEIVERB_PRIMARY,nullptr,site,0,nullptr,nullptr))&&opened==1&&toNative(current)==toNative(original),"primary OLE verb did not open exact editing source");
+    current=changed;check(SUCCEEDED(office::update())&&site->saves==1,"editor update did not save to Office host");
+    check(toNative(readStorage(site->storage.Get()))==toNative(changed),"Office host did not receive edited source and presentation");
+    check(SUCCEEDED(object->Close(OLECLOSE_NOSAVE))&&!office::editing(),"OLE close did not finish editing");
+    check(SUCCEEDED(object->DoVerb(OLEIVERB_OPEN,nullptr,site,0,nullptr,nullptr))&&opened==2&&toNative(current)==toNative(changed),"second OLE open lost saved edits");
+    current=original;object->Close(OLECLOSE_NOSAVE);
+    check(SUCCEEDED(object->DoVerb(OLEIVERB_OPEN,nullptr,site,0,nullptr,nullptr))&&toNative(current)==toNative(changed),"cancelled edits replaced committed source");
+    current=original;check(SUCCEEDED(object->Close(OLECLOSE_SAVEIFDIRTY))&&site->saves==2,"close with save did not update Office host");
+    check(toNative(readStorage(site->storage.Get()))==toNative(original),"close with save lost editing source");
+    object->SetClientSite(nullptr);
+    office::start({nullptr,{}, {},editor::officePicture},false,false);
 }
 static void verifyEmf(const std::wstring& path){
     auto image=GetEnhMetaFileW(path.c_str());check(image!=nullptr,"missing EMF vector presentation");
@@ -61,6 +101,7 @@ int main(){
             if(!reopened.plots.empty())reopened.plots[0].series[0].values[1]+=1.25;
             check(SUCCEEDED(office::exportEmbedded(reopened,storage.c_str(),image.c_str())),"Office re-edit save failed");
             verifyEmf(image);check(toNative(readObject(storage))==toNative(reopened),"Office re-edit was not preserved");
+            editLifecycle(d,reopened);
         }
         std::cout<<"Office storage: mechanism and 5 complex graphs saved, reopened, edited and saved again; EMF presentations valid\n";
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';result=1;}
