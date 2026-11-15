@@ -16,6 +16,19 @@ static bool overlaps(Rect a,Rect b){return a.x<b.x+b.w-0.01&&a.x+a.w>b.x+0.01&&a
 static EnergyPlot sample(){EnergyPlot p;p.id=1;p.p={30,90};p.width=760;p.height=400;p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#167d9a",{0,37.2,17.7,27.3,-9.9},0,2},{"Path 2","#b44758",{0,37.2,17.7,27.3,-9.9},1,2}};return p;}
 int main(){try{
     {
+        Document d;EnergyPlot p;p.id=1;p.width=760;p.height=420;p.yMin=-8;p.yMax=32;
+        for(int state=0;state<7;++state)p.states.push_back({"I_{"+std::to_string(state)+"}",double(state)});
+        for(int path=0;path<5;++path){EnergySeries series;series.name="Path "+std::to_string(path+1);for(int state=0;state<7;++state)series.values.push_back((state%2?25.:0.)+path*.3-state);p.series.push_back(series);}
+        p.series[0].values[1]+=1.25;d.plots={p};auto picture=makeScene(d,measure);
+        std::vector<Primitive> captions;
+        for(const auto& item:picture.items)if(item.type==Primitive::Text&&(item.textRole==8||(item.textRole==0&&item.text.find('.')!=std::string::npos))){
+            check(item.fontSize>=8.5,"dense manual-range graph retains readable energy text");captions.push_back(item);
+        }
+        check(captions.size()==35,"manual-range graph keeps every pathway energy");
+        for(size_t i=0;i<captions.size();++i)for(size_t j=i+1;j<captions.size();++j)check(!overlaps(bounds(captions[i]),bounds(captions[j])),"readable values do not overlap");
+    }
+
+    {
         Document d;auto p=sample();p.width=300;p.tickFontSize=24;
         p.series[0].name=std::string(65,'W');d.plots={p};
         for(const auto& item:makeScene(d,measure).items)if(item.type==Primitive::Text&&item.textRole==7){

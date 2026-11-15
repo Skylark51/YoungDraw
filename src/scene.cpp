@@ -813,7 +813,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             double th=font*1.3,gap=std::max(2.,font*.20),pitch=th+gap;
             double minY=topY+2,maxY=y0-th-4,step=std::max(.5,h/600.);
             int slots=int(std::floor((maxY-minY)/step))+1;if(slots<=0)return false;
-            double maxShift=std::min(h*.45,std::max(2*th,(count-1)*pitch+gap));
+            double maxShift=std::min(h*.45,std::max(2*th,count*pitch+gap));
             const double infinity=std::numeric_limits<double>::infinity();
             std::vector<double> prev(slots,infinity),next(slots,infinity);
             std::vector<std::vector<int>> parent(count,std::vector<int>(slots,-1));
@@ -860,9 +860,9 @@ Scene makeScene(const Document& d,const Measure& measure){
                 if(!fitGroup(first,end,valueFont,false)){fitted=false;break;}first=end;
             }
             if(fitted)break;
-            // At normal reading size, allow a small white text backing over connectors only.
+            // Try a small white backing over connectors before reducing readable type.
             // Dots and level plateaus remain hard obstacles; nothing is moved to a side rail.
-            if(valueFont<=9.){
+            {
                 fitted=true;placedValueBoxes.clear();for(size_t first=0;first<captions.size();){size_t end=first+1;while(end<captions.size()&&captions[end].index==captions[first].index)end++;
                     if(!fitGroup(first,end,valueFont,false)&&!fitGroup(first,end,valueFont,true)){fitted=false;break;}first=end;
                 }
