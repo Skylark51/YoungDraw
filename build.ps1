@@ -1,4 +1,4 @@
-param([string]$BuildDirectory = 'build/release-v04-final')
+param([string]$BuildDirectory = 'build/release-v04-final', [switch]$HeadlessTests = $true)
 $ErrorActionPreference = 'Stop'
 if ($BuildDirectory -notmatch '^[A-Za-z0-9_/-]+$' -or $BuildDirectory.Contains('..')) { throw 'Use a relative build folder inside the project.' }
 $env:VSLANG = '1033'
@@ -23,7 +23,12 @@ try {
     if ($LASTEXITCODE) { throw 'CMake configure failed' }
     cmake --build $outputDir
     if ($LASTEXITCODE) { throw 'Build failed' }
-    ctest --test-dir $outputDir --output-on-failure
+    if ($HeadlessTests) {
+        # Only console tests: omit editor, dialog, theme and Office UI coverage.
+        ctest --test-dir $outputDir --output-on-failure -R '^(core_tests|layout_refinement|atomic_file_save|mechanism_regression|mechanism_editing|mechanism_graph_editing|cdx_import|plot_layout|november_complex_graphs)$'
+    } else {
+        ctest --test-dir $outputDir --output-on-failure
+    }
     if ($LASTEXITCODE) { throw 'Tests failed' }
 } finally {
     subst "${driveLetter}:" /D

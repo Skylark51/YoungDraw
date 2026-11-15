@@ -568,7 +568,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         std::vector<size_t> legendPaths;
         for(size_t k=0;k<paths.size();k++){
             bool hasData=false;for(size_t i=0;i<plot.states.size();i++)if(paths[k].hasValue(i)){hasData=true;break;}
-            if(hasData){legendPaths.push_back(k);legendFont=std::min(legendFont,std::max(4.,(w-30)/std::max(1.,widthOf(paths[k].name,1))));}
+            if(hasData){legendPaths.push_back(k);legendFont=std::min(legendFont,std::max(4.,(w*.92-29)/std::max(1.,widthOf(paths[k].name,1))));}
         }
         // Compact, centered legend rows directly above the plotting area.
         // The default title duplicates the x caption; retain its saved value without printing twice.

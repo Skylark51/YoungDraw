@@ -16,6 +16,14 @@ static bool overlaps(Rect a,Rect b){return a.x<b.x+b.w-0.01&&a.x+a.w>b.x+0.01&&a
 static EnergyPlot sample(){EnergyPlot p;p.id=1;p.p={30,90};p.width=760;p.height=400;p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#167d9a",{0,37.2,17.7,27.3,-9.9},0,2},{"Path 2","#b44758",{0,37.2,17.7,27.3,-9.9},1,2}};return p;}
 int main(){try{
     {
+        Document d;auto p=sample();p.width=300;p.tickFontSize=24;
+        p.series[0].name=std::string(65,'W');d.plots={p};
+        for(const auto& item:makeScene(d,measure).items)if(item.type==Primitive::Text&&item.textRole==7){
+            auto box=bounds(item);
+            check(box.x>=p.p.x+50&&box.x+box.w<=p.p.x+p.width-4,"long legend includes swatch width when fitting inside graph");
+        }
+    }
+    {
         check(EnergyPlot{}.unit=="kcal mol^{-1}","new graphs default to inverse mole units");
         Document d;auto p=sample();d.plots={p};const auto baseline=makeScene(d,measure);
         d.plots[0].showYTicks=false;d.plots[0].energyAtTop=true;d.plots[0].legendOffset={47,63};

@@ -7,6 +7,24 @@
 using namespace yd;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 int main(){try{
+    for(const auto& shape:{std::string("<arrow id='9' Tail3D='20 40 0' Head3D='120 40 0' ArrowheadTail='Full'/>") ,
+                           std::string("<curve id='9' CurvePoints='20 40 40 10 100 10 120 40' ArrowHeadTail='HalfLeft'/>")}){
+        auto imported=fromCdxml("<CDXML><page id='1'>"+shape+"</page></CDXML>");
+        check(imported.objects.size()==1&&imported.objects[0].head!=0,"tail-only CDXML arrow has an editable arrowhead");
+        const auto& arrow=imported.objects[0];
+        check(arrow.points.front().x==120&&arrow.points.back().x==20,"tail-only CDXML arrow preserves direction including Bezier controls");
+        auto restored=fromCdxml(toCdxml(imported));
+        check(restored.objects[0].head==arrow.head&&restored.objects[0].points.back().x==20,"tail-only arrow direction survives re-saving");
+    }
+    {
+        auto tagged=fromCdxml("<CDXML><page id='1'><fragment id='2'><n id='3' p='10 10'><objecttag id='1' Name='a'/></n><n id='4' p='30 10'><objecttag id='1' Name='b'/></n></fragment></page></CDXML>");
+        check(tagged.atoms.size()==2,"repeated objecttag IDs do not collide with drawing IDs");
+        auto xml=toCdxml(tagged);
+        check(xml.find("Name=\"a\"")!=std::string::npos&&xml.find("Name=\"b\"")!=std::string::npos,"objecttag metadata survives saving");
+        check(fromCdxml(xml).atoms.size()==2,"tagged drawing remains editable");
+        bool rejected=false;try{fromCdxml("<CDXML><page id='1'><n id='2' p='0 0'/><n id='2' p='10 0'/></page></CDXML>");}catch(...){rejected=true;}
+        check(rejected,"duplicate drawing IDs are still rejected");
+    }
     auto document=mechanismDemo();auto original=document.reactions[0];auto rows=mechanismRows(original);
     check(rows.size()==5&&rows[0][0]=="중간체"&&rows[1][0]=="TS"&&rows[2][0]=="중간체","rows explicitly distinguish intermediates and transition states");
     rows[0]={"중간체","Reactant","0 / 2","-3.0 / 4.4"};
