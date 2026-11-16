@@ -109,6 +109,7 @@ struct EnergyPlot {
     std::optional<double> yMin,yMax;
     double axisScale=1;
     double axisFontSize=0,tickFontSize=0,valueFontSize=0,energyLabelFontSize=0; // pt; 0 fits automatically to graph size.
+    double legendFontSize=0; // 0 follows automatic tick sizing; explicit sizes are preserved.
     double stateFontSize=0,xAxisWidth=0,curveWidth=0,structureInkScale=1;
     bool fixedValueFontSize=false; // Sidebar sizes stay fixed; legacy documents retain automatic fitting.
     double yTitleGap=0; // Clearance from the Y title to ticks/axis; 0 chooses a readable automatic gap.

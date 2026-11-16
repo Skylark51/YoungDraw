@@ -510,7 +510,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         axisFont=std::min(axisFont,std::max(4.,(plot.width-114)/std::max(1.,widthOf(plot.xLabel,1))));
         tickFont=std::min(tickFont,std::max(4.,plot.height*.14));
         if(!plot.fixedValueFontSize||plot.valueFontSize==0)valueFont=std::min(valueFont,std::max(4.,plot.height*.18));
-        double titleFont=axisFont*1.05,legendFont=tickFont;
+        double titleFont=axisFont*1.05,legendFont=plot.legendFontSize>0?plot.legendFontSize:tickFont;
         double x0=plot.p.x+50,w=std::max(100.,plot.width-54);
         double y0=plot.p.y+plot.height-std::max(40.,tickFont*1.3+axisFont*1.4+16);
         double axisY=y0;s.plotBaselines[owner]=axisY;
@@ -636,18 +636,20 @@ Scene makeScene(const Document& d,const Measure& measure){
             }
             Primitive mark;mark.owner=owner;mark.points={{x0-3*plot.axisScale,y},{x0,y}};mark.width=.5*plot.axisScale;s.items.push_back(mark);
         }
-        auto waveSpacing=[&](double width){return std::max(3.5,width*inkFactor*.8+2.);};
+        auto waveSpacing=[&](double width){return std::clamp(width*inkFactor*.25+1.8,2.8,4.5);};
+        auto waveHalfLength=[&](double width){return std::clamp(12.+width*inkFactor,13.,21.);};
         auto wave=[&](Vec center,Vec along,Vec across,double width,const std::string& color){
-            const double spacing=waveSpacing(width);
+            const double spacing=waveSpacing(width),length=waveHalfLength(width);
+            const double stroke=std::clamp(width*inkFactor*.65,.7,2.6)/inkFactor;
             for(double shift:{-spacing,spacing})for(int half=0;half<2;++half){
-                const double start=-10+10*half,side=half==0?3.5:-3.5;
-                Primitive curve;curve.type=Primitive::Bezier;curve.owner=owner;curve.color=color;curve.width=width;
-                curve.points={center+along*shift+across*start,center+along*(shift+side)+across*(start+3.3),center+along*(shift+side)+across*(start+6.7),center+along*shift+across*(start+10)};s.items.push_back(curve);
+                const double start=-length+length*half,side=(half==0?1.:-1.)*length*.25;
+                Primitive curve;curve.type=Primitive::Bezier;curve.owner=owner;curve.color=color;curve.width=stroke;
+                curve.points={center+along*shift+across*start,center+along*(shift+side)+across*(start+length/3),center+along*(shift+side)+across*(start+2*length/3),center+along*shift+across*(start+length)};s.items.push_back(curve);
             }
         };
         if(plot.showYAxis)for(const auto& band:displayBands)if(band.marker&&band.high>=low&&band.low<=high){
             const double y=(yAt(std::max(low,band.low))+yAt(std::min(high,band.high)))/2;
-            const double axisHole=std::max(8.,waveSpacing(yAxisStroke)+5+yAxisStroke*inkFactor);
+            const double axisHole=std::max(7.,waveSpacing(yAxisStroke)+waveHalfLength(yAxisStroke)*.1875+yAxisStroke*inkFactor*.5+2);
             // Cut the axis itself instead of masking with a background-colored patch.
             for(size_t k=0,count=s.items.size();k<count;++k){const auto shaft=s.items[k];
                 if(shaft.owner!=owner||shaft.type!=Primitive::Line||shaft.points.size()!=2||std::abs(shaft.points[0].x-x0)>1e-8||std::abs(shaft.points[1].x-x0)>1e-8)continue;
@@ -664,7 +666,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         std::vector<size_t> legendPaths;
         for(size_t k=0;k<paths.size();k++){
             bool hasData=false;for(size_t i=0;i<plot.states.size();i++)if(paths[k].hasValue(i)){hasData=true;break;}
-            if(hasData){legendPaths.push_back(k);legendFont=std::min(legendFont,std::max(4.,(w*.92-29)/std::max(1.,widthOf(paths[k].name,1))));}
+            if(hasData){legendPaths.push_back(k);if(plot.legendFontSize==0)legendFont=std::min(legendFont,std::max(4.,(w*.92-29)/std::max(1.,widthOf(paths[k].name,1))));}
         }
         // Compact, centered legend rows directly above the plotting area.
         // The default title duplicates the x caption; retain its saved value without printing twice.
@@ -737,7 +739,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX,double breakScale,int breakStyle){
             if(std::isfinite(breakX)&&breakX>a.x&&breakX<b.x&&b.x-a.x>20){
                 Vec tangent=(b-a)*(1/std::max(1e-9,(b-a).length()));
-                const double hole=breakStyle==1?std::min((b.x-a.x)*.25,std::max(8.,std::abs(tangent.x)*(waveSpacing(path.width)+3.5)+std::abs(tangent.y)*10+path.width*inkFactor)):8.;
+                const double hole=breakStyle==1?std::min((b.x-a.x)*.25,std::max(7.,std::abs(tangent.x)*(waveSpacing(path.width)+waveHalfLength(path.width)*.1875)+std::abs(tangent.y)*waveHalfLength(path.width)+path.width*inkFactor*.5+2)):8.;
                 breakX=std::clamp(breakX,a.x+hole+1,b.x-hole-1);
                 // Split the real path instead of painting a white rectangle over other objects.
                 Vec c1{a.x+(b.x-a.x)*.42,a.y},c2{b.x-(b.x-a.x)*.42,b.y};

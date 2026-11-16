@@ -5,6 +5,7 @@
 #include "win_editor_files.h"
 #include "win_editor_plot.h"
 #include "win_editor_reaction.h"
+#include "win_editor_render.h"
 #include "win_mechanism_editor.h"
 #include "win_editor_shortcuts.h"
 #include "win_editor_state.h"
@@ -31,7 +32,8 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  if(id==198||id==199){groupSelected(id==199);return;}
  if(id>=190&&id<=197){alignSelection(id);return;}
  if(id==110||id==125||id==126||(id>=160&&id<=165))repeatAction=[id](){command(id);};
- if(id>=plotAppearanceFirstCommand&&id<=plotAppearanceLastCommand){editPlotAppearance(primary(),id-plotAppearanceFirstCommand);return;}
+ if(id==plotLegendSizeCommand){editPlotAppearance(primary(),7);return;}
+  if(id>=plotAppearanceFirstCommand&&id<=plotAppearanceLastCommand){editPlotAppearance(primary(),id-plotAppearanceFirstCommand);return;}
  if(id==182||id==183){sidebarPage=id-182;showLayers=false;redraw();return;}if(id==219){auto r=ui::form(win,L"오비탈 설정",{{L"모양",std::to_string(int(orbitalKind)),false,{L"s (원형)",L"p (두 로브)",L"d (네 로브)",L"혼성 (큰 로브 / 작은 로브)"}},{L"위상 표시",std::to_string(orbitalPhase),false,{L"흑백 (채움 / 윤곽)",L"윤곽선",L"색상 (청색 / 적색)"}}});if(r){orbitalKind=OrbitalKind(std::stoi((*r)[0]));orbitalPhase=std::stoi((*r)[1]);tool=Orbital;selection.clear();status=L"오비탈: 클릭하거나 중심에서 바깥으로 드래그하세요.";}redraw();return;}if(id==175||id==176){showLayers=id==176;redraw();return;}
  if(id>=177&&id<=181){
     bool images=doc.imagesLocked,graphs=doc.graphsLocked;
@@ -72,7 +74,9 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  case 168:editArrowCross();break;case 169:branchMechanism();break;
  case 165:resizeSelected();break;case 160:case 161:case 162:case 163:case 164:transformSelected(id);break;case 170:library(L"전체");break;case 171:library(L"리간드");break;case 172:library(L"착물");break;case 173:library(L"기질");break;case 174:library(L"산·시약");break;case 100:newDocumentTab();break;case 109:closeDocumentTab(activeDocument);break;
  case 101:openDocuments(openDocumentFiles());break;
- case 102:save();break;case 103:{auto p=fileDialog(true,1);if(p){writeFile(*p,toSvg(scene()));status=L"SVG를 내보냈습니다. 가져온 미지원 객체는 결과를 확인하세요.";}break;}case 108:{auto p=fileDialog(true,2);if(p){writeFile(*p,toCdxml(doc));status=L"CDXML을 내보냈습니다.";}break;}
+ case copyPngCommand:copyPng();break;
+  case exportPngCommand:{auto path=fileDialog(true,5);if(path){writePreview(*path,doc,true);status=L"투명 PNG 그림을 내보냈습니다.";}break;}
+  case 102:save();break;case 103:{auto p=fileDialog(true,1);if(p){writeFile(*p,toSvg(scene()));status=L"SVG를 내보냈습니다. 가져온 미지원 객체는 결과를 확인하세요.";}break;}case 108:{auto p=fileDialog(true,2);if(p){writeFile(*p,toCdxml(doc));status=L"CDXML을 내보냈습니다.";}break;}
   case 106:{
       int choice=MessageBoxW(win,L"JACS 출판용 SVG\n\n예: 단일 열 (240 pt)\n아니요: 두 열 (504 pt)\n취소: 내보내기 중단",
                              L"JACS Publication",MB_YESNOCANCEL|MB_ICONQUESTION);

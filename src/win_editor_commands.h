@@ -20,7 +20,10 @@ inline constexpr int addEnergyGapCommand = 237;
 inline constexpr int changePlotStyleCommand = 238;
 inline constexpr int plotAxisLengthsCommand = 239;
 inline constexpr int plotAppearanceFirstCommand = 240; // Independent sidebar appearance controls.
-inline constexpr int plotAppearanceLastCommand = 246;
+inline constexpr int plotAppearanceLastCommand = 246; // Existing controls retain their command IDs.
+inline constexpr int plotLegendSizeCommand = 249;
+inline constexpr int exportPngCommand = 247;
+inline constexpr int copyPngCommand = 248;
 
 void command(int id);
 

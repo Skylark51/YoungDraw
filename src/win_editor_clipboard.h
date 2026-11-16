@@ -6,6 +6,8 @@ namespace yd::editor {
 
 Document selectedDocument();
 void copy();
+void copyPng();
+std::string clipboardMemoryBytes(HGLOBAL memory);
 std::string clipboardMemoryText(HGLOBAL memory,bool unicode=false);
 std::optional<Document> clipboardStructureText(const std::string& text);
 std::optional<Document> clipboardDocument();

@@ -1,5 +1,6 @@
 #include "win_editor_clipboard.h"
 #include "win_editor_files.h"
+#include "win_editor_render.h"
 #include "win_editor_images.h"
 #include "win_editor_state.h"
 #include "cdxml.h"
@@ -7,12 +8,27 @@
 #include "win_dialogs.h"
 #include "win_ui.h"
 #include <shellapi.h>
+#include <cstring>
+#include <new>
 
 namespace yd::editor {
 
 Document selectedDocument(){auto chosen=selection;for(int id:selection)if(auto b=doc.bond(id)){chosen.push_back(b->a);chosen.push_back(b->b);}return doc.subset(chosen);}
 UINT clipboardFormat(){return RegisterClipboardFormatW(L"YoungDraw.Project.v2");}
 void copy(){if(selection.empty())return;if(FAILED(office::copy(selectedDocument())))throw std::runtime_error("클립보드 복사에 실패했습니다. 잠시 후 다시 시도하세요.");status=L"복사했습니다. Word·Excel에 붙여넣거나 YoungDraw에서 편집할 수 있습니다.";}
+void copyPng(){
+    auto image=drawingBitmap(selection.empty()?doc:selectedDocument(),true);const auto bytes=encodePng(*image);
+    const UINT png=RegisterClipboardFormatW(L"PNG"),mime=RegisterClipboardFormatW(L"image/png");
+    if(!png||!mime)throw std::runtime_error("PNG 클립보드 형식을 등록할 수 없습니다.");
+    auto allocate=[&](){HGLOBAL handle=GlobalAlloc(GMEM_MOVEABLE,bytes.size());if(!handle)throw std::bad_alloc();auto* data=GlobalLock(handle);if(!data){GlobalFree(handle);throw std::bad_alloc();}memcpy(data,bytes.data(),bytes.size());GlobalUnlock(handle);return handle;};
+    auto release=[](void* handle){if(handle)GlobalFree(handle);};
+    std::unique_ptr<void,decltype(release)> native(allocate(),release),web(allocate(),release);
+    if(!OpenClipboard(win))throw std::runtime_error("클립보드가 사용 중입니다. 잠시 후 다시 시도하세요.");
+    if(!EmptyClipboard()){CloseClipboard();throw std::runtime_error("클립보드를 비울 수 없습니다.");}
+    if(!SetClipboardData(png,native.get())){CloseClipboard();throw std::runtime_error("PNG 클립보드 복사에 실패했습니다.");}
+    native.release();if(SetClipboardData(mime,web.get()))web.release();CloseClipboard();
+    status=selection.empty()?L"문서 전체를 투명 PNG로 복사했습니다.":L"선택 영역을 투명 PNG로 복사했습니다.";
+}
 std::string clipboardMemoryText(HGLOBAL memory,bool unicode){
     if(!memory)return {};auto size=GlobalSize(memory);auto* bytes=static_cast<const char*>(GlobalLock(memory));if(!bytes)return {};
     std::string value;

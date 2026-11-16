@@ -142,21 +142,22 @@ int main(){try{
     }
     {
         Document styled;auto graph=newEnergyPlot(0,true);graph.id=styled.nextId++;graph.title="";graph.xLabel="";graph.showYTicks=false;graph.states={{"A",0},{"B",20}};graph.series[0].values={0,20};graph.series[0].color="#137faa";
-        graph.fixedValueFontSize=true;graph.stateFontSize=26;graph.valueFontSize=24;graph.xAxisWidth=3;graph.yAxisWidth=5;graph.curveWidth=7;graph.thinLines=true;graph.inkScale=1.5;
+        graph.legendFontSize=28;graph.series[0].name="Long pathway legend";graph.fixedValueFontSize=true;graph.stateFontSize=26;graph.valueFontSize=24;graph.xAxisWidth=3;graph.yAxisWidth=5;graph.curveWidth=7;graph.thinLines=true;graph.inkScale=1.5;
         int a=styled.addAtom({40,40},6),b=styled.addAtom({65,40},6);int bond=styled.addBond(a,b);graph.states[0].above={a,b,bond};styled.plots={graph};
         const auto initial=makeScene(styled);styled.plots[0].structureInkScale=2;const auto scene=makeScene(styled);const auto axes=scene.plotAxes.at(graph.id);
-        bool x=false,y=false,curve=false,name=false,value=false,structure=false;
+        bool x=false,y=false,curve=false,name=false,value=false,structure=false,legend=false;
         for(const auto& item:scene.items){
             if(item.owner==graph.id&&item.type==Primitive::Line&&item.points.size()==2){
                 if(std::abs(item.points[0].y-axes.origin.y)<1e-8&&std::abs(item.points[1].y-axes.origin.y)<1e-8){x=true;check(std::abs(item.width-3)<1e-8,"X axis thickness is independent of global and thin stroke settings");}
                 if(std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8){y=true;check(std::abs(item.width-5)<1e-8,"Y axis thickness is independent of curve thickness");}
             }
             if(item.owner==graph.id&&item.type==Primitive::Bezier&&item.color==graph.series[0].color){curve=true;check(std::abs(item.width-7)<1e-8,"curve thickness is independently respected");}
+            if(item.owner==graph.id&&item.type==Primitive::Text&&item.textRole==7){legend=true;check(std::abs(item.fontSize-28)<1e-8,"explicit legend font size remains independent of ticks and automatic fitting");}
             if(item.owner==graph.id&&item.type==Primitive::Text&&item.textRole==6){name=true;check(std::abs(item.fontSize-26)<1e-8,"state name font is independent of axis ticks");}
             if(item.owner==graph.id&&item.type==Primitive::Text&&item.textRole==8){value=true;check(std::abs(item.fontSize-24)<1e-8,"explicit data value size is not reduced by automatic placement");}
             if(item.owner==bond&&item.type==Primitive::Line){structure=true;for(const auto& old:initial.items)if(old.owner==bond&&old.type==Primitive::Line)check(std::abs(item.width-old.width*2)<1e-8,"inserted structure stroke can change without resizing text or axes");}
         }
-        check(x&&y&&curve&&name&&value&&structure,"all independently styled graph elements are rendered");
+        check(x&&y&&curve&&name&&value&&structure&&legend,"all independently styled graph elements are rendered");
 #ifdef TEST_CDXML
         for(const auto& restored:{fromNative(toNative(styled)),fromCdxml(toCdxml(styled))})check(toNative(restored)==toNative(styled),"independent plot appearance survives native and CDXML saving");
 #endif
@@ -218,8 +219,9 @@ int main(){try{
     }
     {
         Document thick;auto g=newEnergyPlot(0,true);g.id=thick.nextId++;g.thinLines=false;g.inkScale=3;g.series[0].width=10;g.showYAxis=false;g.states[1].breakAfter=true;g.states[1].breakStyle=1;g.valueGap=28;thick.plots={g};
-        std::vector<Primitive> waves;for(auto item:makeScene(thick).items)if(item.type==Primitive::Bezier&&item.points.size()==4&&std::abs((item.points.back()-item.points.front()).length()-10)<1e-6)waves.push_back(item);
-        check(waves.size()==4&&(waves[0].points[0]-waves[2].points[0]).length()>waves[0].width+10,"thick waves have a real stroke-dependent separation");
+        std::vector<Primitive> waves;for(auto item:makeScene(thick).items)if(item.type==Primitive::Bezier&&item.points.size()==4&&std::abs((item.points.back()-item.points.front()).length()-21)<1e-6)waves.push_back(item);
+        check(waves.size()==4&&(waves[0].points[0]-waves[2].points[0]).length()>waves[0].width*2+1,"thick waves have a real stroke-dependent separation");
+        for(const auto& wave:waves)check(wave.width>=2.2&&wave.width<=2.6+1e-8&&(wave.points.back()-wave.points.front()).length()>20,"heavy curves retain long slender wave marks");
         thick.plots[0].showYAxis=true;auto rendered=makeScene(thick);auto axes=rendered.plotAxes.at(g.id);bool axis=false;
         for(auto item:rendered.items)if(item.type==Primitive::Line&&item.points.size()==2&&std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8){axis=true;check(std::abs(item.width-30)<1e-8,"y-axis inherits the curve's displayed width");}check(axis,"y-axis shaft is present");
         thick.plots[0].yAxisWidth=2;auto custom=makeScene(thick);for(auto item:custom.items)if(item.type==Primitive::Line&&item.points.size()==2&&std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8)check(std::abs(item.width-2)<1e-8,"explicit y-axis width remains independent of overall ink scaling");

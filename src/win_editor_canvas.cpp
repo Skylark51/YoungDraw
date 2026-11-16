@@ -118,7 +118,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  float toolbarX=12;
  loadFavorites();
  const int toolbarWidth=isolatedStructureEditing?ww-308:ww;
- topLimit=std::max(0,(isolatedStructureEditing?880:1116+int(favorites.size())*48)-toolbarWidth);
+ topLimit=std::max(0,(isolatedStructureEditing?880:1164+int(favorites.size())*48)-toolbarWidth);
  topOffset=std::min(topOffset,topLimit);
  const auto toolbarClip=RectF(0,0,float(toolbarWidth),63);
  auto toolbarState=g.Save();g.SetClip(toolbarClip);g.TranslateTransform(float(-topOffset),0);
@@ -140,7 +140,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  }
  separator();group({104,105});separator();group({107,125,155,156});separator();
  group({170,171,172,173,174});separator();group({160,161,162,163,164});
- if(!isolatedStructureEditing){separator();group({bondAnimationCommand});}
+ if(!isolatedStructureEditing){separator();group({bondAnimationCommand,copyPngCommand});}
  for(int id:favorites)group({id});
  g.Restore(toolbarState);
  clipHits(topHits,toolbarClip,float(-topOffset),0);
@@ -296,11 +296,11 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
     if(sidebarPage==1){
         heading(L"개별 크기·굵기·간격",303);
         const auto* graph=plot(primary());
-        const wchar_t* names[]={L"축 아래 이름",L"데이터 값",L"X축 굵기",L"Y축 굵기",L"곡선 굵기",L"그림 선 굵기",L"Y축 제목 간격"};
-        const double values[]={graph?graph->stateFontSize:0,graph?graph->valueFontSize:0,graph?graph->xAxisWidth:0,graph?graph->yAxisWidth:0,graph?graph->curveWidth:0,graph?graph->structureInkScale*100:100,graph?graph->yTitleGap:0};
-        for(int i=0;i<7;i++){
-            const RectF box{rx+12+(i%2)*120.f,323+(i/2)*36.f,i==6?234.f:114.f,30};
-            hits.push_back({plotAppearanceFirstCommand+i,box});
+        const wchar_t* names[]={L"축 아래 이름",L"데이터 값",L"X축 굵기",L"Y축 굵기",L"곡선 굵기",L"그림 선 굵기",L"Y축 제목 간격",L"범례 글자 크기"};
+        const double values[]={graph?graph->stateFontSize:0,graph?graph->valueFontSize:0,graph?graph->xAxisWidth:0,graph?graph->yAxisWidth:0,graph?graph->curveWidth:0,graph?graph->structureInkScale*100:100,graph?graph->yTitleGap:0,graph?graph->legendFontSize:0};
+        for(int i=0;i<8;i++){
+            const RectF box{rx+12+(i%2)*120.f,323+(i/2)*36.f,114.f,30};
+            hits.push_back({i==7?plotLegendSizeCommand:plotAppearanceFirstCommand+i,box});
             appearance::rounded(g,box,6,box.Contains(float(mouse.x),float(mouse.y))?palette.hover:palette.raised);
             ui::drawLabel(g,names[i],{box.X+3,box.Y,box.Width-6,15},11.f,ink,false,true);
             const std::wstring value=!graph?L"그래프 선택":values[i]==0?L"자동":ui::wide(number(values[i]))+(i==5?L"%":L" pt");

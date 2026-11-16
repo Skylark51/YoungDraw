@@ -84,15 +84,15 @@ void editPlotAxisLengths(int id){
 }
 void editPlotAppearance(int id,int field){
     const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("조절할 에너지 그래프를 선택하세요.");
-    if(field<0||field>6)return;
+    if(field<0||field>7)return;
     const Document before=doc;
-    const wchar_t* labels[]={L"축 아래 이름 크기 (pt, 0: 자동)",L"데이터 값 크기 (pt, 0: 자동)",L"X축 굵기 (pt, 0: 자동)",L"Y축 굵기 (pt, 0: 자동)",L"곡선 굵기 (pt, 0: 경로별 설정)",L"삽입 그림 선 굵기 (%, 100: 기본)",L"Y축 제목 간격 (pt, 0: 자동, 최대 300)"};
-    const double current[]={p->stateFontSize,p->valueFontSize,p->xAxisWidth,p->yAxisWidth,p->curveWidth,p->structureInkScale*100,p->yTitleGap};
+    const wchar_t* labels[]={L"축 아래 이름 크기 (pt, 0: 자동)",L"데이터 값 크기 (pt, 0: 자동)",L"X축 굵기 (pt, 0: 자동)",L"Y축 굵기 (pt, 0: 자동)",L"곡선 굵기 (pt, 0: 경로별 설정)",L"삽입 그림 선 굵기 (%, 100: 기본)",L"Y축 제목 간격 (pt, 0: 자동, 최대 300)",L"범례 글자 크기 (pt, 0: 자동, 4~72)"};
+    const double current[]={p->stateFontSize,p->valueFontSize,p->xAxisWidth,p->yAxisWidth,p->curveWidth,p->structureInkScale*100,p->yTitleGap,p->legendFontSize};
     auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
-        const double value=numeric(values[0],field==5?25:0,field<2?72:field==5?400:field==6?300:100);
-        if(field<2&&value>0&&value<4)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
+        const double value=numeric(values[0],field==5?25:0,(field<2||field==7)?72:field==5?400:field==6?300:100);
+        if((field<2||field==7)&&value>0&&value<4)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
         doc=before;auto& graph=*plot(id);
-        double* targets[]={&graph.stateFontSize,&graph.valueFontSize,&graph.xAxisWidth,&graph.yAxisWidth,&graph.curveWidth,&graph.structureInkScale,&graph.yTitleGap};
+        double* targets[]={&graph.stateFontSize,&graph.valueFontSize,&graph.xAxisWidth,&graph.yAxisWidth,&graph.curveWidth,&graph.structureInkScale,&graph.yTitleGap,&graph.legendFontSize};
         *targets[field]=field==5?value/100:value;if(field==1)graph.fixedValueFontSize=value>0;redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
     auto result=ui::form(win,L"그래프 개별 크기·굵기",{{labels[field],number(current[field])}},update);

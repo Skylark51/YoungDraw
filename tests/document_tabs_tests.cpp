@@ -254,6 +254,8 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else if(formAction>=15&&formAction<=17){
         SendDlgItemMessageW(dialog,116,CB_SETCURSEL,formAction==17?0:1,0);
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction==29||formAction==30){
+        SetDlgItemTextW(dialog,100,formAction==29?L"28":L"40");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==27||formAction==28){
         SetDlgItemTextW(dialog,100,formAction==27?L"60":L"80");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==25){
@@ -295,7 +297,7 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else{
         SetDlgItemTextW(dialog,101,L"30");previewObserved=toNative(doc)!=formBefore;
     }
-    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28)?IDCANCEL:IDOK,0);
+    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28||formAction==30)?IDCANCEL:IDOK,0);
 }
 static void graphCaptionChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection.clear();tool=Select;guides=true;fit();
@@ -337,6 +339,23 @@ static void graphUnitChecks(HWND hwnd){
     formAction=24;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(doc.plots[0].unit=="kJ/mol","custom unit survives reopening settings");
     doc={};history.clear();selection.clear();dirty=false;
     std::cout<<"Graph energy unit selection, preview, cancellation, undo and export checks passed\n";
+}
+static void pngExportChecks(HWND hwnd){
+    struct ClipboardRestore{IDataObject* original=nullptr;ClipboardRestore(){check(SUCCEEDED(OleGetClipboard(&original)),"preserve clipboard before PNG regression");}~ClipboardRestore(){if(SUCCEEDED(OleSetClipboard(original))&&original)OleFlushClipboard();if(original)original->Release();}} restore;
+    doc={};selection.clear();history.clear();dirty=false;
+    Object first;first.id=doc.nextId++;first.kind=ObjectKind::Line;first.points={{-35,-20},{35,20}};first.width=1.7;first.color="#194fa0";doc.objects.push_back(first);
+    auto second=first;second.id=doc.nextId++;for(auto& p:second.points)p.x+=400;doc.objects.push_back(second);
+    const auto before=toNative(doc);auto bitmap=drawingBitmap(doc,true);Color corner;bitmap->GetPixel(0,0,&corner);check(corner.GetA()==0,"PNG background has zero alpha");
+    size_t opaque=0,partial=0;for(UINT y=0;y<bitmap->GetHeight();y++)for(UINT x=0;x<bitmap->GetWidth();x++){Color pixel;bitmap->GetPixel(x,y,&pixel);if(pixel.GetA()==255)opaque++;else if(pixel.GetA()>0)partial++;}
+    check(opaque>10&&partial>10,"transparent PNG contains visible strokes and antialiased alpha edges");
+    writePreview(L"transparent-png-export.png",doc,true);Bitmap saved(L"transparent-png-export.png");check(saved.GetLastStatus()==Ok&&saved.GetWidth()==bitmap->GetWidth(),"exported PNG is a decodable image");saved.GetPixel(0,0,&corner);check(corner.GetA()==0,"file export preserves transparent background");
+    auto clipboardPng=[&](){check(OpenClipboard(hwnd)!=0,"open PNG clipboard for verification");auto bytes=clipboardMemoryBytes(GetClipboardData(RegisterClipboardFormatW(L"PNG")));auto alias=clipboardMemoryBytes(GetClipboardData(RegisterClipboardFormatW(L"image/png")));CloseClipboard();check(bytes==alias&&bytes.size()>8&&bytes.substr(0,8)==std::string("\x89PNG\r\n\x1a\n",8),"clipboard carries real PNG bytes in both native and MIME formats");return bytes;};
+    command(copyPngCommand);check(clipboardPng()==encodePng(*bitmap),"PNG copy without selection copies the whole document");
+    selection={first.id};auto selected=drawingBitmap(selectedDocument(),true);check(selected->GetWidth()<bitmap->GetWidth(),"selected image bounds omit unselected objects");command(copyPngCommand);check(clipboardPng()==encodePng(*selected),"PNG copy uses only the selection when present");
+    check(toNative(doc)==before&&!dirty,"PNG export and copy never modify the source document");
+    auto menu=GetSubMenu(GetMenu(hwnd),0);wchar_t label[128]{};check(GetMenuStringW(menu,exportPngCommand,label,128,MF_BYCOMMAND)>0,"file menu exposes PNG picture export");
+    Document wavePreview;auto graph=reactionProfilePlot();graph.id=wavePreview.nextId++;graph.states[1].breakAfter=true;graph.states[1].breakStyle=1;graph.states[1].breakScale=.1;graph.inkScale=1.5;graph.series[0].width=4;graph.series[0].name="Reaction pathway";graph.legendFontSize=20;wavePreview.plots={graph};writePreview(L"wave-legend-preview.png",wavePreview,true);
+    doc={};selection.clear();history.clear();std::cout<<"Transparent PNG file and clipboard checks passed\n";
 }
 int main(int argc,char** argv){
     BYTE initialKeys[256]{};SetKeyboardState(initialKeys);
@@ -399,6 +418,9 @@ int main(int argc,char** argv){
         check(RegisterClassW(&wc)!=0,"register window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
+        if(argc>1&&std::string(argv[1])=="--png-export-only"){
+            pngExportChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
         graphCaptionChecks(hwnd);
         if(argc>1&&std::string(argv[1])=="--plot-caption-only"){
             DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
@@ -479,6 +501,7 @@ int main(int argc,char** argv){
                 check(!helpText(id).empty(),"each toolbar icon has Korean help");
             }
             check(hit(156).X==hit(155).X+48,"text palette is immediately right of atom palette");
+            check(present(copyPngCommand)&&hit(copyPngCommand).X==hit(bondAnimationCommand).X+48&&!helpText(copyPngCommand).empty(),"transparent PNG copy icon appears next to GIF in the top toolbar");
             check(hit(bondAnimationCommand).X==hit(164).X+64&&hit(bondAnimationCommand).Width==hit(164).Width&&
                   hit(bondAnimationCommand).Height==hit(164).Height,"GIF icon matches the rotation controls after its separator");
             check(hit(164).GetRight()<1200,"all toolbar groups fit minimum window width");
@@ -487,6 +510,7 @@ int main(int argc,char** argv){
             check(present(137)&&present(139)&&present(138)&&!present(141)&&present(addEnergyGapCommand)&&present(plotAnnotationsCommand)&&present(changePlotStyleCommand)&&present(plotAxisLengthsCommand)&&present(151)&&!present(127)&&!present(126),"graph tab consolidates creation and explicit gap insertion without example buttons");
             check(hit(151).Y==hit(137).Y&&!helpText(151).empty(),"spin crossing control fits in the graph tools row and has help");
             check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow+176,"graph sidebar keeps tool ordering below the independent appearance controls");
+            check(present(plotLegendSizeCommand)&&hit(plotLegendSizeCommand).Y<hit(130).Y&&!helpText(plotLegendSizeCommand).empty(),"independent legend font control is accessible in the sidebar");
             for(int id=plotAppearanceFirstCommand;id<=plotAppearanceLastCommand;id++)check(present(id)&&hit(id).Y<hit(130).Y&&!helpText(id).empty(),"independent graph appearance controls are accessible above graph tools");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;
@@ -625,6 +649,11 @@ int main(int argc,char** argv){
             writePreview(L"y-title-spacing.png",doc);
             check(history.undo(doc)&&toNative(doc)==spacingBefore,"Y title spacing is one undo action");
             check(history.redo(doc)&&doc.plots[0].yTitleGap==60,"Y title spacing can be redone");
+            const auto legendBefore=toNative(doc);formBefore=legendBefore;formAction=30;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotLegendSizeCommand);
+            check(formDriven&&previewObserved&&toNative(doc)==legendBefore,"canceling sidebar legend size restores the previewed document");
+            formAction=29;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotLegendSizeCommand);
+            check(formDriven&&previewObserved&&doc.plots[0].legendFontSize==28,"sidebar legend control applies its own font size");
+            check(history.undo(doc)&&toNative(doc)==legendBefore,"legend size is one undo action");
             doc={};history.clear();selection.clear();dirty=false;
         }
         {
