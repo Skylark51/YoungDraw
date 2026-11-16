@@ -1,8 +1,9 @@
-﻿param([ValidateSet('Prepare','Reopen')][string]$Stage='Prepare',[int]$ReuseTestProcessId=0)
+﻿param([ValidateSet('Prepare','Reopen')][string]$Stage='Prepare',[int]$ReuseTestProcessId=0,[string]$SourceDirectory='',[string]$OutputDirectory='')
 $ErrorActionPreference='Stop'
 $taskExisting=@(Get-Process POWERPNT -ErrorAction SilentlyContinue)
 if($taskExisting.Count -and ($taskExisting.Count -ne 1 -or $taskExisting[0].Id -ne $ReuseTestProcessId)){throw 'PowerPoint is already running; leave user session untouched.'}
-$taskOutput=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../build/powerpoint-background'))
+$taskOutput=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../build/powerpoint-background'))}
+$taskSources=if($SourceDirectory){[IO.Path]::GetFullPath($SourceDirectory)}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../build/release-v04-final/office-storage-verification'))}
 New-Item -ItemType Directory -Path $taskOutput -Force | Out-Null
 $taskCanQuit=$false
 $taskApp=$null
@@ -17,7 +18,7 @@ try {
         $taskPresentation=$taskApp.Presentations.Add(0)
         foreach($taskCase in 0..5){
             $taskSlide=$taskPresentation.Slides.Add($taskCase+1,12)
-            $taskImage=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../build/release-v04-final/office-storage-verification/$taskCase.emf"))
+            $taskImage=Join-Path $taskSources "$taskCase.emf"
             $taskSlide.Shapes.AddPicture($taskImage,0,-1,20,20,650,450) | Out-Null
         }
         $taskTarget=Join-Path $taskOutput 'template.pptx'

@@ -4,13 +4,18 @@ from collections import Counter
 from copy import deepcopy
 import hashlib
 import io
-import sys
+import argparse
 import zipfile
 import xml.etree.ElementTree as E
 import olefile
 ROOT=Path(__file__).resolve().parents[1]
-OUT=ROOT/'build/powerpoint-background'
-SOURCES=ROOT/'build/release-v04-final/office-storage-verification'
+parser=argparse.ArgumentParser()
+parser.add_argument('stage',nargs='?',choices=['prepare','verify'],default='verify')
+parser.add_argument('--sources',type=Path,default=ROOT/'build/release-v04-final/office-storage-verification')
+parser.add_argument('--output',type=Path,default=ROOT/'build/powerpoint-background')
+args=parser.parse_args()
+OUT=args.output
+SOURCES=args.sources
 P='http://schemas.openxmlformats.org/presentationml/2006/main'
 A='http://schemas.openxmlformats.org/drawingml/2006/main'
 R='http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -22,7 +27,7 @@ def native(data):
         assert ole.exists('YoungDrawDocument'), 'missing editing source'
         assert any(name[-1].startswith('\x02OlePres') for name in ole.listdir()), 'missing cached presentation'
         return hashlib.sha256(ole.openstream('YoungDrawDocument').read()).hexdigest()
-if len(sys.argv)>1 and sys.argv[1]=='prepare':
+if args.stage=='prepare':
     with zipfile.ZipFile(OUT/'template.pptx') as z: files={n:z.read(n) for n in z.namelist()}
     for i in range(6):
         slide=f'ppt/slides/slide{i+1}.xml'; root=E.fromstring(files[slide]); tree=root.find(f'.//{{{P}}}spTree');pic=tree.find(f'{{{P}}}pic'); assert pic is not None

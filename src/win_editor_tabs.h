@@ -23,5 +23,8 @@ void manageProjects(const std::wstring& initial={});
 void showRecent();
 Document officeCurrentDocument();
 void createDocumentTabs();
+void startRecovery();
+void snapshotRecovery();
+void finishRecovery();
 
 } // namespace yd::editor

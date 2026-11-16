@@ -203,8 +203,8 @@ int delocalizeBonds(Document& d,const std::vector<int>& selection){
     for(auto& b:d.bonds)if(ids.count(b.id)||(ids.count(b.a)&&ids.count(b.b))){b.kind=BondKind::Aromatic;b.doubleSide=0;b.customOrder.clear();b.customDisplay.clear();count++;}return count;
 }
 void History::checkpoint(const Document& d){if(undo_.size()>=100)undo_.erase(undo_.begin());undo_.push_back(d);redo_.clear();}
-bool History::undo(Document& d){if(undo_.empty())return false;redo_.push_back(d);d=undo_.back();undo_.pop_back();return true;}
-bool History::redo(Document& d){if(redo_.empty())return false;undo_.push_back(d);d=redo_.back();redo_.pop_back();return true;}
+bool History::undo(Document& d){if(undo_.empty())return false;redo_.push_back(d);d=std::move(undo_.back());undo_.pop_back();return true;}
+bool History::redo(Document& d){if(redo_.empty())return false;undo_.push_back(d);d=std::move(redo_.back());redo_.pop_back();return true;}
 Document demo(){
     Document d;double l=d.style.bondLength;d.ring({70,60},6,true);
     int a=d.atoms[1].id;Vec v{std::cos(pi/6)*l,l/2};int c=d.addAtom(d.atom(a)->p+v*benzeneConnectorScale);d.addBond(a,c);

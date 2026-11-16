@@ -8,6 +8,62 @@
 #include <limits>
 #include <stdexcept>
 namespace yd {
+namespace {
+double segmentDistance(Vec p,Vec a,Vec b){
+    Vec v=b-a;double length=v.x*v.x+v.y*v.y;
+    double t=length>1e-16?std::clamp(((p-a).x*v.x+(p-a).y*v.y)/length,0.,1.):0;
+    return (p-a-v*t).length();
+}
+bool hitCubic(Vec p,Vec a,Vec b,Vec c,Vec d,double tolerance,int depth=0){
+    if(p.x<std::min({a.x,b.x,c.x,d.x})-tolerance||p.x>std::max({a.x,b.x,c.x,d.x})+tolerance||
+       p.y<std::min({a.y,b.y,c.y,d.y})-tolerance||p.y>std::max({a.y,b.y,c.y,d.y})+tolerance)return false;
+    if(depth>=12||std::max(segmentDistance(b,a,d),segmentDistance(c,a,d))<=tolerance*.2)
+        return segmentDistance(p,a,d)<=tolerance;
+    Vec ab=(a+b)*.5,bc=(b+c)*.5,cd=(c+d)*.5,abc=(ab+bc)*.5,bcd=(bc+cd)*.5,m=(abc+bcd)*.5;
+    return hitCubic(p,a,ab,abc,m,tolerance,depth+1)||hitCubic(p,m,bcd,cd,d,tolerance,depth+1);
+}
+bool inPolygon(Vec p,const std::vector<Vec>& points){
+    bool inside=false;if(points.size()<3)return false;
+    for(size_t i=0,j=points.size()-1;i<points.size();j=i++){
+        auto a=points[i],b=points[j];
+        if((a.y>p.y)!=(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+    }return inside;
+}
+}
+bool hitObject(const Scene& scene,int owner,Vec point,double tolerance){
+    for(const auto& item:scene.items){
+        if(item.owner!=owner||item.points.empty())continue;
+        const auto& ps=item.points;double t=std::max(.001,tolerance+item.width/2);
+        if(item.type==Primitive::Text){
+            auto it=scene.objectBounds.find(owner);if(it==scene.objectBounds.end())continue;
+            auto b=it->second;if(point.x>=b.x-t&&point.y>=b.y-t&&point.x<=b.x+b.w+t&&point.y<=b.y+b.h+t)return true;
+        }else if(item.type==Primitive::Bezier){
+            for(size_t i=0;i+3<ps.size();i+=3)if(hitCubic(point,ps[i],ps[i+1],ps[i+2],ps[i+3],t))return true;
+            if(item.closed&&segmentDistance(point,ps.back(),ps.front())<=t)return true;
+            if(item.filled){
+                std::vector<Vec> outline{ps.front()};
+                for(size_t i=0;i+3<ps.size();i+=3)for(int step=1;step<=32;++step){
+                    double v=step/32.,u=1-v;outline.push_back(ps[i]*(u*u*u)+ps[i+1]*(3*u*u*v)+ps[i+2]*(3*u*v*v)+ps[i+3]*(v*v*v));
+                }
+                if(inPolygon(point,outline))return true;
+            }
+        }else if(item.type==Primitive::Line||item.type==Primitive::Polygon){
+            for(size_t i=1;i<ps.size();++i)if(segmentDistance(point,ps[i-1],ps[i])<=t)return true;
+            if((item.closed||item.type==Primitive::Polygon)&&segmentDistance(point,ps.back(),ps.front())<=t)return true;
+            if((item.filled||item.type==Primitive::Polygon)&&inPolygon(point,ps))return true;
+        }else if(ps.size()>=2){
+            double l=std::min(ps[0].x,ps[1].x),r=std::max(ps[0].x,ps[1].x),top=std::min(ps[0].y,ps[1].y),b=std::max(ps[0].y,ps[1].y);
+            if(item.type==Primitive::Ellipse){
+                double rx=(r-l)/2,ry=(b-top)/2;
+                if(rx<1e-9||ry<1e-9){if(segmentDistance(point,ps[0],ps[1])<=t)return true;continue;}
+                double radius=std::hypot((point.x-(l+r)/2)/rx,(point.y-(top+b)/2)/ry);
+                if((item.filled&&radius<=1)||std::abs(radius-1)*std::min(rx,ry)<=t)return true;
+            }else if(point.x>=l-t&&point.x<=r+t&&point.y>=top-t&&point.y<=b+t){
+                if(item.filled||item.type==Primitive::Image||point.x<=l+t||point.x>=r-t||point.y<=top+t||point.y>=b-t)return true;
+            }
+        }
+    }return false;
+}
 std::vector<ScriptRun> scriptRuns(const std::string& input){
     auto value=chemicalScripts(input);
     std::vector<ScriptRun> runs;std::string normal;
@@ -936,7 +992,7 @@ std::string toSvg(const Scene& s,double widthPt){std::ostringstream o;o.imbue(st
     const double printedWidth=widthPt>0?publicationCheck(s,widthPt).widthPt:r.w;
     const double printedHeight=widthPt>0?r.h*printedWidth/r.w:r.h;
     o<<"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\""<<printedWidth<<"pt\" height=\""<<printedHeight<<"pt\" viewBox=\""<<r.x<<' '<<r.y<<' '<<r.w<<' '<<r.h<<"\">\n<g stroke-linecap=\"round\" stroke-linejoin=\"round\">\n";
-    for(auto& p:s.items){if(p.points.empty())continue;auto a=p.points[0];std::string dash=p.dash==1?" stroke-dasharray=\"4 3\"":p.dash==2?" stroke-dasharray=\"1 2\"":"";
+    for(auto& p:s.items){if(p.points.empty())continue;auto a=p.points[0];if(p.opacity!=255)o<<"<g opacity=\""<<double(p.opacity)/255<<"\">";std::string dash=p.dash==1?" stroke-dasharray=\"4 3\"":p.dash==2?" stroke-dasharray=\"1 2\"":"";
         if(p.type==Primitive::Line||p.type==Primitive::Bezier){o<<"<path fill=\""<<(p.filled?p.color:"none")<<"\" stroke=\""<<p.color<<"\" stroke-width=\""<<p.width<<"\""<<((p.flatEnd||p.flatStart)?" stroke-linecap=\"butt\"":"")<<dash<<" d=\"M "<<a.x<<' '<<a.y;
             if(p.type==Primitive::Bezier){for(size_t i=1;i+2<p.points.size();i+=3)o<<" C "<<p.points[i].x<<' '<<p.points[i].y<<' '<<p.points[i+1].x<<' '<<p.points[i+1].y<<' '<<p.points[i+2].x<<' '<<p.points[i+2].y;}
             else for(size_t i=1;i<p.points.size();i++)o<<" L "<<p.points[i].x<<' '<<p.points[i].y;if(p.closed)o<<" Z";o<<"\"/>\n";}
@@ -944,8 +1000,8 @@ std::string toSvg(const Scene& s,double widthPt){std::ostringstream o;o.imbue(st
         else if(p.type==Primitive::Text){o<<"<text transform=\"rotate("<<p.rotation<<" "<<a.x<<" "<<a.y<<")\" fill=\""<<p.color<<"\" x=\""<<a.x<<"\" y=\""<<a.y+p.fontSize*.91<<"\" font-family=\""<<escape(p.font)<<"\" font-size=\""<<p.fontSize<<"\""<<(p.face&1?" font-weight=\"bold\"":"")<<(p.face&2?" font-style=\"italic\"":"")<<(p.face&4?" text-decoration=\"underline\"":"")<<">";std::istringstream lines(p.text);std::string line;int row=0;while(std::getline(lines,line)){o<<"<tspan x=\""<<a.x<<"\" dy=\""<<(row++?p.fontSize*1.3:0)<<"\">"<<escape(line)<<"</tspan>";}o<<"</text>\n";}
         else if(p.points.size()>=2){Vec z=p.points[1];double x=std::min(a.x,z.x),y=std::min(a.y,z.y),w=std::abs(z.x-a.x),h=std::abs(z.y-a.y);
             if(p.type==Primitive::Image)o<<"<image x=\""<<x<<"\" y=\""<<y<<"\" width=\""<<w<<"\" height=\""<<h<<"\" href=\"data:"<<p.mime<<";base64,"<<hexToBase64(p.imageHex)<<"\"/>\n";
-            else if(p.type==Primitive::Ellipse)o<<"<ellipse fill=\""<<(p.filled?p.color:"none")<<"\" stroke=\""<<p.color<<"\" stroke-width=\""<<p.width<<"\" cx=\""<<x+w/2<<"\" cy=\""<<y+h/2<<"\" rx=\""<<w/2<<"\" ry=\""<<h/2<<"\"/>\n";
-            else o<<"<rect fill=\""<<(p.filled?p.color:"none")<<"\" stroke=\""<<p.color<<"\" stroke-width=\""<<p.width<<"\" x=\""<<x<<"\" y=\""<<y<<"\" width=\""<<w<<"\" height=\""<<h<<"\"/>\n";}}
+            else if(p.type==Primitive::Ellipse)o<<"<ellipse fill=\""<<(p.filled?p.color:"none")<<"\" stroke=\""<<p.color<<"\" stroke-width=\""<<p.width<<"\""<<dash<<" cx=\""<<x+w/2<<"\" cy=\""<<y+h/2<<"\" rx=\""<<w/2<<"\" ry=\""<<h/2<<"\"/>\n";
+            else o<<"<rect fill=\""<<(p.filled?p.color:"none")<<"\" stroke=\""<<p.color<<"\" stroke-width=\""<<p.width<<"\""<<dash<<" x=\""<<x<<"\" y=\""<<y<<"\" width=\""<<w<<"\" height=\""<<h<<"\"/>\n";}if(p.opacity!=255)o<<"</g>\n";}
     o<<"</g>\n</svg>\n";return o.str();
 }
 }

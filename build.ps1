@@ -24,8 +24,8 @@ try {
     cmake --build $outputDir
     if ($LASTEXITCODE) { throw 'Build failed' }
     if ($HeadlessTests) {
-        # Only console tests: omit editor, dialog, theme and Office UI coverage.
-        ctest --test-dir $outputDir --output-on-failure -R '^(core_tests|layout_refinement|atomic_file_save|mechanism_regression|mechanism_editing|mechanism_graph_editing|cdx_import|plot_layout|november_complex_graphs|office_storage_roundtrip)$'
+        # Console tests plus the hidden pointer regression: omit interactive dialog/theme coverage.
+        ctest --test-dir $outputDir --output-on-failure -R '^(quality_regression|pointer_quality|core_tests|layout_refinement|atomic_file_save|mechanism_regression|mechanism_editing|mechanism_graph_editing|cdx_import|plot_layout|november_complex_graphs|office_storage_roundtrip)$'
     } else {
         ctest --test-dir $outputDir --output-on-failure
     }
