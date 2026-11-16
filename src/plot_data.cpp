@@ -227,9 +227,9 @@ std::vector<MechanismStage> mechanismStageData(const std::vector<std::vector<std
             auto optionalSize=[&](size_t column,double maximum){
                 if(row.size()<=column||row[column].find_first_not_of(" \t\r\n")==std::string::npos)return 0.;
                 size_t end=0;const double value=std::stod(row[column],&end);
-                if(row[column].find_first_not_of(" \t\r\n",end)!=std::string::npos||!std::isfinite(value)||value<0||value>maximum||(value>0&&value<.1))throw std::runtime_error("화살표 굵기/화살촉은 0(자동) 또는 허용 범위의 숫자로 입력하세요.");return value;
+                if(row[column].find_first_not_of(" \t\r\n",end)!=std::string::npos||!std::isfinite(value)||value<0||value>maximum||(value>0&&value<.1))throw std::runtime_error(column==4?"화살표 굵기는 0(자동) 또는 0.1~100 pt로 입력하세요.":"화살촉 길이는 0(자동) 또는 0.1~40 pt로 입력하세요.");return value;
             };
-            width=optionalSize(4,8);head=optionalSize(5,40);
+            width=optionalSize(4,maxStageArrowWidth);head=optionalSize(5,40);
             result.push_back({row[0],start,end,font,width,head});if(result.size()>100)throw std::runtime_error("단계는 최대 100개입니다.");
         }catch(const std::exception& e){throw std::runtime_error(std::to_string(i+1)+"행: "+e.what());}
     }return result;

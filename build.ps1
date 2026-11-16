@@ -1,13 +1,21 @@
-param([string]$BuildDirectory = 'build/release-v04-final', [switch]$HeadlessTests = $true)
+param([string]$BuildDirectory = 'build/release-v04-final', [switch]$HeadlessTests = $true, [string]$VisualStudioDirectory = '')
 $ErrorActionPreference = 'Stop'
 if ($BuildDirectory -notmatch '^[A-Za-z0-9_/-]+$' -or $BuildDirectory.Contains('..')) { throw 'Use a relative build folder inside the project.' }
 $env:VSLANG = '1033'
 $projectDir = $PSScriptRoot
 $vswherePath = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-$vsDir = & $vswherePath -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+$vsDir = $VisualStudioDirectory
+if (!$vsDir) { $vsDir = & $vswherePath -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath }
 if (!$vsDir) { throw 'Install Visual Studio Build Tools with Desktop development with C++.' }
 $devShell = Join-Path $vsDir 'Common7/Tools/Launch-VsDevShell.ps1'
-& $devShell -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+$taskOriginalPath = $env:PATH
+if ($VisualStudioDirectory) {
+    Import-Module (Join-Path $vsDir 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
+    Enter-VsDevShell -VsInstallPath $vsDir -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+} else {
+    & $devShell -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+}
+$env:PATH = $env:PATH + ';' + $taskOriginalPath
 $env:VSLANG = '1033'
 $ninjaPath = Join-Path $vsDir 'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe'
 # MSVC/CMake subprocesses can fail on Korean paths. A temporary drive alias

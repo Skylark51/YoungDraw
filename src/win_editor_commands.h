@@ -19,6 +19,8 @@ inline constexpr int plotAnnotationsCommand = 236;
 inline constexpr int addEnergyGapCommand = 237;
 inline constexpr int changePlotStyleCommand = 238;
 inline constexpr int plotAxisLengthsCommand = 239;
+inline constexpr int plotAppearanceFirstCommand = 240; // Six independent sidebar controls.
+inline constexpr int plotAppearanceLastCommand = 245;
 
 void command(int id);
 

@@ -89,6 +89,7 @@ struct EnergyState {
     std::optional<double> breakLow,breakHigh; // Explicit compressed energy interval; both empty selects automatically.
     std::string gapLabel; // Empty: automatically calculated signed delta G (double dagger for TS).
 };
+inline constexpr double maxStageArrowWidth=100.;
 struct MechanismStage { std::string label; double start=0,end=100,fontSize=0,arrowWidth=0,arrowHeadSize=0; }; // Percent span; fontSize 0 matches state captions.
 // Empty color entries inherit the pathway color. Segment i joins states i and i+1.
 struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
@@ -108,6 +109,8 @@ struct EnergyPlot {
     std::optional<double> yMin,yMax;
     double axisScale=1;
     double axisFontSize=0,tickFontSize=0,valueFontSize=0,energyLabelFontSize=0; // pt; 0 fits automatically to graph size.
+    double stateFontSize=0,xAxisWidth=0,curveWidth=0,structureInkScale=1;
+    bool fixedValueFontSize=false; // Sidebar sizes stay fixed; legacy documents retain automatic fitting.
     double valueGap=0,yAxisWidth=0; // Extra energy-label clearance; y-axis width 0 follows the primary curve.
     double yTickStep=0; // 0: automatic; positive: spacing in the plot's energy unit.
     std::vector<MechanismStage> stages; // Empty in older documents; editable independently of energy states.

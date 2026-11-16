@@ -123,6 +123,27 @@ int main(){try{
         g.states[2].breakPath=0;std::ofstream("reaction-profile-scaled-preview.svg")<<toSvg(makeScene(scaled));
     }
     {
+        Document styled;auto graph=newEnergyPlot(0,true);graph.id=styled.nextId++;graph.title="";graph.xLabel="";graph.showYTicks=false;graph.states={{"A",0},{"B",20}};graph.series[0].values={0,20};graph.series[0].color="#137faa";
+        graph.fixedValueFontSize=true;graph.stateFontSize=26;graph.valueFontSize=24;graph.xAxisWidth=3;graph.yAxisWidth=5;graph.curveWidth=7;graph.thinLines=true;graph.inkScale=1.5;
+        int a=styled.addAtom({40,40},6),b=styled.addAtom({65,40},6);int bond=styled.addBond(a,b);graph.states[0].above={a,b,bond};styled.plots={graph};
+        const auto initial=makeScene(styled);styled.plots[0].structureInkScale=2;const auto scene=makeScene(styled);const auto axes=scene.plotAxes.at(graph.id);
+        bool x=false,y=false,curve=false,name=false,value=false,structure=false;
+        for(const auto& item:scene.items){
+            if(item.owner==graph.id&&item.type==Primitive::Line&&item.points.size()==2){
+                if(std::abs(item.points[0].y-axes.origin.y)<1e-8&&std::abs(item.points[1].y-axes.origin.y)<1e-8){x=true;check(std::abs(item.width-3)<1e-8,"X axis thickness is independent of global and thin stroke settings");}
+                if(std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8){y=true;check(std::abs(item.width-5)<1e-8,"Y axis thickness is independent of curve thickness");}
+            }
+            if(item.owner==graph.id&&item.type==Primitive::Bezier&&item.color==graph.series[0].color){curve=true;check(std::abs(item.width-7)<1e-8,"curve thickness is independently respected");}
+            if(item.owner==graph.id&&item.type==Primitive::Text&&item.textRole==6){name=true;check(std::abs(item.fontSize-26)<1e-8,"state name font is independent of axis ticks");}
+            if(item.owner==graph.id&&item.type==Primitive::Text&&item.textRole==8){value=true;check(std::abs(item.fontSize-24)<1e-8,"explicit data value size is not reduced by automatic placement");}
+            if(item.owner==bond&&item.type==Primitive::Line){structure=true;for(const auto& old:initial.items)if(old.owner==bond&&old.type==Primitive::Line)check(std::abs(item.width-old.width*2)<1e-8,"inserted structure stroke can change without resizing text or axes");}
+        }
+        check(x&&y&&curve&&name&&value&&structure,"all independently styled graph elements are rendered");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(styled)),fromCdxml(toCdxml(styled))})check(toNative(restored)==toNative(styled),"independent plot appearance survives native and CDXML saving");
+#endif
+    }
+    {
         Document arrows;auto graph=newEnergyPlot(0,true);graph.id=arrows.nextId++;graph.thinLines=false;graph.xColor="#a12345";
         graph.stages=mechanismStageData({{"Reaction","0","100","14","2.5","8"}});arrows.plots={graph};
         auto arrowItems=[&](){std::vector<Primitive> out;for(auto item:makeScene(arrows).items)if(item.color==graph.xColor&&(item.type==Primitive::Polygon||item.type==Primitive::Line))out.push_back(item);return out;};
@@ -139,8 +160,16 @@ int main(){try{
 #ifdef TEST_CDXML
         for(const auto& restored:{fromNative(toNative(arrows)),fromCdxml(toCdxml(arrows))})check(toNative(restored)==toNative(arrows),"reaction arrow styles survive native and CDXML saving");
 #endif
+        for(double width:{50.,maxStageArrowWidth}){
+            arrows.plots[0].stages=mechanismStageData({{"Reaction","0","100","50",std::to_string(width),"0"}});
+            bool rendered=false;for(auto item:arrowItems())if(item.type==Primitive::Line){rendered=true;check(std::abs(item.width-width)<1e-8,"large reaction arrow thickness is applied to the scene");}
+            check(rendered,"large reaction arrow shafts are rendered");
+#ifdef TEST_CDXML
+            for(const auto& restored:{fromNative(toNative(arrows)),fromCdxml(toCdxml(arrows))})check(toNative(restored)==toNative(arrows),"large reaction arrow thickness survives saving and reopening");
+#endif
+        }
         auto old=mechanismStageData({{"Legacy","0","100","14"}});check(old[0].arrowWidth==0&&old[0].arrowHeadSize==0,"older stage rows retain automatic arrow sizing");
-        for(auto row:std::vector<std::vector<std::string>>{{"Bad","0","100","14","nan","0"},{"Bad","0","100","14","1","41"}}){bool rejected=false;try{mechanismStageData({row});}catch(...){rejected=true;}check(rejected,"invalid reaction arrow dimensions are rejected");}
+        for(auto row:std::vector<std::vector<std::string>>{{"Bad","0","100","14","101","0"},{"Bad","0","100","14","nan","0"},{"Bad","0","100","14","1","41"}}){bool rejected=false;try{mechanismStageData({row});}catch(...){rejected=true;}check(rejected,"invalid reaction arrow dimensions are rejected");}
         std::ofstream("reaction-arrow-style-preview.svg")<<toSvg(makeScene(arrows));
     }
     {
@@ -175,7 +204,7 @@ int main(){try{
         check(waves.size()==4&&(waves[0].points[0]-waves[2].points[0]).length()>waves[0].width+10,"thick waves have a real stroke-dependent separation");
         thick.plots[0].showYAxis=true;auto rendered=makeScene(thick);auto axes=rendered.plotAxes.at(g.id);bool axis=false;
         for(auto item:rendered.items)if(item.type==Primitive::Line&&item.points.size()==2&&std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8){axis=true;check(std::abs(item.width-30)<1e-8,"y-axis inherits the curve's displayed width");}check(axis,"y-axis shaft is present");
-        thick.plots[0].yAxisWidth=2;auto custom=makeScene(thick);for(auto item:custom.items)if(item.type==Primitive::Line&&item.points.size()==2&&std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8)check(std::abs(item.width-6)<1e-8,"y-axis width can be overridden independently");
+        thick.plots[0].yAxisWidth=2;auto custom=makeScene(thick);for(auto item:custom.items)if(item.type==Primitive::Line&&item.points.size()==2&&std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8)check(std::abs(item.width-2)<1e-8,"explicit y-axis width remains independent of overall ink scaling");
 #ifdef TEST_CDXML
         for(const auto& restored:{fromNative(toNative(thick)),fromCdxml(toCdxml(thick))})check(toNative(restored)==toNative(thick),"label clearance and separate axis width survive saving");
 #endif

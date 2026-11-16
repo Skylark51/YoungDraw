@@ -463,7 +463,7 @@ int main(int argc,char** argv){
             // Hosted Windows desktops may cap the native window below the width
             // required by these full-toolbar layout assertions.
             const int nativeWidth=ww,nativeHeight=wh;
-            ww=std::max(1440,ww);wh=std::max(900,wh);
+            ww=std::max(1440,ww);wh=std::max(1040,wh);
             Bitmap snapshot(ww,wh,PixelFormat32bppARGB);Graphics graphics(&snapshot);
             auto repaint=[&](){HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);};
             auto hit=[&](int id)->RectF{for(auto& h:hits)if(h.id==id)return h.box;return {};};
@@ -481,11 +481,11 @@ int main(int argc,char** argv){
                   hit(bondAnimationCommand).Height==hit(164).Height,"GIF icon matches the rotation controls after its separator");
             check(hit(164).GetRight()<1200,"all toolbar groups fit minimum window width");
             check(present(218)&&present(219)&&hit(150).GetBottom()<=wh-bottom,"orbital tools and style button fit the client height");
-            ww=nativeWidth;wh=nativeHeight;repaint();
             auto before=toNative(doc);command(183);repaint();
             check(present(137)&&present(139)&&present(138)&&!present(141)&&present(addEnergyGapCommand)&&present(plotAnnotationsCommand)&&present(changePlotStyleCommand)&&present(plotAxisLengthsCommand)&&present(151)&&!present(127)&&!present(126),"graph tab consolidates creation and explicit gap insertion without example buttons");
             check(hit(151).Y==hit(137).Y&&!helpText(151).empty(),"spin crossing control fits in the graph tools row and has help");
-            check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow,"graph sidebar puts publication formatting last and shares the structure insertion position");
+            check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow+140,"graph sidebar keeps tool ordering below the independent appearance controls");
+            for(int id=plotAppearanceFirstCommand;id<=plotAppearanceLastCommand;id++)check(present(id)&&hit(id).Y<hit(130).Y&&!helpText(id).empty(),"independent graph appearance controls are accessible above graph tools");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;
             check(present(dottedBondCommand)&&!helpText(dottedBondCommand).empty(),"dotted single bond tool is available in the sidebar with help");
@@ -537,6 +537,7 @@ int main(int argc,char** argv){
             CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
             check(snapshot.Save(L"orbital-sidebar-preview.png",&png,nullptr)==Ok,"render orbital drawing tools and mechanism sidebar");
             sidebarPage=1;repaint();check(snapshot.Save(L"graph-sidebar-preview.png",&png,nullptr)==Ok,"render organized graph sidebar");
+            ww=nativeWidth;wh=nativeHeight;repaint();
             doc=originalDoc;history=originalHistory;selection=originalSelection;dirty=originalDirty;origin=originalOrigin;zoom=originalZoom;tool=Select;orbitalKind=OrbitalKind::P;orbitalPhase=0;sidebarPage=0;
         }
         {

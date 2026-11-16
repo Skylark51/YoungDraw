@@ -500,6 +500,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         double scale=std::clamp(std::sqrt(plot.width*plot.height/(460.*240.)),.8,2.);
         double tickFont=plot.tickFontSize>0?plot.tickFontSize:11.5*scale*std::pow(plot.axisScale,.2);
         tickFont=std::min(tickFont,std::max(4.,plot.height*.14));
+        double stateFont=plot.stateFontSize>0?plot.stateFontSize:tickFont;
         double axisFont=plot.axisFontSize>0?plot.axisFontSize:tickFont;
         double energyFont=plot.energyLabelFontSize>0?plot.energyLabelFontSize:tickFont;
         double valueFont=plot.valueFontSize>0?plot.valueFontSize:12.5*scale;
@@ -508,7 +509,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         // Requested sizes are upper bounds: shrink only when the physical graph cannot fit them.
         axisFont=std::min(axisFont,std::max(4.,(plot.width-114)/std::max(1.,widthOf(plot.xLabel,1))));
         tickFont=std::min(tickFont,std::max(4.,plot.height*.14));
-        valueFont=std::min(valueFont,std::max(4.,plot.height*.18));
+        if(!plot.fixedValueFontSize||plot.valueFontSize==0)valueFont=std::min(valueFont,std::max(4.,plot.height*.18));
         double titleFont=axisFont*1.05,legendFont=tickFont;
         double x0=plot.p.x+50,w=std::max(100.,plot.width-54);
         double y0=plot.p.y+plot.height-std::max(40.,tickFont*1.3+axisFont*1.4+16);
@@ -586,9 +587,9 @@ Scene makeScene(const Document& d,const Measure& measure){
             external.push_back({l,t,std::max(1.,r-l),std::max(1.,b-t)});
         }
         s.plotAxes[owner]={{x0,axisY},{x0+w+12*plot.axisScale,axisY},{x0,topY-14*plot.axisScale},axisFont,tickFont,valueFont,energyFont,h};
-        if(plot.showXAxis)arrow({x0,axisY},{x0+w+12*plot.axisScale,axisY},"#000000",std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,plot.axisScale*(3.5/3.0));
-        const double yAxisStroke=plot.yAxisWidth>0?plot.yAxisWidth:plot.series.empty()?2.4:plot.series.front().width;
         const double inkFactor=plot.inkScale*(plot.thinLines?.5:1.);
+        if(plot.showXAxis)arrow({x0,axisY},{x0+w+12*plot.axisScale,axisY},"#000000",plot.xAxisWidth>0?plot.xAxisWidth/inkFactor:std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,plot.axisScale*(3.5/3.0));
+        const double yAxisStroke=plot.yAxisWidth>0?plot.yAxisWidth/inkFactor:plot.series.empty()?2.4:plot.series.front().width;
         if(plot.showYAxis)arrow({x0,axisY},{x0,topY-14*plot.axisScale},"#000000",yAxisStroke,1,std::max(plot.axisScale*(3.5/3.0),yAxisStroke*inkFactor*.6));
         for(size_t i=0;i<plot.stages.size();i++){
             const auto [a,b]=stageRange(plot.stages[i]);double c=(a+b)/2;
@@ -596,7 +597,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             double y=y0+8+laneOffsets[layout.lane]+laneHeights[layout.lane]/2;
             double gap=widthOf(layout.text,font)/2+std::min(font*.35,(b-a)*.04),shaft=std::max(.01,(b-a)/2-gap);
             const auto& stage=plot.stages[i];
-            double weight=stage.arrowWidth>0?stage.arrowWidth:std::max(.6,std::min(font*.085,shaft*.08));
+            double weight=stage.arrowWidth>0?stage.arrowWidth/inkFactor:std::max(.6,std::min(font*.085,shaft*.08));
             const double automaticHead=std::min(font*.7,std::max({font*.20,shaft*.18,weight*inkFactor*3}));
             const double headLength=std::min(stage.arrowHeadSize>0?stage.arrowHeadSize:automaticHead,shaft*.65);
             double headScale=headLength/5;
@@ -652,6 +653,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             for(double shift:{-3.,3.}){Primitive slash;slash.owner=owner;slash.width=yAxisStroke;slash.points={{x0-5,y+shift+3},{x0+5,y+shift-3}};s.items.push_back(slash);}
         }
         std::vector<EnergySeries> paths=plot.series;if(paths.empty()){EnergySeries path;for(auto& st:plot.states)path.values.push_back(st.energy);paths.push_back(path);}
+        if(plot.curveWidth>0)for(auto& path:paths)path.width=plot.curveWidth/inkFactor;
         titleFont=std::min(titleFont,std::max(4.,w/std::max(1.,widthOf(plot.title,1))));
         std::vector<size_t> legendPaths;
         for(size_t k=0;k<paths.size();k++){
@@ -715,7 +717,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             remember(a,b);double dy=b.y-a.y,t0=0,t1=1;
             if(std::abs(dy)<1e-12){if(a.y<topY||a.y>y0)return;}
             else{double u=(topY-a.y)/dy,v=(y0-a.y)/dy;if(u>v)std::swap(u,v);t0=std::max(0.,u);t1=std::min(1.,v);if(t0>t1)return;}
-            Primitive part;part.owner=owner;part.width=path.width*(level&&plot.boldLevels&&plot.thinLines?2.:1.);part.color=path.color;part.dash=dash;part.points={a+(b-a)*t0,a+(b-a)*t1};s.items.push_back(part);
+            Primitive part;part.owner=owner;part.width=path.width*(level&&plot.boldLevels&&plot.thinLines&&plot.curveWidth==0?2.:1.);part.color=path.color;part.dash=dash;part.points={a+(b-a)*t0,a+(b-a)*t1};s.items.push_back(part);
         };
         std::map<size_t,std::pair<const EnergyCrossing*,Vec>> crossings;
         if(!independent)for(const auto& crossing:plot.crossings){
@@ -910,16 +912,16 @@ Scene makeScene(const Document& d,const Measure& measure){
             }
         }
         std::vector<Rect> stateBoxes;double stateBottom=axisY+10,stateScriptTop=0;
-        for(auto& state:plot.states)if(state.label.find("^{")!=std::string::npos)stateScriptTop=-tickFont*.4;
+        for(auto& state:plot.states)if(state.label.find("^{")!=std::string::npos)stateScriptTop=-stateFont*.4;
         for(size_t i=0;i<plot.states.size();i++){
             const auto& state=plot.states[i];if(state.labelPlacement==3)continue;
             bool onCurve=state.labelPlacement==1||state.labelPlacement==2;
             if(onCurve&&(size_t(state.labelPath)>=paths.size()||!visible(paths[size_t(state.labelPath)],i)))continue;
             std::string label=state.label;
             if(state.transitionState&&state.above.empty()&&state.below.empty()&&!label.empty())label="["+label+"]^{‡}";
-            double x=stateX(i)+state.labelOffset.x,tw=scriptWidth(label,tickFont);
-            double scriptTop=label.find("^{")!=std::string::npos?-tickFont*.4:stateScriptTop;
-            double height=tickFont*1.3*(1+std::count(label.begin(),label.end(),'\n'))-scriptTop;
+            double x=stateX(i)+state.labelOffset.x,tw=scriptWidth(label,stateFont);
+            double scriptTop=label.find("^{")!=std::string::npos?-stateFont*.4:stateScriptTop;
+            double height=stateFont*1.3*(1+std::count(label.begin(),label.end(),'\n'))-scriptTop;
             double y=axisY+10;
             if(onCurve){double levelY=pointAt(i,paths[size_t(state.labelPath)].values[i]).y;y=state.labelPlacement==1?levelY-height-10:levelY+10;}
             Rect box{x-tw/2,y+state.labelOffset.y,tw,height};
@@ -930,7 +932,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 if(!moved)break;
             }
             stateBoxes.push_back(box);if(!onCurve)stateBottom=std::max(stateBottom,box.y+box.h);
-            plotText(label,{x,box.y-scriptTop},tickFont,"#000000",true,6,int(i));
+            plotText(label,{x,box.y-scriptTop},stateFont,"#000000",true,6,int(i));
         }
         // Gaps use current data, so changing energies or units updates the annotation.
         for(size_t i=0;i<plot.states.size();++i){const auto& state=plot.states[i];
@@ -1029,13 +1031,13 @@ Scene makeScene(const Document& d,const Measure& measure){
         };
         // Keep labels in their own state's column and choose one readable size for the graph.
         double maxUnitWidth=0;for(auto& caption:captions)maxUnitWidth=std::max(maxUnitWidth,widthOf(caption.text,1));
-        valueFont=std::min(valueFont,std::max(4.,std::max(12.,stateGap*.80)/std::max(1.,maxUnitWidth)));
+        if(!plot.fixedValueFontSize||plot.valueFontSize==0)valueFont=std::min(valueFont,std::max(4.,std::max(12.,stateGap*.80)/std::max(1.,maxUnitWidth)));
         std::map<size_t,size_t> labelsPerState;size_t mostLabels=1;
         for(auto& caption:captions)mostLabels=std::max(mostLabels,++labelsPerState[caption.index]);
         // A shallow multi-path plot needs smaller text before labels drift far from their levels.
-        valueFont=std::min(valueFont,std::max(6.,h/(8.+1.3*mostLabels)));
+        if(!plot.fixedValueFontSize||plot.valueFontSize==0)valueFont=std::min(valueFont,std::max(6.,h/(8.+1.3*mostLabels)));
         const bool strongOmission=std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakOmit>0;});
-        const double minimumValueFont=strongOmission&&plot.valueFontSize>0?valueFont:4.;
+        const double minimumValueFont=(plot.fixedValueFontSize||strongOmission)&&plot.valueFontSize>0?valueFont:4.;
         bool fitted=captions.empty();
         for(int pass=0;pass<40&&!fitted;pass++){
             fitted=true;placedValueBoxes.clear();
@@ -1089,6 +1091,18 @@ Scene makeScene(const Document& d,const Measure& measure){
         graphWeights[graph.id]=graph.inkScale;
         for(const auto& state:graph.states)for(const auto* ids:{&state.above,&state.below})for(int id:*ids)graphWeights.emplace(id,graph.inkScale);
     }
+    std::map<int,double> structureWeights;
+    for(const auto& graph:d.plots)if(std::abs(graph.structureInkScale-1)>1e-9)
+        for(const auto& state:graph.states)for(const auto* ids:{&state.above,&state.below})for(int id:*ids)structureWeights.emplace(id,graph.structureInkScale);
+    for(auto& item:s.items)if(item.type!=Primitive::Text&&item.type!=Primitive::Image)
+        if(const auto found=structureWeights.find(item.owner);found!=structureWeights.end()){
+            item.width*=found->second;
+            if(item.type==Primitive::Polygon)if(const auto* bond=d.bond(item.owner)){
+                const auto v=d.atom(bond->b)->p-d.atom(bond->a)->p;const double length=v.length();
+                if(length>1e-9){Vec center{};for(auto q:item.points)center=center+q;center=center*(1./item.points.size());const Vec normal{-v.y/length,v.x/length};
+                    for(auto& q:item.points){const auto offset=q-center;q=q+normal*((offset.x*normal.x+offset.y*normal.y)*(found->second-1));}}
+            }
+        }
     for(auto& item:s.items)if(const auto found=graphWeights.find(item.owner);found!=graphWeights.end()){
         if(item.type==Primitive::Text)item.textStrokeWidth=item.fontSize*.05*(found->second-1);
         else if(item.type!=Primitive::Image){

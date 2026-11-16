@@ -15,6 +15,7 @@ void publicationLayout(int id);
 void plotSettings(int id);
 void changePlotStyle(int id);
 void editPlotAxisLengths(int id);
+void editPlotAppearance(int id,int field);
 bool adjustSelectedPlotWeight(bool increase);
 void editPlotStages(int id);
 void editPlotCrossings(int id);

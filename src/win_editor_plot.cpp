@@ -82,6 +82,23 @@ void editPlotAxisLengths(int id){
     if(result){if(preview(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }
+void editPlotAppearance(int id,int field){
+    const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("조절할 에너지 그래프를 선택하세요.");
+    if(field<0||field>5)return;
+    const Document before=doc;
+    const wchar_t* labels[]={L"축 아래 이름 크기 (pt, 0: 자동)",L"데이터 값 크기 (pt, 0: 자동)",L"X축 굵기 (pt, 0: 자동)",L"Y축 굵기 (pt, 0: 자동)",L"곡선 굵기 (pt, 0: 경로별 설정)",L"삽입 그림 선 굵기 (%, 100: 기본)"};
+    const double current[]={p->stateFontSize,p->valueFontSize,p->xAxisWidth,p->yAxisWidth,p->curveWidth,p->structureInkScale*100};
+    auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
+        const double value=numeric(values[0],field==5?25:0,field<2?72:field==5?400:100);
+        if(field<2&&value>0&&value<4)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
+        doc=before;auto& graph=*plot(id);
+        double* targets[]={&graph.stateFontSize,&graph.valueFontSize,&graph.xAxisWidth,&graph.yAxisWidth,&graph.curveWidth,&graph.structureInkScale};
+        *targets[field]=field==5?value/100:value;if(field==1)graph.fixedValueFontSize=value>0;redraw();UpdateWindow(win);return {};
+    }catch(const std::exception& e){return ui::wide(e.what());}};
+    auto result=ui::form(win,L"그래프 개별 크기·굵기",{{labels[field],number(current[field])}},update);
+    if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+    else{doc=before;redraw();}
+}
 void changePlotStyle(int id){
     const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("스타일을 바꿀 에너지 그래프를 선택하세요.");
     const Document before=doc;const int originalMode=p->mode;
@@ -131,7 +148,7 @@ static std::optional<double> kilojoulesPerUnit(const std::string& unit){
 }
 void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");EnergyPlot original=*p;Document before=doc;
     auto update=[&](const std::vector<std::string>& v)->std::wstring{try{EnergyPlot p=original;p.title=v[0];p.unit=v[1]==ui::utf8(L"kcal mol⁻¹")?"kcal mol^{-1}":v[1];p.xLabel=v[2];p.yLabel=v[3];p.xColor=colorValue(v[4]);p.yColor=colorValue(v[5]);auto size=values(v[6]);if(size.size()!=2||size[0]<180||size[1]<140||size[0]>4000||size[1]>4000)return L"크기는 180×140 ~ 4000×4000 pt로 입력하세요.";p.width=size[0];p.height=size[1];p.mode=std::stoi(v[7]);p.showValues=v[8]=="1";p.yTickStep=v[9].empty()?0:numeric(v[9],0);p.yMin=v[10].empty()?std::optional<double>{}:numeric(v[10]);p.yMax=v[11].empty()?std::optional<double>{}:numeric(v[11]);
- p.valueGap=numeric(v[26],0,200);p.yAxisWidth=numeric(v[27],0,20);
+ p.valueGap=numeric(v[26],0,200);p.yAxisWidth=numeric(v[27],0,100);
  p.axisFontSize=numeric(v[12],0,72);p.tickFontSize=numeric(v[13],0,72);p.valueFontSize=numeric(v[14],0,72);p.energyLabelFontSize=numeric(v[15],0,72);p.thinLines=v[16]=="1";p.boldLevels=v[17]=="1";
  for(double font:{p.axisFontSize,p.tickFontSize,p.valueFontSize,p.energyLabelFontSize})if(font>0&&font<4)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
  if(v[18]=="1"&&p.unit!=original.unit){
@@ -451,8 +468,8 @@ void editPlotStages(int id){
     auto update=[&](const ui::Table& cells)->std::wstring{try{
         auto candidate=mechanismStageData(cells);doc=before;plot(id)->stages=std::move(candidate);redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
-    auto result=ui::table(win,L"반응 이름·화살표 범위",{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 크기 (pt, 0: 자동)",L"화살표 굵기 (pt, 0: 자동)",L"화살촉 길이 (pt, 0: 자동)"},rows,update,true,
-        L"x축 위에 ← 반응 이름 → 표시 · 범위: x축 전체 폭의 0~100% (최소 1%) · 겹치는 범위는 다른 줄에 표시 · 글자: 0(상태 이름과 같은 크기) 또는 4~72 pt · 화살표: 굵기 0(자동) / 0.1~8 pt, 화살촉 0(구간 길이에 맞춤) / 0.1~40 pt · 긴 설명은 줄바꿈 · 모두 삭제하면 숨김");
+    auto result=ui::table(win,L"반응 이름·화살표 범위",{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 크기 (pt, 0: 자동)",L"화살표 굵기 (0: 자동, 0.1~100 pt)",L"화살촉 길이 (pt, 0: 자동)"},rows,update,true,
+        L"x축 위에 ← 반응 이름 → 표시 · 범위: x축 전체 폭의 0~100% (최소 1%) · 겹치는 범위는 다른 줄에 표시 · 글자: 0(상태 이름과 같은 크기) 또는 4~72 pt · 화살표: 굵기 0(자동) / 0.1~100 pt, 화살촉 0(구간 길이에 맞춤) / 0.1~40 pt · 긴 설명은 줄바꿈 · 모두 삭제하면 숨김");
     if(result){update(*result);if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }
@@ -464,7 +481,7 @@ void snapPlotStages(int id){
     int index=std::stoi((*choice)[0])-1;
     if(index<0&&p->stages.size()>=100)throw std::runtime_error("반응 이름은 최대 100개입니다.");
     MechanismStage label=index<0?MechanismStage{"Mechanism",0,100}:p->stages[size_t(index)];
-    auto text=ui::form(win,L"반응 이름",{{L"반응 이름",label.label,false,{},false,4,true},{L"글자 크기 (pt, 0: 자동)",number(label.fontSize)},{L"화살표 굵기 (pt, 0: 자동)",number(label.arrowWidth)},{L"화살촉 길이 (pt, 0: 자동)",number(label.arrowHeadSize)}});if(!text)return;
+    auto text=ui::form(win,L"반응 이름",{{L"반응 이름",label.label,false,{},false,4,true},{L"글자 크기 (pt, 0: 자동)",number(label.fontSize)},{L"화살표 굵기 (0: 자동, 0.1~100 pt)",number(label.arrowWidth)},{L"화살촉 길이 (pt, 0: 자동)",number(label.arrowHeadSize)}});if(!text)return;
     auto checked=mechanismStageData({{(*text)[0],"0","100",(*text)[1],(*text)[2],(*text)[3]}});if(checked.empty())return;
     snapLabel=checked.front();snapPlot=id;snapStage=index;snapStart.reset();selection={id};tool=Select;
     status=L"자석 배치: 준위의 왼쪽 끝·중앙·오른쪽 끝 중 첫 점을 클릭하세요. Esc: 취소";redraw();
