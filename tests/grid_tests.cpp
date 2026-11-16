@@ -19,7 +19,7 @@ struct Fixture {
         };
         grid.preview=[&,original](const ui::Table& data){try{auto candidate=energyGridData(original,data);applied=std::move(candidate);return std::wstring{};}catch(const std::exception& e){return ui::wide(e.what());}};
         auto hwnd=CreateWindowExW(0,L"YoungDrawGridRegression",L"Grid test",WS_OVERLAPPED,0,0,990,640,nullptr,nullptr,GetModuleHandleW(nullptr),&grid);
-        check(hwnd!=nullptr,"create grid");
+        check(hwnd!=nullptr,"create grid");ui::attachWindowHelp(hwnd);for(int id:{20,21,22,23,24,27,28})check(ui::hasButtonHelp(GetDlgItem(hwnd,id)),"all table action buttons have tooltip descriptions");
     }
     ~Fixture(){DestroyWindow(grid.win);DeleteObject(grid.font);}
     void edit(int row,int col,const wchar_t* text){ui::selectCell(grid,row,col);ui::editCell(grid);SetWindowTextW(grid.edit,text);}

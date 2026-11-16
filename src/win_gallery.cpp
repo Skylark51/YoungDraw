@@ -1,3 +1,5 @@
+#include "win_button_help.h"
+#include <map>
 #include "win_gallery.h"
 #include "win_dialogs.h"
 #include "win_ui.h"
@@ -84,6 +86,7 @@ void paint(HWND hwnd,Gallery& f,HDC dc){
     button(g,f,IDOK,L"선택한 템플릿 삽입",{preview.X,float(h-54),184,34},true,f.selected>=0);
     button(g,f,IDCANCEL,L"닫기",{preview.X+194,float(h-54),106,34});
     Graphics output(dc);ui::presentPixels(output,bitmap);
+    std::vector<ui::HelpRegion> help;for(const auto& hit:f.targets){int id=hit.command;std::wstring text;if(id>=1000)text=f.cards->at(size_t(id-1000)).name+L" 템플릿을 선택하여 크게 봅니다. 더블클릭하면 문서에 삽입합니다.";else if(id>=100&&id<110)text=std::wstring(captions[id-100])+L" 분류의 템플릿을 표시합니다.";else if(id>=300&&id<307)text=L"선택한 템플릿의 M 자리를 이 금속으로 바꿔 미리 봅니다.";else {const std::map<int,std::wstring> labels={{201,L"이전 페이지"},{202,L"다음 페이지"},{410,L"즐겨찾기"},{411,L"편집 탭으로 열기"},{412,L"이름 변경"},{413,L"분류 이동"},{414,L"삭제"},{IDOK,L"선택한 템플릿 삽입"},{IDCANCEL,L"닫기"}};auto it=labels.find(id);text=ui::labelHelp(it==labels.end()?L"템플릿":it->second);}auto b=hit.box;help.push_back({UINT_PTR(id),{LONG(b.X),LONG(b.Y),LONG(b.GetRight()),LONG(b.GetBottom())},text});}ui::setRegionHelp(hwnd,help);
 }
 void command(HWND hwnd,Gallery& f,int id){
     if(id>=100&&id<110){f.category=f.categories[size_t(id-100)];filter(f);}
@@ -102,7 +105,7 @@ LRESULT CALLBACK searchProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWOR
 }
 LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     auto* f=reinterpret_cast<Gallery*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
-    if(msg==WM_CREATE){f=static_cast<Gallery*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,(LONG_PTR)f);
+    if(msg==WM_CREATE){ui::enableButtonHelp();f=static_cast<Gallery*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,(LONG_PTR)f);
         f->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
         const auto tone=appearance::palette().raised;
         f->editBrush=CreateSolidBrush(RGB(tone.GetR(),tone.GetG(),tone.GetB()));

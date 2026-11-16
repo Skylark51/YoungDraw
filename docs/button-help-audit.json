@@ -1,0 +1,220 @@
+{
+  "date": "2026-11-17",
+  "scope": "YoungDraw 소스의 모든 네이티브 BUTTON 생성 지점과 직접 그리는 버튼·카드·탭·추가 표시",
+  "nativeStrategy": "UI 스레드의 버튼 생성과 문구 변경을 감지하여 설명을 자동 등록. 기존 도움말 창은 재사용. 창 종료 시 설명 저장소 정리.",
+  "nativeCreationSiteCount": 31,
+  "nativeCreationSites": [
+    {
+      "file": "src/win_editor_animation.cpp",
+      "line": 890,
+      "source": "cancel=CreateWindowW(L\"BUTTON\",L\"취소\",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,290,83,104,28,window,nullptr,nullptr,nullptr);"
+    },
+    {
+      "file": "src/win_editor_animation.cpp",
+      "line": 1125,
+      "source": "HWND control=CreateWindowW(L\"BUTTON\",labels[id-PreviewPlay],WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,"
+    },
+    {
+      "file": "src/win_editor_animation.cpp",
+      "line": 1135,
+      "source": "auto control=CreateWindowW(L\"BUTTON\",id==PreviewAdd?L\"단계 추가…\":id==PreviewRemove?L\"단계 삭제\":"
+    },
+    {
+      "file": "src/win_editor_animation.cpp",
+      "line": 1267,
+      "source": "HWND button=CreateWindowW(L\"BUTTON\",label,WS_CHILD|WS_VISIBLE|WS_TABSTOP,x,r.bottom-40,108,28,hwnd,HMENU(INT_PTR(id)),nullptr,nullptr);"
+    },
+    {
+      "file": "src/win_grid.cpp",
+      "line": 331,
+      "source": "for(int i=0;i<5;i++){HWND b=CreateWindowW(L\"BUTTON\",labels[i],WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,positions[i],540,155,34,hwnd,(HMENU)(INT_PTR)(20+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);if(i==2)g->apply=b;}"
+    },
+    {
+      "file": "src/win_grid.cpp",
+      "line": 332,
+      "source": "if(g->scripts)for(int i=0;i<2;i++){HWND b=CreateWindowW(L\"BUTTON\",i?L\"x²\":L\"x₂\",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,860+i*50,540,46,34,hwnd,(HMENU)(INT_PTR)(25+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}"
+    },
+    {
+      "file": "src/win_grid.cpp",
+      "line": 333,
+      "source": "for(int i=0;i<2;i++){HWND b=CreateWindowW(L\"BUTTON\",i?L\"다시 실행 (Ctrl+Shift+Z)\":L\"되돌리기 (Ctrl+Z)\",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,16+i*240,580,230,28,hwnd,(HMENU)(INT_PTR)(27+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}"
+    },
+    {
+      "file": "src/win_project_manager.cpp",
+      "line": 395,
+      "source": "self->control(L\"STATIC\",L\"내 프로젝트\",1,0);self->control(L\"BUTTON\",L\"검색…\",16,WS_TABSTOP|BS_OWNERDRAW);self->control(L\"STATIC\",L\"노트 · 자동 저장\",2,0);"
+    },
+    {
+      "file": "src/win_project_manager.cpp",
+      "line": 398,
+      "source": "for(int i=0;i<6;i++)self->control(L\"BUTTON\",labels[i],10+i,WS_TABSTOP|BS_OWNERDRAW);"
+    },
+    {
+      "file": "src/win_project_manager.cpp",
+      "line": 400,
+      "source": "for(int i=0;i<9;i++)self->control(L\"BUTTON\",actions[i],20+i,WS_TABSTOP|BS_OWNERDRAW);"
+    },
+    {
+      "file": "src/win_project_manager.cpp",
+      "line": 401,
+      "source": "self->control(L\"BUTTON\",L\"선택 항목 복제\",17,WS_TABSTOP|BS_OWNERDRAW);self->control(L\"BUTTON\",L\"선택 항목 ZIP 내보내기\",18,WS_TABSTOP|BS_OWNERDRAW);"
+    },
+    {
+      "file": "src/win_project_manager.cpp",
+      "line": 402,
+      "source": "self->control(L\"BUTTON\",L\"새 폴더\",29,WS_TABSTOP|BS_OWNERDRAW);self->control(L\"BUTTON\",L\"상위 폴더\",30,WS_TABSTOP|BS_OWNERDRAW);self->control(L\"BUTTON\",L\"선택 항목 이동\",31,WS_TABSTOP|BS_OWNERDRAW);"
+    },
+    {
+      "file": "src/win_project_manager.cpp",
+      "line": 403,
+      "source": "const wchar_t* previewActions[]={L\"미리보기 확대 / 돌아가기\",L\"확대\",L\"축소\",L\"배율 초기화\"};for(int i=0;i<4;++i)self->control(L\"BUTTON\",previewActions[i],32+i,WS_TABSTOP|BS_OWNERDRAW);"
+    },
+    {
+      "file": "src/win_mechanism_editor.cpp",
+      "line": 295,
+      "source": "const wchar_t* tools[]={L\"이름·에너지\",L\"전체 표\",L\"연결하기\",L\"분기 추가\",L\"자동 정렬\",L\"추가 설정\"};for(int i=0;i<6;++i)self->control(L\"BUTTON\",tools[i],30+i,BS_OWNERDRAW|WS_TABSTOP);"
+    },
+    {
+      "file": "src/win_mechanism_editor.cpp",
+      "line": 297,
+      "source": "const wchar_t* tools2[]={L\"원본 비교\",L\"화면 맞춤\",L\"되돌리기\",L\"다시 실행\",L\"확대 +\",L\"축소 −\"};for(int i=0;i<6;++i)self->control(L\"BUTTON\",tools2[i],40+i,BS_OWNERDRAW|WS_TABSTOP);"
+    },
+    {
+      "file": "src/win_mechanism_editor.cpp",
+      "line": 299,
+      "source": "self->control(L\"BUTTON\",L\"⟳ 마지막 → 처음 연결\",64,BS_AUTOCHECKBOX|WS_TABSTOP);"
+    },
+    {
+      "file": "src/win_mechanism_editor.cpp",
+      "line": 302,
+      "source": "const wchar_t* drawingTools[]={L\"그림 그리기\",L\"붙여넣기\",L\"파일 넣기\",L\"중간체 삽입\"};for(int i=0;i<4;++i)self->control(L\"BUTTON\",drawingTools[i],60+i,BS_OWNERDRAW|WS_TABSTOP);"
+    },
+    {
+      "file": "src/win_mechanism_editor.cpp",
+      "line": 303,
+      "source": "self->control(L\"BUTTON\",L\"단계·연결 삭제\",65,BS_OWNERDRAW|WS_TABSTOP);self->control(L\"BUTTON\",L\"단계 합치기\",66,BS_OWNERDRAW|WS_TABSTOP);"
+    },
+    {
+      "file": "src/win_mechanism_editor.cpp",
+      "line": 304,
+      "source": "const wchar_t* toolPages[]={L\"구조\",L\"배치\",L\"보기\"};for(int i=0;i<3;i++)self->control(L\"BUTTON\",toolPages[i],70+i,BS_OWNERDRAW|WS_TABSTOP);"
+    },
+    {
+      "file": "src/win_mechanism_editor.cpp",
+      "line": 309,
+      "source": "self->control(L\"BUTTON\",L\"적용\",IDOK,BS_OWNERDRAW|WS_TABSTOP);self->control(L\"BUTTON\",L\"취소\",IDCANCEL,BS_OWNERDRAW|WS_TABSTOP);"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 47,
+      "source": "for(int i=0;i<5;++i)control(L\"BUTTON\",graphNames[i],WS_TABSTOP|BS_OWNERDRAW,100+i,22+(i%3)*228,53+(i/3)*169,216,156);"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 50,
+      "source": "control(L\"BUTTON\",L\"ΔE · 에너지\",WS_TABSTOP|BS_OWNERDRAW,200,22,435,216,43);"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 51,
+      "source": "control(L\"BUTTON\",L\"ΔG · 자유 에너지\",WS_TABSTOP|BS_OWNERDRAW,201,250,435,216,43);"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 55,
+      "source": "control(L\"BUTTON\",picker->editStyle?L\"적용\":L\"만들기\",WS_TABSTOP|BS_OWNERDRAW,IDOK,476,buttonY,100,34);"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 56,
+      "source": "control(L\"BUTTON\",L\"취소\",WS_TABSTOP|BS_OWNERDRAW,IDCANCEL,588,buttonY,100,34);"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 183,
+      "source": "if(field.color){HWND b=CreateWindowW(L\"BUTTON\",L\"...\",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,621,y,39,29,hwnd,(HMENU)(INT_PTR)(500+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);f->rows.back().push_back(b);}"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 185,
+      "source": "if(field.scripts)for(int k=0;k<2;k++){HWND b=CreateWindowW(L\"BUTTON\",k?L\"x₂\":L\"x²\",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,565+k*48,y,44,29,hwnd,(HMENU)(INT_PTR)((k?800:700)+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);f->rows.back().push_back(b);}"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 191,
+      "source": "for(int i=0;i<2;i++){HWND b=CreateWindowW(L\"BUTTON\",i?L\"취소\":L\"적용\",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,450+i*110,y+4,100,32,hwnd,(HMENU)(INT_PTR)(i?IDCANCEL:IDOK),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);if(!i)f->apply=b;}"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 293,
+      "source": "control(L\"BUTTON\",s->action,IDOK,414,312,100,29,WS_TABSTOP|BS_DEFPUSHBUTTON);"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "line": 294,
+      "source": "control(L\"BUTTON\",L\"닫기\",IDCANCEL,522,312,100,29,WS_TABSTOP);"
+    },
+    {
+      "file": "src/win_plot_manager.cpp",
+      "line": 33,
+      "source": "HWND button(int id,const wchar_t* label){auto h=CreateWindowExW(0,L\"BUTTON\",label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,1,1,window,(HMENU)INT_PTR(id),GetModuleHandleW(nullptr),nullptr);SendMessageW(h,WM_SETFONT,(WPARAM)font,TRUE);return h;}"
+    }
+  ],
+  "customSurfaces": [
+    {
+      "file": "src/win_editor_canvas.cpp",
+      "controls": "상단·좌측·우측 도구 및 원소, 레이어, 구조 편집, 단계 추가",
+      "help": "helpText / setRegionHelp"
+    },
+    {
+      "file": "src/win_editor_tabs.cpp",
+      "controls": "문서 탭 전환과 닫기",
+      "help": "각 문서 탭의 전환·닫기 영역 분리"
+    },
+    {
+      "file": "src/win_dialogs.cpp",
+      "controls": "속성창 분류 탭",
+      "help": "분류별 설정 표시 설명"
+    },
+    {
+      "file": "src/win_gallery.cpp",
+      "controls": "10개 분류, 템플릿 카드, 페이지, 즐겨찾기, 편집, 이름, 이동, 삭제, 7개 금속, 삽입, 닫기",
+      "help": "현재 보이는 클릭 영역과 도움말 영역 일치"
+    },
+    {
+      "file": "src/win_theme.cpp",
+      "controls": "7개 테마, 6개 무늬, 3개 강도, 적용, 취소",
+      "help": "18개 모든 영역"
+    },
+    {
+      "file": "src/win_mechanism_editor.cpp",
+      "controls": "구조·배치·보기 분류, 구조·단계·연결·배치·원본 비교·편집 기록 및 추가 표시",
+      "help": "의미별 개별 설명과 추가·분기 구분"
+    },
+    {
+      "file": "src/win_plot_manager.cpp",
+      "controls": "5개 분류와 전체 편집 도구, 구조 편집, 실행 취소·다시 실행·닫기",
+      "help": "그래프 명령 설명 및 구조 편집 설명"
+    },
+    {
+      "file": "src/win_editor_animation.cpp",
+      "controls": "재생·출력·자막·구조·프레임 편집, 탐색 막대, 단계 썸네일",
+      "help": "기능별 설명 및 탐색·드래그 설명"
+    }
+  ],
+  "reorganization": [
+    "메인 메커니즘 사이드바를 관리·편입·신규·파일 인식으로 통합",
+    "메커니즘 편집 도구를 독립 창 우측의 구조·배치·보기 탭으로 구성",
+    "실행 취소·다시 실행을 편집 기록 영역으로 묶음",
+    "그래프 편집은 별도 관리 창의 5개 분류로 통합"
+  ],
+  "runtimeCoverage": [
+    "document_tabs: 메인 표시 버튼, 편입 적용·취소·단일 실행 취소, 일반 속성 버튼",
+    "graph_manager: 5개 분류 모든 네이티브 버튼",
+    "mechanism_editor_ui: 25개 버튼과 모든 분류의 작은 화면 배치",
+    "project_manager_ui: 생성된 모든 프로젝트 작업 버튼",
+    "grid_regression: 행·적용·취소·편집 기록 버튼",
+    "appearance_themes: 18개 테마 영역 및 갤러리 영역 생성·제거",
+    "animated_gif: 모든 재생·편집 버튼 및 탐색·썸네일 영역"
+  ]
+}

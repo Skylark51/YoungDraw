@@ -181,6 +181,13 @@ void insertBranchArrows(){
     if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();fit();status=L"세로선 분기 화살표를 만들었습니다. 그룹으로 이동 · Ctrl+Shift+G로 개별 편집 · Ctrl+Z로 되돌리기";}
 }
 Reaction* selectedMechanism();
+void includeSelectedMechanism(){
+    auto ids=groupedSelection(selection);if(ids.empty())throw std::runtime_error("메커니즘에 넣을 구조들을 먼저 선택하세요.");
+    const Document before=doc;Document draft=before;const int owner=arrangeImportedMechanism(draft,ids,false,true);
+    const bool hasArrow=std::any_of(before.objects.begin(),before.objects.end(),[&](const Object& object){return object.head&&std::find(ids.begin(),ids.end(),object.id)!=ids.end();});if(!hasArrow){auto& r=draft.reactions.back();r.links.clear();r.slotGrid.clear();r.fixedFrames=false;r.manualConnections=false;optimizeMechanism(draft,{owner},false);}
+    if(auto result=mechanismEditor(win,draft,owner,&before)){history.checkpoint(before);doc=std::move(*result);selection={owner};targetContainer=0;sidebarPage=0;tool=Select;changed();fit();status=L"선택한 구조를 메커니즘에 편입했습니다. Ctrl+Z로 원래 구조 배치까지 복원할 수 있습니다.";}
+}
+
 void arrangeImported(bool editAfter){
     if(editAfter){
         auto* existing=selectedMechanism();

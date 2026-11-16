@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_dialogs.h"
 #include "win_ui.h"
 #include "win_dialog_style.h"
@@ -38,7 +39,7 @@ void drawGraphCard(const DRAWITEMSTRUCT& item,GraphPicker& picker,int mode){
 }
 LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
     auto* picker=reinterpret_cast<GraphPicker*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
-    if(message==WM_CREATE){
+    if(message==WM_CREATE){ui::enableButtonHelp();
         picker=static_cast<GraphPicker*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(picker));
         picker->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
         auto control=[&](const wchar_t* kind,const wchar_t* label,DWORD style,int id,int x,int y,int w,int h){auto c=CreateWindowW(kind,label,WS_CHILD|WS_VISIBLE|style,x,y,w,h,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);SendMessageW(c,WM_SETFONT,WPARAM(picker->font),TRUE);return c;};
@@ -158,7 +159,7 @@ static void layoutFormTabs(Form& f){
 }
 static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     auto* f=reinterpret_cast<Form*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
-    if(msg==WM_CREATE){
+    if(msg==WM_CREATE){ui::enableButtonHelp();
         f=static_cast<Form*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(f));
         f->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());int y=16;
         if(!f->tabs.empty()){
@@ -168,7 +169,7 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 TCITEMW item{};item.mask=TCIF_TEXT;item.pszText=group.first.data();
                 TabCtrl_InsertItem(f->tab,TabCtrl_GetItemCount(f->tab),&item);
             }
-            TabCtrl_SetCurSel(f->tab,0);y=52;
+            TabCtrl_SetCurSel(f->tab,0);y=52;std::vector<ui::HelpRegion> help;for(size_t i=0;i<f->tabs.size();i++){RECT rect{};if(TabCtrl_GetItemRect(f->tab,int(i),&rect))help.push_back({UINT_PTR(i+1),rect,f->tabs[i].first+L" 설정 항목을 표시합니다. 다른 탭의 입력값은 유지됩니다."});}ui::setRegionHelp(f->tab,help);
         }
         for(size_t i=0;i<f->fields.size();i++){
             auto& field=f->fields[i];HWND label=CreateWindowW(L"STATIC",field.label.c_str(),WS_CHILD|WS_VISIBLE,16,y+4,210,labelHeight(field),hwnd,nullptr,nullptr,nullptr);SendMessageW(label,WM_SETFONT,(WPARAM)f->font,TRUE);
@@ -275,7 +276,7 @@ struct SearchDialog {
     }
     static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         auto* s=reinterpret_cast<SearchDialog*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
-        if(msg==WM_CREATE){
+        if(msg==WM_CREATE){ui::enableButtonHelp();
             s=static_cast<SearchDialog*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
             SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(s));
             auto control=[&](const wchar_t* cls,const wchar_t* text,int id,int x,int y,int w,int h,DWORD flags,DWORD ex=0){

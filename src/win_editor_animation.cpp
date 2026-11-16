@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_editor_animation.h"
 #include "cdxml.h"
 #include "mechanism_data.h"
@@ -864,6 +865,7 @@ void paintPreview(HWND hwnd,HDC dc,AnimationPreview& preview){
     Graphics output(dc);
     output.SetPageUnit(UnitPixel);
     output.DrawImage(preview.buffer.get(),Gdiplus::Rect(0,0,w,h),0,0,w,h,UnitPixel);
+    std::vector<ui::HelpRegion> help;help.push_back({1,seekBounds(hwnd),L"원하는 재생 위치를 클릭하거나 드래그해 프레임을 이동합니다."});for(size_t i=size_t(preview.thumbOffset);i<preview.thumbs.size();i++){LONG x=8+LONG(i-preview.thumbOffset)*92;if(x>=w-previewSidebar)break;help.push_back({UINT_PTR(i+2),{x,h-78,std::min(x+86,LONG(w-previewSidebar)),h-8},L"이 단계로 이동합니다. 썸네일을 드래그해 단계 순서를 바꿀 수 있습니다."});}ui::setRegionHelp(hwnd,help);
 }
 
 void setPlaying(HWND hwnd,AnimationPreview& preview,bool playing){
@@ -1113,7 +1115,7 @@ int thumbnailAt(HWND hwnd,const AnimationPreview& preview,POINT p){
 
 LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     auto* preview=reinterpret_cast<AnimationPreview*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
-    if(msg==WM_CREATE){
+    if(msg==WM_CREATE){ui::enableButtonHelp();
         preview=static_cast<AnimationPreview*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
         SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(preview));
         preview->font=CreateFontW(-15,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
@@ -1255,7 +1257,7 @@ struct RoutePicker {
         InvalidateRect(hwnd,nullptr,TRUE);
     }
     static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
-        if(msg==WM_CREATE){
+        if(msg==WM_CREATE){ui::enableButtonHelp();
             auto p=static_cast<RoutePicker*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
             SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(p));
             RECT r{};GetClientRect(hwnd,&r);

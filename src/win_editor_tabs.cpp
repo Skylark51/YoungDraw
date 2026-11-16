@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_dialogs.h"
 #include "win_editor_chrome.h"
 #include "win_editor_files.h"
@@ -289,7 +290,7 @@ LRESULT CALLBACK documentTabProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR
             auto saved=g.Save();g.SetClip(RectF(box.X+10,box.Y,box.Width-34,box.Height));text(g,name,box.X+10,box.Y+6,12,selected?p.text:p.muted,selected);g.Restore(saved);
             Pen cross(hovered?p.text:p.muted,1.2f);float x=float(r.right-14),y=float(client.bottom)/2;g.DrawLine(&cross,x-3,y-3,x+3,y+3);g.DrawLine(&cross,x-3,y+3,x+3,y-3);
         }
-        Graphics out(dc);ui::presentPixels(out,buffer);EndPaint(hwnd,&ps);return 0;
+        Graphics out(dc);ui::presentPixels(out,buffer);EndPaint(hwnd,&ps);std::vector<ui::HelpRegion> help;for(int i=0;i<TabCtrl_GetItemCount(hwnd);i++){RECT r{};if(!TabCtrl_GetItemRect(hwnd,i,&r))continue;RECT close=r;close.left=std::max(r.left,r.right-24);r.right=close.left;help.push_back({UINT_PTR(2*i+1),r,L"이 문서 탭으로 전환합니다. 다른 문서의 변경 내용은 유지됩니다."});help.push_back({UINT_PTR(2*i+2),close,L"이 문서 탭을 닫습니다. 저장하지 않은 변경이 있으면 저장 여부를 확인합니다."});}ui::setRegionHelp(hwnd,help);return 0;
     }
     if(msg==WM_LBUTTONUP){TCHITTESTINFO hit{{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)},0};int index=TabCtrl_HitTest(hwnd,&hit);RECT r{};
         if(index>=0&&TabCtrl_GetItemRect(hwnd,index,&r)&&hit.pt.x>=r.right-24){PostMessageW(win,WM_APP+3,index,0);return 0;}}

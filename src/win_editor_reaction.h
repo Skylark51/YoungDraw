@@ -22,6 +22,7 @@ void branchMechanism();
 void externalMechanism();
 void insertBranchArrows();
 void arrangeImported(bool editAfter=false);
+void includeSelectedMechanism();
 void editMechanismControls(int id);
 Vec mechanismAddPosition(const Reaction& r, bool below=false, size_t slot=size_t(-1));
 std::vector<std::pair<size_t,Vec>> mechanismSplitButtons(const Reaction& r);

@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_editor_animation.h"
 #include "win_editor_canvas.h"
 #include "win_editor_commands.h"
@@ -247,6 +248,7 @@ static void CALLBACK driveAutoAnimation(HWND parent,UINT,UINT_PTR timer,DWORD){
         const std::wstring firstFrame=L"프레임 1";
         if(readoutText.empty()||(readoutText.size()>=firstFrame.size()&&
            readoutText.compare(readoutText.size()-firstFrame.size(),firstFrame.size(),firstFrame)==0))return;
+        ui::attachWindowHelp(dialog);for(int id:{101,102,103,104,105,106,107,108,109,112,113,114,115,116})check(ui::hasButtonHelp(GetDlgItem(dialog,id)),"every GIF preview action has descriptive help");UpdateWindow(dialog);check(ui::regionHelpCount(dialog)>1,"GIF seek and thumbnail controls have hover help");
         const auto initialLoop=SendDlgItemMessageW(dialog,111,CB_GETCURSEL,0,0);
         SendDlgItemMessageW(dialog,111,CB_SETCURSEL,0,0);
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(111,CBN_SELCHANGE),LPARAM(GetDlgItem(dialog,111)));

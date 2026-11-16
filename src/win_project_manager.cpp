@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_dialog_style.h"
 #include "win_projects.h"
 #include "win_dialogs.h"
@@ -383,7 +384,7 @@ struct Manager {
         if(msg==WM_NCCREATE){self=static_cast<Manager*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);self->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)self);}
         if(!self)return DefWindowProcW(h,msg,wp,lp);
         try{switch(msg){
-            case WM_CREATE:{
+            case WM_CREATE:{ui::enableButtonHelp();
                 const auto& palette=appearance::palette();
                 self->chromeBrush=CreateSolidBrush(color(palette.chrome));
                 self->panelBrush=CreateSolidBrush(color(palette.panel));

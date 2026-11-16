@@ -33,7 +33,9 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  if(id==198||id==199){groupSelected(id==199);return;}
  if(id>=190&&id<=197){alignSelection(id);return;}
  if(id==110||id==125||id==126||(id>=160&&id<=165))repeatAction=[id](){command(id);};
- if(id==plotManagerCommand){managePlot(primary());return;}
+ if(id==includeMechanismCommand){includeSelectedMechanism();return;}
+  if(id==mechanismManagerCommand){if(!reaction(primary()))throw std::runtime_error("관리할 메커니즘을 선택하세요.");editReaction(primary());return;}
+  if(id==plotManagerCommand){managePlot(primary());return;}
   if(id==plotFontCommand){editPlotFont(primary());return;}
   if(id==plotWaveWidthCommand||id==plotWaveGapCommand){editPlotAppearance(primary(),id==plotWaveWidthCommand?8:9);return;}
   if(id==plotLegendSizeCommand){editPlotAppearance(primary(),7);return;}

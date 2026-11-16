@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_mechanism_editor.h"
 #include "win_editor_render.h"
 #include "win_editor_state.h"
@@ -22,7 +23,7 @@ struct Editor {
     Document draft,source;
     MechanismEditorCallbacks callbacks;
     HWND tooltip=nullptr;
-    int owner=0,stage=-1,edge=-1,connectFrom=-1,dragStage=-1;
+    int owner=0,stage=-1,edge=-1,connectFrom=-1,dragStage=-1,toolPage=0;
     bool comparing=false,connecting=false,updating=false,accepted=false,lengthGesture=false;
     HWND window=nullptr,list=nullptr,message=nullptr;
     HFONT font=nullptr;
@@ -58,36 +59,22 @@ struct Editor {
                 double(canvas.top+canvas.bottom)/2-(b.y+b.h/2)*scale};
         InvalidateRect(window,nullptr,TRUE);
     }
-    void layout(){
+    void layout(bool refit=true){
         RECT r{};GetClientRect(window,&r);int w=r.right,h=r.bottom;
-        const int side=std::clamp(w/4,190,260),left=side+20;
+        const int side=std::clamp(w/5,190,240),tools=std::clamp(w/5,200,260),left=side+20,right=w-tools-20;
         auto place=[&](int id,int x,int y,int width,int height){MoveWindow(GetDlgItem(window,id),x,y,std::max(1,width),std::max(1,height),TRUE);};
-        place(10,10,10,side,23);place(11,10,35,side,220);
-        place(12,10,71,side,23);place(13,10,96,side,220);
-        place(14,10,132,side,23);place(15,10,157,side,220);
-        place(16,10,193,side,23);place(17,10,218,side,30);
-        place(18,10,252,side,23);place(19,10,278,side,28);
-        place(21,10,315,side,23);
-        int listTop=345;MoveWindow(list,10,listTop,side,std::max(1,h-listTop-70),TRUE);
-        // Stable task groups: primary editing above, layout/view/history below.
-        int available=w-left-10;buttonSize=std::clamp((available-56)/9,44,58);
-        int primary=std::min(76,(available-36)/7),x=left;
-        place(23,x,8,3*primary+8,16);
-        for(int id:{60,61,62}){place(id,x,28,primary,54);x+=primary+4;}
-        x+=8;place(24,x,8,4*primary+12,16);
-        for(int id:{30,63,32,33}){place(id,x,28,primary,54);x+=primary+4;}
-        x=left;place(25,x,92,3*buttonSize+8,16);
-        for(int id:{34,31,35}){place(id,x,112,buttonSize,48);x+=buttonSize+4;}
-        x+=8;place(26,x,92,4*buttonSize+12,16);
-        for(int id:{40,41,44,45}){place(id,x,112,buttonSize,48);x+=buttonSize+4;}
-        x+=8;place(27,x,92,2*buttonSize+4,16);
-        for(int id:{42,43}){place(id,x,112,buttonSize,48);x+=buttonSize+4;}
-        place(64,10,278,side,28);
-        int top=172;
-        place(22,left,top,w-left-10,38);
-        canvas={left,top+44,w-10,h-60};
+        place(10,10,10,side,23);place(11,10,35,side,220);place(12,10,71,side,23);place(13,10,96,side,220);place(14,10,132,side,23);place(15,10,157,side,220);place(16,10,193,side,23);place(17,10,218,side,30);place(18,10,252,side,23);place(19,10,278,side,28);place(64,10,278,side,28);place(21,10,315,side,23);MoveWindow(list,10,345,side,std::max(1,h-415),TRUE);
+        const int sx=w-tools-10,tabWidth=(tools-8)/3,tileWidth=(tools-8)/2,tileHeight=std::clamp((h-300)/5,44,68);
+        for(int i=0;i<3;i++)place(70+i,sx+i*(tabWidth+4),10,tabWidth,30);
+        const wchar_t* titles[]={L"구조·단계·연결",L"배치·설정",L"보기·원본 비교"};SetDlgItemTextW(window,23,titles[toolPage]);place(23,sx,50,tools,20);
+        for(int id:{24,25,26})ShowWindow(GetDlgItem(window,id),SW_HIDE);
+        const std::vector<std::vector<int>> pages={{60,61,62,63,30,32,33,65,66},{34,35,31},{40,41,44,45}};
+        for(int id:{30,31,32,33,34,35,40,41,44,45,60,61,62,63,65,66})ShowWindow(GetDlgItem(window,id),SW_HIDE);
+        auto& shown=pages[size_t(toolPage)];for(size_t i=0;i<shown.size();i++){place(shown[i],sx+int(i%2)*(tileWidth+8),78+int(i/2)*(tileHeight+8),tileWidth,tileHeight);ShowWindow(GetDlgItem(window,shown[i]),SW_SHOW);}
+        SetDlgItemTextW(window,27,L"편집 기록");place(27,sx,h-164,tools,20);place(42,sx,h-138,tileWidth,60);place(43,sx+tileWidth+8,h-138,tileWidth,60);
+        place(22,left,10,right-left,36);canvas={left,54,right,h-60};
         place(50,10,h-52,w-210,42);place(IDOK,w-180,h-48,80,32);place(IDCANCEL,w-90,h-48,80,32);
-        fit();
+        if(refit)fit();else InvalidateRect(window,nullptr,TRUE);
     }
     void sync(){
         updating=true;auto& r=reaction();
@@ -114,6 +101,7 @@ struct Editor {
     void updateActions(){
         auto& r=reaction();const bool selected=stage>=0&&size_t(stage)<r.slots.size()&&!comparing;
         for(int id:{60,61,62})EnableWindow(GetDlgItem(window,id),selected);
+        EnableWindow(GetDlgItem(window,65),!comparing&&(edge>=0||(selected&&r.slots.size()>1)));EnableWindow(GetDlgItem(window,66),selected&&r.slots.size()>1);
         EnableWindow(GetDlgItem(window,33),canBranch());EnableWindow(GetDlgItem(window,63),canInsert());
         EnableWindow(GetDlgItem(window,30),!comparing&&(selected||edge>=0));
         EnableWindow(GetDlgItem(window,15),!comparing&&edge>=0);EnableWindow(GetDlgItem(window,64),!comparing&&closingEdge()>=0);
@@ -203,6 +191,8 @@ struct Editor {
         if(updating||comparing)return;auto old=draft;auto& r=reaction();
         try{
             if(id==11){int mode=int(SendDlgItemMessageW(window,11,CB_GETCURSEL,0,0));
+                bool chain=r.links.size()+1==r.slots.size()&&r.cycleStages.empty();for(size_t i=0;i<r.links.size()&&chain;i++)chain=r.links[i].from==int(i)&&r.links[i].to==int(i+1)&&r.links[i].members.empty();
+                if(chain&&mode!=4&&mode!=5&&mode!=7){r.links.clear();r.manualConnections=false;r.fixedFrames=false;r.slotGrid.clear();}
                 if(!r.cycleStages.empty()&&(mode==3||mode==6||mode==7)){
                     if(mode!=7){int last=closingEdge();r.hiddenArrows.erase(std::remove(r.hiddenArrows.begin(),r.hiddenArrows.end(),last),r.hiddenArrows.end());if(mode==6&&last>=0)r.hiddenArrows.push_back(last);}
                 }else{
@@ -249,6 +239,7 @@ struct Editor {
         g.Restore(saved);
     }
     void draw(){PAINTSTRUCT ps{};auto dc=BeginPaint(window,&ps);paint(dc);EndPaint(window,&ps);
+        std::vector<ui::HelpRegion> help;for(size_t i=0;i<pluses.size();i++){auto p=pluses[i].point;help.push_back({UINT_PTR(i+1),{LONG(p.x-11),LONG(p.y-11),LONG(p.x+11),LONG(p.y+11)},pluses[i].branch?L"이 단계에서 새 경로를 분기합니다. 새 단계와 TS 이름·에너지를 입력할 수 있습니다.":L"이 위치에 새 단계를 추가합니다. 적용 전까지 원본 문서는 유지됩니다."});}ui::setRegionHelp(window,help);
     }
     void action(int id){
         if(id==IDOK){accepted=true;DestroyWindow(window);return;}if(id==IDCANCEL){DestroyWindow(window);return;}
@@ -259,6 +250,8 @@ struct Editor {
         if(comparing){say(L"원본을 보고 있습니다. ‘편집 결과’로 돌아와 수정하세요.");return;}
         if(id==42){if(!undo.empty()){redo.push_back(draft);draft=std::move(undo.back());undo.pop_back();stage=edge=-1;changed();}return;}
         if(id==43){if(!redo.empty()){undo.push_back(draft);draft=std::move(redo.back());redo.pop_back();stage=edge=-1;changed();}return;}
+        if(id==65){remove();return;}
+        if(id==66){if(stage<0||reaction().slots.size()<2)return;std::vector<std::wstring> labels;for(size_t i=0;i<reaction().slots.size();i++)labels.push_back(std::to_wstring(i+1)+L" · "+ui::wide(reaction().slots[i].label));auto chosen=ui::form(window,L"단계 합치기",{{L"구조·연결을 받을 단계",std::to_string(stage?0:1),false,labels}});if(!chosen)return;int target=std::stoi(chosen->front());if(target==stage)throw std::runtime_error("다른 단계를 선택하세요.");Document candidate=draft;removeMechanismStage(candidate,owner,size_t(stage),target,false);stage=edge=-1;commit(std::move(candidate));return;}
         if(id>=60&&id<=62){structure(id);return;}if(id==63){insertIntermediate();return;}
         if(id==30){editText();return;}if(id==31){table();return;}
         if(id==32){connecting=!connecting;connectFrom=-1;say(connecting?L"시작 그림 영역 → 도착 그림 영역을 클릭하거나 드래그하세요. Esc: 종료":L"연결 모드를 종료했습니다.");InvalidateRect(window,nullptr,TRUE);return;}
@@ -274,8 +267,9 @@ struct Editor {
         RectF box(float(draw.rcItem.left),float(draw.rcItem.top),float(draw.rcItem.right-draw.rcItem.left),float(draw.rcItem.bottom-draw.rcItem.top));
         auto fillColor=active?p.accent:enabled?p.raised:p.panel;auto fg=enabled?(active?p.onAccent:p.text):p.muted;
         RectF tile(box.X+2,box.Y+2,box.Width-4,box.Height-4);appearance::rounded(g,tile,6,fillColor);
+        if(draw.CtlID>=70&&draw.CtlID<=72){bool selected=int(draw.CtlID)-70==toolPage;appearance::rounded(g,tile,6,selected?p.accent:p.raised);wchar_t label[64]{};GetWindowTextW(draw.hwndItem,label,64);ui::drawLabel(g,label,tile,12.f,selected?p.onAccent:p.text,selected,true);return;}
         if(draw.CtlID==IDOK||draw.CtlID==IDCANCEL){colors.draw(draw,draw.CtlID==IDOK);return;}
-        int symbol=121;switch(draw.CtlID){case 60:symbol=186;break;case 61:symbol=123;break;case 62:symbol=124;break;case 63:symbol=143;break;case 31:symbol=131;break;case 32:symbol=145;break;case 33:symbol=169;break;case 34:symbol=125;break;case 35:symbol=127;break;case 40:symbol=140;break;case 41:symbol=107;break;case 42:symbol=104;break;case 43:symbol=105;break;case 44:case 45:symbol=107;break;}
+        int symbol=121;switch(draw.CtlID){case 60:symbol=186;break;case 61:symbol=123;break;case 62:symbol=124;break;case 63:symbol=143;break;case 65:symbol=144;break;case 66:symbol=146;break;case 31:symbol=131;break;case 32:symbol=145;break;case 33:symbol=169;break;case 34:symbol=125;break;case 35:symbol=127;break;case 40:symbol=140;break;case 41:symbol=107;break;case 42:symbol=104;break;case 43:symbol=105;break;case 44:case 45:symbol=107;break;}
         if(draw.CtlID==44||draw.CtlID==45){Pen mark(fg,1.8f);float x=box.X+box.Width/2-3,y=box.Y+17;g.DrawEllipse(&mark,x-9,y-9,18.f,18.f);g.DrawLine(&mark,x+7,y+7,x+15,y+15);g.DrawLine(&mark,x-4,y,x+4,y);if(draw.CtlID==44)g.DrawLine(&mark,x,y-4,x,y+4);}
         else icon(g,symbol,{box.X+(box.Width-26)/2,box.Y+4,26,26},fg);
         wchar_t label[128]{};GetWindowTextW(draw.hwndItem,label,128);ui::drawLabel(g,label,{box.X+2,box.GetBottom()-19,box.Width-4,16},10,fg,active,true);
@@ -286,7 +280,7 @@ struct Editor {
         if(msg==WM_NCCREATE){self=static_cast<Editor*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);self->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)self);}
         if(!self)return DefWindowProcW(h,msg,wp,lp);
         try{switch(msg){
-        case WM_CREATE:{
+        case WM_CREATE:{ui::enableButtonHelp();
             self->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
             self->control(L"STATIC",L"배치 · 그림에서 직접 이동 가능",10);
             self->control(L"COMBOBOX",L"",11,CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP);
@@ -306,12 +300,14 @@ struct Editor {
             const wchar_t* groups[]={L"구조 입력",L"단계 · 연결",L"배치 · 설정",L"보기",L"편집 기록"};for(int i=0;i<5;++i)self->control(L"STATIC",groups[i],23+i);
             self->control(L"STATIC",L"",22,SS_ENDELLIPSIS);
             const wchar_t* drawingTools[]={L"그림 그리기",L"붙여넣기",L"파일 넣기",L"중간체 삽입"};for(int i=0;i<4;++i)self->control(L"BUTTON",drawingTools[i],60+i,BS_OWNERDRAW|WS_TABSTOP);
+            self->control(L"BUTTON",L"단계·연결 삭제",65,BS_OWNERDRAW|WS_TABSTOP);self->control(L"BUTTON",L"단계 합치기",66,BS_OWNERDRAW|WS_TABSTOP);
+            const wchar_t* toolPages[]={L"구조",L"배치",L"보기"};for(int i=0;i<3;i++)self->control(L"BUTTON",toolPages[i],70+i,BS_OWNERDRAW|WS_TABSTOP);
             self->tooltip=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,0,0,0,0,h,nullptr,GetModuleHandleW(nullptr),nullptr);
             SendMessageW(self->tooltip,TTM_SETMAXTIPWIDTH,0,340);
             for(int id:{30,31,32,33,34,35,40,41,42,43,44,45,60,61,62,63}){wchar_t label[128]{};auto control=GetDlgItem(h,id);GetWindowTextW(control,label,128);TOOLINFOW tip{sizeof(tip)};tip.uFlags=TTF_IDISHWND|TTF_SUBCLASS;tip.hwnd=h;tip.uId=UINT_PTR(control);tip.lpszText=label;SendMessageW(self->tooltip,TTM_ADDTOOLW,0,(LPARAM)&tip);}
             self->message=self->control(L"STATIC",L"+ : 추가 / 분기 · 그림 영역 드래그: 이동 · 더블클릭: 구조 그리기 · F2: 이름·에너지 · Delete: 단계·연결 삭제",50);
             self->control(L"BUTTON",L"적용",IDOK,BS_OWNERDRAW|WS_TABSTOP);self->control(L"BUTTON",L"취소",IDCANCEL,BS_OWNERDRAW|WS_TABSTOP);
-            self->sync();self->layout();return 0;}
+            self->sync();self->layout();ui::attachWindowHelp(h);return 0;}
         case WM_SIZE:self->layout();return 0;
         case WM_GETMINMAXINFO:{MONITORINFO m{sizeof(m)};GetMonitorInfoW(MonitorFromWindow(h,MONITOR_DEFAULTTONEAREST),&m);reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={std::min(760L,m.rcWork.right-m.rcWork.left),std::min(620L,m.rcWork.bottom-m.rcWork.top)};return 0;}
         case WM_ERASEBKGND:return TRUE;
@@ -320,6 +316,7 @@ struct Editor {
         case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:return self->colors.control(msg,(HDC)wp);
         case WM_DRAWITEM:self->drawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
         case WM_COMMAND:{int id=LOWORD(wp),code=HIWORD(wp);
+            if(id>=70&&id<=72&&code==BN_CLICKED){self->toolPage=id-70;self->layout(false);return 0;}
             if(id==20&&code==LBN_SELCHANGE){self->stage=int(SendMessageW(self->list,LB_GETCURSEL,0,0));self->edge=-1;self->updateActions();InvalidateRect(h,nullptr,TRUE);return 0;}
             if(id==20&&code==LBN_DBLCLK){self->editText();return 0;}
             if((id==11||id==13||id==15)&&(code==CBN_SELCHANGE||code==CBN_EDITCHANGE)){if(id==13&&code==CBN_SELCHANGE){int n=int(SendDlgItemMessageW(h,13,CB_GETCURSEL,0,0));wchar_t text[128]{};SendDlgItemMessageW(h,13,CB_GETLBTEXT,n,(LPARAM)text);SetDlgItemTextW(h,13,n==3?L"":text);}self->setting(id);return 0;}

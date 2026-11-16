@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_mechanism_editor.h"
 #include "win_editor_state.h"
 #include "mechanism_data.h"
@@ -21,9 +22,9 @@ struct Picture {
     static int width(HWND h){RECT r{};GetClientRect(h,&r);return r.right;}
     static int height(HWND h){RECT r{};GetClientRect(h,&r);return r.bottom;}
     bool teal(int x,int y){Gdiplus::Color c;bitmap.GetPixel(x,y,&c);return c.GetR()<45&&c.GetG()>110&&c.GetG()<165&&c.GetB()>95&&c.GetB()<155;}
-    RECT selectedBox(HWND editor){auto banner=childRect(editor,22);for(int y=banner.bottom+12;y<int(bitmap.GetHeight())-100;++y)for(int x=banner.left+12;x<int(bitmap.GetWidth())-30;++x){if(!teal(x,y)||!teal(x+20,y)||!teal(x,y+20)||!teal(x,y+40))continue;int right=x;while(right<int(bitmap.GetWidth())-1&&teal(right,y))++right;int bottom=y;while(bottom<int(bitmap.GetHeight())-1&&teal(x,bottom))++bottom;if(right-x>50&&bottom-y>40)return {x,y,right,bottom};}throw std::runtime_error("selected picture frame is fully visible");}
+    RECT selectedBox(HWND editor){auto banner=childRect(editor,22);for(int y=banner.bottom+12;y<int(bitmap.GetHeight())-100;++y)for(int x=banner.left+12;x<banner.right-12;++x){if(!teal(x,y)||!teal(x+20,y)||!teal(x,y+20)||!teal(x,y+40))continue;int right=x;while(right<int(bitmap.GetWidth())-1&&teal(right,y))++right;int bottom=y;while(bottom<int(bitmap.GetHeight())-1&&teal(x,bottom))++bottom;if(right-x>50&&bottom-y>40)return {x,y,right,bottom};}throw std::runtime_error("selected picture frame is fully visible");}
     POINT selectedFrame(HWND editor){auto box=selectedBox(editor);return {(box.left+box.right)/2,(box.top+box.bottom)/2};}
-    std::vector<POINT> pluses(HWND editor){std::vector<POINT> result;auto banner=childRect(editor,22);for(int y=banner.bottom+18;y<int(bitmap.GetHeight())-72;++y)for(int x=banner.left+12;x<int(bitmap.GetWidth())-22;++x){if(!teal(x,y)||!teal(x-3,y)||!teal(x+3,y)||!teal(x,y-3)||!teal(x,y+3)||teal(x+3,y+3)||!teal(x-9,y)||!teal(x+9,y))continue;if(std::none_of(result.begin(),result.end(),[&](POINT p){return std::abs(p.x-x)<10&&std::abs(p.y-y)<10;}))result.push_back({x,y});}return result;}
+    std::vector<POINT> pluses(HWND editor){std::vector<POINT> result;auto banner=childRect(editor,22);for(int y=banner.bottom+18;y<int(bitmap.GetHeight())-72;++y)for(int x=banner.left+12;x<banner.right-12;++x){if(!teal(x,y)||!teal(x-3,y)||!teal(x+3,y)||!teal(x,y-3)||!teal(x,y+3)||teal(x+3,y+3)||!teal(x-9,y)||!teal(x+9,y))continue;if(std::none_of(result.begin(),result.end(),[&](POINT p){return std::abs(p.x-x)<10&&std::abs(p.y-y)<10;}))result.push_back({x,y});}return result;}
 };
 void CALLBACK fillMetadata(HWND editor,UINT,UINT_PTR timer,DWORD){
     HWND form=nullptr;while((form=FindWindowExW(nullptr,form,L"YoungDrawForm",nullptr)))if(GetWindow(form,GW_OWNER)==editor)break;
@@ -39,6 +40,9 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
     KillTimer(owner,timer);
     try{
         auto list=GetDlgItem(editor,20);
+        for(int id:{30,31,32,33,34,35,40,41,42,43,44,45,60,61,62,63,64,65,66,70,71,72,IDOK,IDCANCEL})check(ui::hasButtonHelp(GetDlgItem(editor,id)),"all mechanism buttons have descriptive tooltip registration");
+        check(childRect(editor,60).left>childRect(editor,22).right,"mechanism tools occupy their own right sidebar");
+        command(editor,71);check(IsWindowVisible(GetDlgItem(editor,34))&&!IsWindowVisible(GetDlgItem(editor,60)),"layout tab groups its controls");command(editor,72);check(IsWindowVisible(GetDlgItem(editor,40)),"view tab groups preview controls");command(editor,70);
         if(phase==2){
             check(!IsWindowEnabled(GetDlgItem(editor,33)),"cycle branch action starts disabled");
             Picture picture(editor);auto pluses=picture.pluses(editor);
@@ -93,7 +97,7 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
         if(phase==4){
             SetWindowPos(editor,nullptr,0,0,760,620,SWP_NOMOVE|SWP_NOZORDER);
             RECT client{};GetClientRect(editor,&client);
-            for(int id:{11,13,15,17,19,20,22,30,31,32,33,34,35,40,41,42,43,44,45,60,61,62,63,IDOK,IDCANCEL}){auto r=childRect(editor,id);check(r.left>=0&&r.top>=0&&r.right<=client.right&&r.bottom<=client.bottom,"all controls remain inside small monitor window");}
+            for(int page:{70,71,72}){command(editor,page);for(int id:{11,13,15,17,19,20,22,30,31,32,33,34,35,40,41,42,43,44,45,60,61,62,63,64,65,66,70,71,72,IDOK,IDCANCEL}){if(!IsWindowVisible(GetDlgItem(editor,id)))continue;auto r=childRect(editor,id);check(r.left>=0&&r.top>=0&&r.right<=client.right&&r.bottom<=client.bottom,"all visible controls on every page remain inside small monitor window");}}
             check(childRect(editor,22).bottom+65<childRect(editor,IDOK).top,"small editor retains usable picture canvas");
             PostMessageW(editor,WM_COMMAND,IDCANCEL,0);return;
         }

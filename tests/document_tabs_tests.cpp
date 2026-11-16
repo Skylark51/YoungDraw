@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_dialogs.h"
 // Exercise the production document switching and saving code in a hidden window.
 #include "win_editor_state.h"
@@ -146,7 +147,7 @@ static void CALLBACK driveChemistryMenu(HWND parent,UINT,UINT_PTR timer,DWORD){
             chemistryMenuOpened=true;
             PostMessageW(dialog,WM_COMMAND,22,0);
         }else PostMessageW(dialog,WM_CLOSE,0,0);
-    }else if(std::wstring(name)==L"YoungDrawForm"){
+    }else if(std::wstring(name)==L"YoungDrawForm"){ui::attachWindowHelp(dialog);EnumChildWindows(dialog,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"all dialog buttons have help");return TRUE;},0);
         KillTimer(parent,timer);
         chemistryMenuOpened=true;
         PostMessageW(dialog,WM_COMMAND,IDOK,0);
@@ -365,7 +366,7 @@ static void pngExportChecks(HWND hwnd){
 static void graphManagerChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
     const auto before=toNative(doc);managePlot(owner,false);auto manager=plotManagerWindow;check(manager&&IsWindow(manager)&&toNative(doc)==before,"graph manager opens without modifying the selected graph");
-    for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");}
+    for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
     SendMessageW(manager,WM_COMMAND,4001,0);formBefore=before;formAction=36;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotFontCommand,0);
     check(formDriven&&previewObserved&&toNative(doc)==before,"manager font cancellation restores the previewed graph");
     formAction=35;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotFontCommand,0);
@@ -527,8 +528,10 @@ int main(int argc,char** argv){
             auto hit=[&](int id)->RectF{for(auto& h:hits)if(h.id==id)return h.box;return {};};
             auto present=[&](int id){return hit(id).Width>0;};
             sidebarPage=0;showLayers=false;repaint();
-            check(present(140)&&!present(143)&&!present(144)&&present(169)&&present(145)&&present(146)&&present(147)&&present(149)&&!present(122)&&!present(126)&&!present(148)&&!present(141),"mechanism sidebar consolidates stage addition, table editing and layout controls");
-            check(hit(recognizeMechanismCommand).Y<hit(120).Y&&hit(120).Y==hit(121).Y&&hit(121).Y<hit(146).Y&&hit(145).Y<hit(127).Y&&hit(127).Y<hit(134).Y,"mechanism sidebar follows creation, editing, layout and structure insertion");
+            check(present(mechanismManagerCommand)&&present(includeMechanismCommand)&&present(120)&&present(recognizeMechanismCommand),"mechanism sidebar exposes manager, selected structure inclusion, new and recognize");
+            check(hit(mechanismManagerCommand).Y<hit(includeMechanismCommand).Y&&hit(includeMechanismCommand).Y<hit(120).Y&&hit(120).Y==hit(recognizeMechanismCommand).Y,"mechanism sidebar prioritizes managing and including structures");
+            for(int id:{121,127,140,143,144,145,146,147,149,169})check(!present(id),"mechanism tools are consolidated into independent editor");
+            for(auto& action:hits)check(!helpText(action.id).empty(),"every visible main button has help");
             for(int id:{100,101,102,104,105,107,125,155,156,170,171,172,173,174,160,161,162,163,164}){
                 check(present(id)&&hit(id).Y==hit(100).Y&&hit(id).Width==44&&hit(id).GetBottom()<89,"icon toolbar fits one row above document tabs");
                 check(!helpText(id).empty(),"each toolbar icon has Korean help");
@@ -940,6 +943,8 @@ int main(int argc,char** argv){
                   "current-file recognition works from the graph sidebar and opens the editable draft preview");
             check(history.undo(doc)&&toNative(doc)==formBefore,"sidebar recognition can be undone in one step");
             selection.clear();targetContainer=0;doc={};history.clear();
+            doc.ring({0,0},3);doc.ring({70,0},3);doc.ring({500,200},6);for(size_t i=0;i<6;i++)selection.push_back(doc.atoms[i].id);formBefore=toNative(doc);dirty=false;mechanismGridAction=0;SetTimer(hwnd,901,10,driveNewMechanism);command(includeMechanismCommand);check(mechanismDraftHidden&&toNative(doc)==formBefore&&!dirty&&!history.undo(doc),"selected structure inclusion cancel leaves original and history intact");
+            mechanismGridAction=1;SetTimer(hwnd,901,10,driveNewMechanism);SendMessageW(hwnd,WM_COMMAND,includeMechanismCommand,0);check(mechanismDraftHidden&&doc.reactions.size()==1&&doc.reactions.front().slots.size()==2&&dirty,"selected structures open isolated draft and apply as two steps");check(history.undo(doc)&&toNative(doc)==formBefore,"structure incorporation applies in one undo step");selection.clear();doc={};history.clear();
         }
 
         {

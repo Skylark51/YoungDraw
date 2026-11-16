@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_theme.h"
 #include "win_ui.h"
 #include <commctrl.h>
@@ -216,7 +217,7 @@ void choose(Picker& state,int id){
 }
 LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
  auto* state=reinterpret_cast<Picker*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
- if(msg==WM_CREATE){
+ if(msg==WM_CREATE){ui::enableButtonHelp();
      state=static_cast<Picker*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
      state->window=hwnd;state->focus=100+current.theme;
      SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(state));
@@ -245,7 +246,8 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
      drawPicker(paint,*state);
      paint.Flush(FlushIntentionSync);
      Graphics output(dc);ui::presentPixels(output,buffer);
-     EndPaint(hwnd,&ps);return 0;
+     EndPaint(hwnd,&ps);
+     std::vector<ui::HelpRegion> help;for(const auto& target:targets()){auto b=target.box;std::wstring text=target.id>=100&&target.id<107?L"이 테마를 미리 봅니다. 적용을 누르면 화면 색상과 배경 설정이 저장됩니다.":target.id>=200&&target.id<206?L"캔버스 배경 무늬를 선택합니다. 내보낸 투명 PNG에는 무늬가 포함되지 않습니다.":target.id>=300&&target.id<303?L"배경 무늬의 표시 강도를 선택합니다.":ui::labelHelp(target.id==IDOK?L"적용":L"취소");help.push_back({UINT_PTR(target.id),{LONG(b.X*w/pickerWidth),LONG(b.Y*h/pickerHeight),LONG(b.GetRight()*w/pickerWidth),LONG(b.GetBottom()*h/pickerHeight)},text});}ui::setRegionHelp(hwnd,help);return 0;
  }
  case WM_MOUSEMOVE:{
      if(!state->tracking){

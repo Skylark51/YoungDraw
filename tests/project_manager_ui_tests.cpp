@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_projects.h"
 #include "win_theme.h"
 #include <commctrl.h>
@@ -14,6 +15,7 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
     while((manager=FindWindowExW(nullptr,manager,L"YoungDrawProjectManager",nullptr))){DWORD pid=0;GetWindowThreadProcessId(manager,&pid);if(pid==GetCurrentProcessId()&&GetWindow(manager,GW_OWNER)==owner)break;}
     if(!manager)return;KillTimer(owner,timer);
     try{
+        ui::attachWindowHelp(manager);for(int id=10;id<=35;id++){auto control=GetDlgItem(manager,id);if(control)check(ui::hasButtonHelp(control),"every project action has tooltip help");}
         auto list=GetDlgItem(manager,41),search=GetDlgItem(manager,44),note=GetDlgItem(manager,42);
         check(ListView_GetItemCount(list)==2,"root displays folder and file");
         SetWindowPos(manager,nullptr,0,0,640,480,SWP_NOMOVE|SWP_NOZORDER);

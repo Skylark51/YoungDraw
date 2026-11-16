@@ -221,13 +221,13 @@ void addMechanismBranch(Reaction& r,size_t source){
     Vec p=r.slotGrid.at(source)+Vec{1,1};bool occupied=true;while(occupied){occupied=false;for(auto q:r.slotGrid)if((p-q).length()<.5){p.y++;occupied=true;break;}}
     r.links.push_back({int(source),int(r.slots.size()),{}});r.slotGrid.push_back(p);r.slots.push_back({"",{},""});r.above.push_back("");r.below.push_back("");
 }
-static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& selection,bool preserveLayout){
+static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& selection,bool preserveLayout,bool fromStructures){
     const Document original=d;
     normalizeChemicalLabels(d,selection);
     struct Part{std::vector<int> ids;Rect box;Vec at;};std::vector<Part> parts,notations;std::set<int> seen,owned;
     for(auto& r:d.reactions){for(auto& s:r.slots)owned.insert(s.members.begin(),s.members.end());for(auto& l:r.links)owned.insert(l.members.begin(),l.members.end());}for(auto& p:d.plots)for(auto& s:p.states){owned.insert(s.above.begin(),s.above.end());owned.insert(s.below.begin(),s.below.end());}
     auto selected=[&](const std::vector<int>& ids){return selection.empty()||std::any_of(ids.begin(),ids.end(),[&](int id){return has(selection,id);})||std::any_of(d.bonds.begin(),d.bonds.end(),[&](const Bond& b){return has(selection,b.id)&&(has(ids,b.a)||has(ids,b.b));});};
-    for(auto& a:d.atoms)if(!seen.count(a.id)&&!owned.count(a.id)){auto ids=d.component(a.id);seen.insert(ids.begin(),ids.end());if(!selected(ids))continue;auto b=bounds(d,ids);Part p{ids,b,center(b)};if(ids.size()==1&&a.element==1)notations.push_back(p);else parts.push_back(p);}
+    for(auto& a:d.atoms)if(!seen.count(a.id)&&!owned.count(a.id)){auto ids=d.component(a.id);seen.insert(ids.begin(),ids.end());if(!selected(ids))continue;auto b=bounds(d,ids);Part p{ids,b,center(b)};if(!fromStructures&&ids.size()==1&&a.element==1)notations.push_back(p);else parts.push_back(p);}
     for(auto& o:d.objects)if(o.kind==ObjectKind::Image&&!owned.count(o.id)&&!d.isLocked(o.id)&&selected({o.id})){auto b=bounds(d,{o.id});parts.push_back({{o.id},b,center(b)});}
     std::vector<const Object*> arrows,stems;
     for(auto& o:d.objects)if((o.kind==ObjectKind::Line||o.kind==ObjectKind::Curve)&&o.points.size()>=2&&!owned.count(o.id)&&selected({o.id})){
@@ -257,6 +257,7 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
                 bool hasArrow=std::any_of(arrows.begin(),arrows.end(),[&](const Object* o){return has(group.members,o->id);});
                 if(first&&second&&!hasArrow){grouped=true;break;}
             }
+            if(fromStructures&&!grouped)continue;
             bool overlapping=gap==0&&a.box.y<b.box.y+b.box.h&&b.box.y<a.box.y+a.box.h;
             if((!grouped&&!overlapping&&(gap>std::max(70.,d.style.bondLength*3)||std::abs(a.at.y-b.at.y)>std::max(25.,std::min(a.box.h,b.box.h)*.7)))||separated(a,b))continue;
             a.ids.insert(a.ids.end(),b.ids.begin(),b.ids.end());
@@ -265,7 +266,7 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
             parts.erase(parts.begin()+j);merged=true;break;
         }
     }
-    if(parts.size()<2||parts.size()>40)throw std::runtime_error("정리할 구조 2~40개와 반응 화살표·텍스트를 선택하세요.");
+    if(parts.size()<2||parts.size()>40)throw std::runtime_error(fromStructures?"메커니즘에 편입할 구조 2~40개를 선택하세요. 화살표 없이도 편입할 수 있습니다.":"정리할 구조 2~40개와 반응 화살표·텍스트를 선택하세요.");
     // Row clustering retains the drawn rows; no chemical coordinate is rescaled.
     std::sort(parts.begin(),parts.end(),[](const Part& a,const Part& b){return a.at.y<b.at.y;});
     std::vector<std::vector<Part>> rows;for(auto p:parts){if(rows.empty()||std::abs(p.at.y-rows.back().front().at.y)>std::max(40.,p.box.h*.6))rows.push_back({});rows.back().push_back(p);}parts.clear();
@@ -298,7 +299,10 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
         }
         if(a==b)continue;r.links.push_back({a,b,{}});mids.push_back((arrow->points[arrow->points.size()-2]+arrow->points.back())*.5);consumed.push_back(arrow->id);auto mark=arrow->cross;mark.index=int(r.links.size())-1;if(mark.enabled)r.crosses.push_back(mark);
     }
-    if(!r.explicitConnections())throw std::runtime_error("구조 사이 반응 화살표를 찾지 못했습니다. 구조와 화살표를 함께 선택하세요.");
+    if(!r.explicitConnections()){
+        if(!fromStructures)throw std::runtime_error("구조 사이 반응 화살표를 찾지 못했습니다. 구조와 화살표를 함께 선택하세요.");
+        for(size_t i=1;i<parts.size();i++){r.links.push_back({int(i-1),int(i),{}});mids.push_back((parts[i-1].at+parts[i].at)*.5);}
+    }
     r.above.resize(r.links.size());r.below.resize(r.links.size());
     for(auto& o:d.objects)if(!o.points.empty()&&!owned.count(o.id)&&selected({o.id})&&!has(consumed,o.id)){
         if(o.kind==ObjectKind::Text&&o.text=="+"){r.slots[nearest(o.points[0])].members.push_back(o.id);continue;}
@@ -354,6 +358,6 @@ static int arrangeImportedMechanismImpl(Document& d,const std::vector<int>& sele
     }
     return r.id;
 }
-int arrangeImportedMechanism(Document& d,const std::vector<int>& selection,bool preserveLayout){Document candidate=d;int id=arrangeImportedMechanismImpl(candidate,selection,preserveLayout);d=std::move(candidate);return id;}
+int arrangeImportedMechanism(Document& d,const std::vector<int>& selection,bool preserveLayout,bool fromStructures){Document candidate=d;int id=arrangeImportedMechanismImpl(candidate,selection,preserveLayout,fromStructures);d=std::move(candidate);return id;}
 
 }

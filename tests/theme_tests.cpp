@@ -1,4 +1,6 @@
 // Render the real editor and exercise the appearance dialog without modifying user preferences.
+#include "win_button_help.h"
+#include "win_gallery.h"
 #include "win_editor_canvas.h"
 #include "win_editor_chrome.h"
 #include "win_editor_images.h"
@@ -14,6 +16,7 @@ using namespace yd::editor;
 #include <iostream>
 namespace {
 int requested=0;bool driven=false,valid=true;
+void CALLBACK inspectGallery(HWND owner,UINT,UINT_PTR timer,DWORD){HWND gallery=nullptr;while((gallery=FindWindowExW(nullptr,gallery,L"YoungDrawTemplateGallery",nullptr))){DWORD process=0;GetWindowThreadProcessId(gallery,&process);if(process==GetCurrentProcessId()&&GetWindow(gallery,GW_OWNER)==owner)break;}if(!gallery)return;KillTimer(owner,timer);UpdateWindow(gallery);valid=valid&&ui::regionHelpCount(gallery)==25;SendMessageW(gallery,WM_COMMAND,109,0);UpdateWindow(gallery);valid=valid&&ui::regionHelpCount(gallery)==11;PostMessageW(gallery,WM_COMMAND,IDCANCEL,0);}
 void CALLBACK chooseTheme(HWND,UINT,UINT_PTR timer,DWORD){
  HWND picker=nullptr;
  // An independently running editor may also have its appearance dialog open.
@@ -23,7 +26,7 @@ void CALLBACK chooseTheme(HWND,UINT,UINT_PTR timer,DWORD){
   if(process==GetCurrentProcessId()&&GetWindow(picker,GW_OWNER)==win)break;
  }
  if(!picker)return;
- KillTimer(win,timer);driven=true;
+ KillTimer(win,timer);driven=true;UpdateWindow(picker);valid=valid&&ui::regionHelpCount(picker)==18;
  SendMessageW(picker,WM_COMMAND,100+requested,0);
  SendMessageW(picker,WM_COMMAND,200+requested%6,0);
  SendMessageW(picker,WM_COMMAND,302,0);
@@ -75,7 +78,8 @@ int main(){
    auto after=appearance::settings();if(!driven||!valid||after.theme!=original.theme||after.pattern!=original.pattern||after.intensity!=original.intensity)throw std::runtime_error("Appearance preview/cancel/cache/contrast regression");
    if(toNative(doc)!=native||toSvg(scene())!=svg)throw std::runtime_error("Appearance changed document or export");
   }
-  DestroyWindow(hwnd);std::cout<<"7 themes, 6 patterns, preview rollback, dark contrast, render cache, document and SVG isolation passed\n";
+  Document sample;sample.addAtom({0,0},26);sample.atoms[0].label="M";ui::TemplateCard card;card.name=L"설명 검증";card.category=L"기본";card.document=sample;card.preview=makeScene(sample);card.path=L"test-template.ydraw";SetTimer(hwnd,997,10,inspectGallery);ui::templateGallery(hwnd,{card},L"전체",[](Graphics&,const Scene&,RectF){});if(!valid)throw std::runtime_error("gallery button tooltip coverage regression");
+   DestroyWindow(hwnd);std::cout<<"7 themes, 6 patterns, preview rollback, dark contrast, render cache, document and SVG isolation passed\n";
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';result=1;}
  imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return result;
 }

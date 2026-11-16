@@ -1,3 +1,4 @@
+#include "win_button_help.h"
 #include "win_dialogs.h"
 #include "win_ui.h"
 #include "win_dialog_style.h"
@@ -315,7 +316,7 @@ void requestClose(Grid& g){
 }
 LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     auto* g=reinterpret_cast<Grid*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
-    if(msg==WM_CREATE){
+    if(msg==WM_CREATE){ui::enableButtonHelp();
         g=static_cast<Grid*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);g->win=hwnd;if(g->scriptColumn<0)g->scriptColumn=g->stages?1:0;SetWindowLongPtrW(hwnd,GWLP_USERDATA,(LONG_PTR)g);
         g->font=CreateFontW(-16,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
         g->list=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,16,16,940,450,hwnd,(HMENU)10,nullptr,nullptr);

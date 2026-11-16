@@ -184,7 +184,7 @@ void fillSlot(Document& d,const Document& fragment,int container,size_t index,bo
 Document structureInSlot(const Document& d,int container,size_t index,bool above=false);
 void replaceSlotStructure(Document& d,const Document& fragment,int container,size_t index,bool above=false);
 int collapsePhenyl(Document& d,const std::vector<int>& selection);
-int arrangeImportedMechanism(Document& d,const std::vector<int>& selection={},bool preserveLayout=false);
+int arrangeImportedMechanism(Document& d,const std::vector<int>& selection={},bool preserveLayout=false,bool fromStructures=false);
 void addMechanismBranch(Reaction& r,size_t source);
 std::vector<int> addBranchArrows(Document& d,Vec top,double height,double length,size_t count,bool left=false,int stemId=0);
 void normalizeChemicalLabels(Document& d,const std::vector<int>& selection={});

@@ -39,6 +39,7 @@ if(WIN32)
     src/win_editor_window.cpp
     src/win_project_manager.cpp
     src/win_splash.cpp
+    src/win_button_help.cpp
     src/win_dialogs.cpp
     src/win_grid.cpp
     src/win_gallery.cpp

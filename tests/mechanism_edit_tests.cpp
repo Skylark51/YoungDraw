@@ -13,6 +13,11 @@ static int arrow(Document& d,Vec a,Vec b){Object o;o.id=d.nextId++;o.points={a,b
 static void rigid(const Document& before,const Document& after){for(auto& b:before.bonds){auto* now=after.bond(b.id);check(now&&now->kind==b.kind&&now->a==b.a&&now->b==b.b,"chemical bond identity preserved");check(((before.atom(b.b)->p-before.atom(b.a)->p)-(after.atom(b.b)->p-after.atom(b.a)->p)).length()<1e-7,"bond vectors preserved without rotation or scaling");}for(auto a:before.atoms){auto* b=after.atom(a.id);check(b&&b->charge==a.charge&&b->label==a.label&&b->element==a.element&&b->isotope==a.isotope,"chemical labels and properties preserved");}}
 int main(){try{
     {
+        Document d;d.ring({0,0},3);d.ring({55,0},3);d.ring({500,300},6);std::vector<int> selected;for(size_t i=0;i<6;i++)selected.push_back(d.atoms[i].id);auto before=d;auto original=toNative(d);bool rejected=false;try{arrangeImportedMechanism(d,selected,true);}catch(...){rejected=true;}check(rejected&&toNative(d)==original,"legacy recognition requires arrows and remains atomic");
+        int owner=arrangeImportedMechanism(d,selected,true,true);auto& r=d.reactions.front();check(owner==r.id&&r.slots.size()==2&&r.links.size()==1,"selected nearby molecules become separate sequential stages without arrows");rigid(before,d);for(size_t i=6;i<before.atoms.size();i++)check((before.atoms[i].p-d.atom(before.atoms[i].id)->p).length()<1e-9,"unselected structure stays in place");
+        Document hydrogen;hydrogen.addAtom({0,0},1);hydrogen.addAtom({100,0},8);arrangeImportedMechanism(hydrogen,{},true,true);check(hydrogen.reactions.front().slots.size()==2,"selected atomic hydrogen remains a real stage");
+    }
+    {
         for(const auto& group:functionalGroups()){
             Document d=group.drawing;
             const int root=d.atoms.front().id, marker=d.atoms.back().id, connector=d.bonds.back().id;

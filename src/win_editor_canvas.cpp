@@ -1,3 +1,5 @@
+// Custom canvas controls share the native button help system.
+#include "win_button_help.h"
 #include "win_editor_canvas.h"
 #include "win_editor_chrome.h"
 #include "win_editor_commands.h"
@@ -58,7 +60,7 @@ bool scrollTools(Vec at,int delta){
     int* offset=nullptr,limit=0;
     if(at.y<89){offset=&topOffset;limit=topLimit;}
     else if(at.x<left){offset=&leftOffset;limit=std::max(0,drawingPanelBottom-(wh-bottom));}
-    else if(at.x>=ww-right){offset=&rightOffset;limit=std::max(0,(sidebarPage==1&&!showLayers?540:737)-(wh-bottom));}
+    else if(at.x>=ww-right){offset=&rightOffset;limit=std::max(0,(showLayers?737:540)-(wh-bottom));}
     if(!offset)return false;
     *offset=std::clamp(*offset+delta,0,limit);
     hideTooltip();redraw();return true;
@@ -109,7 +111,7 @@ void presentBuffer(Graphics& out,Bitmap& buffer){
     out.DrawImage(&buffer,Gdiplus::Rect(0,0,INT(buffer.GetWidth()),INT(buffer.GetHeight())),0,0,
                   INT(buffer.GetWidth()),INT(buffer.GetHeight()),UnitPixel);
 }
-void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink=palette.text;muted=palette.muted;accent=palette.accent;border=palette.edge;
+void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const auto& palette=appearance::palette();ink=palette.text;muted=palette.muted;accent=palette.accent;border=palette.edge;
  const auto width=std::max(1,ww),height=std::max(1,wh);
  if(!paintBuffer||paintBuffer->GetWidth()!=UINT(width)||paintBuffer->GetHeight()!=UINT(height))
      paintBuffer=std::make_unique<Bitmap>(width,height,PixelFormat32bppARGB);
@@ -209,6 +211,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
     auto plus=[&](Vec p,float radius){
         SolidBrush body(white);Pen outline(accent,1.8f);
         const float x=float(p.x),y=float(p.y);
+         regionHelp.push_back({UINT_PTR(regionHelp.size()+1),{LONG(x-radius),LONG(y-radius),LONG(x+radius),LONG(y+radius)},L"새 단계 또는 중간체를 이 위치에 추가합니다. 이름·에너지를 입력하고 배치를 확인할 수 있습니다."});
         g.FillEllipse(&body,x-radius,y-radius,2*radius,2*radius);
         g.DrawEllipse(&outline,x-radius,y-radius,2*radius,2*radius);
         g.DrawLine(&outline,x-5,y,x+5,y);g.DrawLine(&outline,x,y-5,x,y+5);
@@ -244,7 +247,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  if(selection.size()==1){auto found=sc.arrowPaths.find(selection.front());if(found!=sc.arrowPaths.end()&&found->second.size()==4){const auto& path=found->second;Pen guidePen(Color(170,0,135,120),1);guidePen.SetDashStyle(DashStyleDash);for(int i:{0,2}){Vec a=screen(path[i]),b=screen(path[i+1]);g.DrawLine(&guidePen,float(a.x),float(a.y),float(b.x),float(b.y));}Pen outline(accent,1.5);SolidBrush body(white),control(accent);for(int i=0;i<4;i++){Vec p=screen(path[i]);g.FillEllipse(i==1||i==2?&control:&body,float(p.x-5),float(p.y-5),10.f,10.f);g.DrawEllipse(&outline,float(p.x-5),float(p.y-5),10.f,10.f);}}}
  if(hoverAtom){Vec p=screen(doc.atom(hoverAtom)->p);Pen pen(accent,1);g.DrawEllipse(&pen,float(p.x-7),float(p.y-7),14.f,14.f);}if(boxing){Pen p(accent,1);p.SetDashStyle(DashStyleDash);g.DrawRectangle(&p,float(std::min(down.x,mouse.x)),float(std::min(down.y,mouse.y)),float(std::abs(down.x-mouse.x)),float(std::abs(down.y-mouse.y)));}if(drawing){if(tool==Orbital){auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,makeScene(draftOrbital(mouse),measure),false,true);g.Restore(transform);}else if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance||tool==Interaction){Document preview=doc;preview.objects.push_back(draftArrow(mouse));auto all=makeScene(preview,measure);Scene arrow;for(auto& item:all.items)if(item.owner==-1)arrow.items.push_back(item);auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,arrow,false,true);g.Restore(transform);}else{Pen p(accent,1.5);p.SetDashStyle(DashStyleDash);g.DrawLine(&p,float(down.x),float(down.y),float(mouse.x),float(mouse.y));}}g.Restore(state);
  float rx=float(ww-right);fill(g,{rx,float(top),float(right),float(wh-top-bottom)},palette.panel);const RectF rightClip(rx,89,float(right),float(std::max(0,wh-bottom-89)));
- rightOffset=std::min(rightOffset,std::max(0,(sidebarPage==1&&!showLayers?540:737)-(wh-bottom)));
+ rightOffset=std::min(rightOffset,std::max(0,(showLayers?737:540)-(wh-bottom)));
  const auto rightHits=hits.size();auto rightState=g.Save();g.SetClip(rightClip);g.TranslateTransform(0,float(-rightOffset));
  button(g,175,L"도구",{rx+12,91,114,28},!showLayers);button(g,176,L"레이어",{rx+132,91,116,28},showLayers);
  if(showLayers){
@@ -299,20 +302,17 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
         text(g,L"구조 / 굵기·물결",rx+16,444,11,muted);
         text(g,L"그래프를 선택한 뒤 관리를 누르세요.",rx+16,484,11,muted);
     }else{
-        tile(recognizeMechanismCommand,L"현재 파일 → 메커니즘 편집",{rx+12,235,237,55},true);
-        heading(L"메커니즘 도구",303);
-        row(323,{{120,L"새 메커니즘"},{140,L"예제 열기"},{121,L"메커니즘 편집"}});
-        row(376,{{146,L"단계 합치기"},{169,L"분기 추가"}});
-        row(429,{{145,L"단계 연결",mechanismConnecting},{147,L"연결 삭제"},{149,L"화살표 길이"}});
-        row(482,{{127,L"배치·단위"},{125,L"자동 정렬"}});
-        text(g,L"Alt+드래그: 단계 자유 배치",rx+16,584,11,muted);
-        heading(L"구조 넣기 · 선택한 그림 영역",603);
-        row(620,{{134,L"그림 영역",guides},{123,L"붙여넣기"},{124,L"파일로 채움"}});
-        row(673,{{186,L"구조 편집"},{113,L"파일 삽입"}});
+        tile(mechanismManagerCommand,L"메커니즘 관리",{rx+12,235,237,68},true);
+        tile(includeMechanismCommand,L"메커니즘에 편입하기",{rx+12,315,237,60});
+        tile(120,L"새 메커니즘",{rx+12,387,114,55});
+        tile(recognizeMechanismCommand,L"파일에서 인식",{rx+134,387,114,55});
+        heading(L"선택 → 편입 → 배치 미리보기",468);
+        text(g,L"구조·단계·연결은 관리 창에서 편집",rx+16,493,11,muted);
+
     }
  }
  g.Restore(rightState);clipHits(rightHits,rightClip,0,float(-rightOffset));
- if(wh-bottom<(sidebarPage==1&&!showLayers?540:737))text(g,L"↕ 휠",rx+float(right-44),91,10,muted);
- fill(g,{0,float(wh-bottom),float(ww),float(bottom)},palette.chrome);rule(g,0,float(wh-bottom),float(ww),float(wh-bottom),border);text(g,status,14,float(wh-bottom+9),11,muted);Graphics out(dc);presentBuffer(out,*paintBuffer);}
+ if(wh-bottom<(showLayers?737:540))text(g,L"↕ 휠",rx+float(right-44),91,10,muted);
+ fill(g,{0,float(wh-bottom),float(ww),float(bottom)},palette.chrome);rule(g,0,float(wh-bottom),float(ww),float(wh-bottom),border);text(g,status,14,float(wh-bottom+9),11,muted);Graphics out(dc);presentBuffer(out,*paintBuffer);ui::setRegionHelp(win,regionHelp);}
 
 } // namespace yd::editor
