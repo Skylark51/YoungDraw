@@ -220,7 +220,7 @@ int main(){try{
     {
         Document thick;auto g=newEnergyPlot(0,true);g.id=thick.nextId++;g.thinLines=false;g.inkScale=3;g.series[0].width=10;g.showYAxis=false;g.states[1].breakAfter=true;g.states[1].breakStyle=1;g.valueGap=28;thick.plots={g};
         std::vector<Primitive> waves;for(auto item:makeScene(thick).items)if(item.type==Primitive::Bezier&&item.points.size()==4&&std::abs((item.points.back()-item.points.front()).length()-21)<1e-6)waves.push_back(item);
-        check(waves.size()==4&&(waves[0].points[0]-waves[2].points[0]).length()>waves[0].width*2+1,"thick waves have a real stroke-dependent separation");
+        check(waves.size()==4&&(waves[0].points[0]-waves[2].points[0]).length()>waves[0].width*2+.5,"thick waves have a real stroke-dependent separation");
         for(const auto& wave:waves)check(wave.width>=2.2&&wave.width<=2.6+1e-8&&(wave.points.back()-wave.points.front()).length()>20,"heavy curves retain long slender wave marks");
         thick.plots[0].showYAxis=true;auto rendered=makeScene(thick);auto axes=rendered.plotAxes.at(g.id);bool axis=false;
         for(auto item:rendered.items)if(item.type==Primitive::Line&&item.points.size()==2&&std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8){axis=true;check(std::abs(item.width-30)<1e-8,"y-axis inherits the curve's displayed width");}check(axis,"y-axis shaft is present");

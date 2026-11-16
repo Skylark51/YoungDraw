@@ -636,7 +636,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             }
             Primitive mark;mark.owner=owner;mark.points={{x0-3*plot.axisScale,y},{x0,y}};mark.width=.5*plot.axisScale;s.items.push_back(mark);
         }
-        auto waveSpacing=[&](double width){return std::clamp(width*inkFactor*.25+1.8,2.8,4.5);};
+        auto waveSpacing=[&](double width){return std::clamp(width*inkFactor*.2+1.6,2.4,3.8);};
         auto waveHalfLength=[&](double width){return std::clamp(12.+width*inkFactor,13.,21.);};
         auto wave=[&](Vec center,Vec along,Vec across,double width,const std::string& color){
             const double spacing=waveSpacing(width),length=waveHalfLength(width);
@@ -649,7 +649,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         };
         if(plot.showYAxis)for(const auto& band:displayBands)if(band.marker&&band.high>=low&&band.low<=high){
             const double y=(yAt(std::max(low,band.low))+yAt(std::min(high,band.high)))/2;
-            const double axisHole=std::max(7.,waveSpacing(yAxisStroke)+waveHalfLength(yAxisStroke)*.1875+yAxisStroke*inkFactor*.5+2);
+            const double axisHole=std::max(7.,waveSpacing(yAxisStroke)+waveHalfLength(yAxisStroke)*.1875+yAxisStroke*inkFactor*.4+1);
             // Cut the axis itself instead of masking with a background-colored patch.
             for(size_t k=0,count=s.items.size();k<count;++k){const auto shaft=s.items[k];
                 if(shaft.owner!=owner||shaft.type!=Primitive::Line||shaft.points.size()!=2||std::abs(shaft.points[0].x-x0)>1e-8||std::abs(shaft.points[1].x-x0)>1e-8)continue;
@@ -739,7 +739,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX,double breakScale,int breakStyle){
             if(std::isfinite(breakX)&&breakX>a.x&&breakX<b.x&&b.x-a.x>20){
                 Vec tangent=(b-a)*(1/std::max(1e-9,(b-a).length()));
-                const double hole=breakStyle==1?std::min((b.x-a.x)*.25,std::max(7.,std::abs(tangent.x)*(waveSpacing(path.width)+waveHalfLength(path.width)*.1875)+std::abs(tangent.y)*waveHalfLength(path.width)+path.width*inkFactor*.5+2)):8.;
+                const double hole=breakStyle==1?std::min((b.x-a.x)*.25,std::max(7.,std::abs(tangent.x)*(waveSpacing(path.width)+waveHalfLength(path.width)*.1875)+std::abs(tangent.y)*waveHalfLength(path.width)+path.width*inkFactor*.4+1)):8.;
                 breakX=std::clamp(breakX,a.x+hole+1,b.x-hole-1);
                 // Split the real path instead of painting a white rectangle over other objects.
                 Vec c1{a.x+(b.x-a.x)*.42,a.y},c2{b.x-(b.x-a.x)*.42,b.y};
