@@ -99,6 +99,9 @@ int main(){
             dirty=false;
         }
         {
+            // Hosted Windows runners cap the native window to their small desktop.
+            // These synthetic mouse coordinates target a fixed logical editor viewport.
+            const int nativeWidth=ww,nativeHeight=wh;ww=std::max(1440,ww);wh=std::max(940,wh);
             doc={};auto graph=newEnergyPlot(0,false);graph.id=doc.nextId++;graph.p={100,100};doc.plots={graph};
             int atom=doc.addAtom({180,0},8);doc.plots[0].states[1].above={atom};int unrelated=doc.addAtom({1000,20},7);
             selection={graph.id};tool=Select;zoom=1;origin={200,150};history.clear();dirty=false;hoverAtom=unrelated;
@@ -114,6 +117,7 @@ int main(){
             check(toNative(doc)==beforeResize&&!history.undo(doc),"canceling an axis drag restores the graph and inserted structures");
             mouseDown(handle);mouseUp(handle+Vec{0,-65});grown=scene().plotAxes.at(graph.id);
             check(std::abs((grown.yEnd-grown.origin).length()-(axes.yEnd-axes.origin).length()-65)<1e-5,"vertical axis handle independently changes vertical axis length");
+            ww=nativeWidth;wh=nativeHeight;
         }
         {
             auto darkness=[&](double scale){
