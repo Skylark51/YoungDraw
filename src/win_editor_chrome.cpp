@@ -172,6 +172,7 @@ void button(Graphics& g,int id,std::wstring label,RectF r,bool active){
 HWND tooltip=nullptr;bool tipActive=false;RECT tipRect{};int tipCommand=0;std::wstring tipText;
 std::wstring helpText(int id){
     if(id==131)return L"에너지 표 편집\n상태 이름과 에너지를 수정하거나 Excel 표를 붙여넣습니다. 경로 이름은 열 제목을 더블클릭해 바꿉니다.";
+    if(id==plotAppearanceLastCommand)return L"Y축 제목 간격\n축 제목과 축선·눈금 사이의 여백을 pt로 조절합니다. 값이 클수록 더 멀어지며 0은 자동 간격입니다. 축 위 제목 배치에도 적용됩니다. 미리보기·취소·Ctrl+Z를 지원합니다.";
     if(id>=plotAppearanceFirstCommand&&id<=plotAppearanceLastCommand)return L"개별 크기·굵기 조절\n선택한 그래프의 해당 항목만 바꿉니다. 입력 중 미리보기, 적용, 취소, Ctrl+Z를 지원합니다. 그림 선 굵기는 삽입한 벡터 구조에 적용됩니다.";
     if(id==plotAxisLengthsCommand)return L"그래프 축 길이·굵기\n가로·세로 축 길이를 따로 입력합니다. 선택 그래프의 축 끝 □를 드래그하거나 + / -로 전체 획 굵기를 조절할 수도 있습니다. 이름·주석·삽입 구조가 함께 따라갑니다.";
     if(id==changePlotStyleCommand)return L"그래프 스타일 변경\n현재 그래프를 곡선·직선·준위형으로 바꿉니다. 그림 카드로 미리보기하고 적용합니다. 데이터·색·구조·주석은 유지하며 취소·Ctrl+Z를 지원합니다.";

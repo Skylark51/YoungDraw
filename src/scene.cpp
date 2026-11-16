@@ -608,19 +608,25 @@ Scene makeScene(const Document& d,const Measure& measure){
         std::vector<double> ticks;for(int i=0;plot.showYAxis&&plot.showYTicks&&i<=axis.intervals;i++)ticks.push_back(axis.firstTick+axis.step*i);
         std::sort(ticks.begin(),ticks.end());ticks.erase(std::unique(ticks.begin(),ticks.end(),[&](double a,double b){return std::abs(a-b)<axis.step*1e-7;}),ticks.end());
         double tickWidth=0;for(double v:ticks)tickWidth=std::max(tickWidth,widthOf(energyTickLabel(v,axis.step),tickFont));
-        double yAxisX=x0-tickWidth-18-energyFont*1.35;Rect yAxisBox{yAxisX,y0-h/2-widthOf(yCaption,energyFont)/2,energyFont*1.3,widthOf(yCaption,energyFont)};
-        for(size_t pass=0;pass<=external.size();pass++){bool moved=false;for(auto other:external)if(overlaps(yAxisBox,other)){yAxisBox.x=other.x-yAxisBox.w-8;moved=true;}if(!moved)break;}
+        const double titleGap=plot.yTitleGap>0?plot.yTitleGap:std::max(24.,energyFont*.8);
+        const double titleInkPad=energyFont*.025*std::max(0.,plot.inkScale-1);
+        const double axisLeft=std::min(x0-yAxisStroke*inkFactor/2,ticks.empty()?x0:x0-10-tickWidth);
+        // A rotated subscript extends right of the normal glyphs. Include both
+        // script offsets and added text ink before measuring the visible gap.
+        double yAxisX=axisLeft-titleGap-energyFont*1.65-titleInkPad;
+        Rect yAxisBox{yAxisX-energyFont*.4-titleInkPad,y0-h/2-widthOf(yCaption,energyFont)/2,energyFont*2.05+2*titleInkPad,widthOf(yCaption,energyFont)};
+        for(size_t pass=0;pass<=external.size();pass++){bool moved=false;for(auto other:external)if(overlaps(yAxisBox,other)){double shift=other.x-yAxisBox.w-8-yAxisBox.x;yAxisBox.x+=shift;yAxisX+=shift;moved=true;}if(!moved)break;}
         if(plot.showYAxis&&plot.energyAtTop){
             // E and the unit share one baseline above the arrowhead. Reserve
             // the whole header, including superscripts, before laying out legends.
-            const double headerY=topY-14*plot.axisScale-energyFont*1.7-4;
+            const double headerY=topY-14*plot.axisScale-energyFont*1.7-titleGap;
             const auto header=plot.energySymbol.empty()?std::string("E"):plot.energySymbol;
             const double eWidth=scriptWidth(header,energyFont);
             const double unitWidth=plot.unit.empty()?0:scriptWidth("("+plot.unit+")",energyFont);
             axisText(header,{x0,headerY},energyFont,plot.yColor,false);
             if(unitWidth>0)axisText("("+plot.unit+")",{x0+eWidth/2+6+unitWidth/2,headerY},energyFont,plot.yColor,false);
             external.push_back({x0-eWidth/2,headerY-energyFont*.4,eWidth+(unitWidth>0?6+unitWidth:0),energyFont*1.7});
-        }else if(plot.showYAxis)axisText(yCaption,{yAxisBox.x,y0-h/2},energyFont,plot.yColor,true);
+        }else if(plot.showYAxis)axisText(yCaption,{yAxisX,y0-h/2},energyFont,plot.yColor,true);
         // Label regular ticks only; range boundaries never create an extra irregular tick.
         double tickHeight=tickFont*1.3,lastLabel=y0+tickHeight+10;
         for(size_t tick=0;tick<ticks.size();tick++){

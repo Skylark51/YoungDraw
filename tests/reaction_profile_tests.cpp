@@ -123,6 +123,24 @@ int main(){try{
         g.states[2].breakPath=0;std::ofstream("reaction-profile-scaled-preview.svg")<<toSvg(makeScene(scaled));
     }
     {
+        Document spacing;auto graph=newEnergyPlot(0,true);graph.id=spacing.nextId++;graph.unit="kcal mol^{-1}";graph.energyLabelFontSize=20;graph.yAxisWidth=30;graph.inkScale=3;graph.thinLines=true;graph.showYTicks=false;spacing.plots={graph};
+        auto titleRight=[&](const Scene& rendered){double right=-1e20;for(const auto& item:rendered.items)if(item.owner==graph.id&&item.type==Primitive::Text&&item.rotation==-90)right=std::max(right,item.points[0].x+item.fontSize*1.3+std::max(0.,item.textStrokeWidth/2));check(right>-1e19,"Y axis title is rendered");return right;};
+        const auto automatic=makeScene(spacing);const auto axes=automatic.plotAxes.at(graph.id);
+        check(axes.origin.x-15-titleRight(automatic)>=24-1e-8,"automatic title spacing clears a thick axis and rotated scripts");
+        spacing.plots[0].yTitleGap=20;const auto near=makeScene(spacing);spacing.plots[0].yTitleGap=60;const auto far=makeScene(spacing);
+        check(std::abs(titleRight(near)-titleRight(far)-40)<1e-8,"Y title clearance changes by the requested amount");
+        check((near.plotAxes.at(graph.id).origin-far.plotAxes.at(graph.id).origin).length()<1e-8,"title spacing does not move the graph axes");
+        spacing.plots[0].showYTicks=true;const auto withTicks=makeScene(spacing);check(titleRight(withTicks)<titleRight(far),"title spacing also reserves the tick label width");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(spacing)),fromCdxml(toCdxml(spacing))})check(toNative(restored)==toNative(spacing),"Y title spacing survives native and CDXML saving");
+        for(double invalid:{-1.,301.,std::numeric_limits<double>::quiet_NaN()}){spacing.plots[0].yTitleGap=invalid;bool rejected=false;try{fromNative(toNative(spacing));}catch(...){rejected=true;}check(rejected,"invalid Y title gaps are rejected on load");}
+#endif
+        spacing.plots[0].yTitleGap=20;spacing.plots[0].energyAtTop=true;const auto upperNear=makeScene(spacing);spacing.plots[0].yTitleGap=60;const auto upperFar=makeScene(spacing);
+        auto headerY=[&](const Scene& rendered){for(const auto& item:rendered.items)if(item.owner==graph.id&&item.type==Primitive::Text&&item.text==graph.energySymbol)return item.points[0].y;throw std::runtime_error("missing upper Y title");};
+        check(std::abs(headerY(upperNear)-headerY(upperFar)-40)<1e-8,"spacing also adjusts the title above the axis");
+        spacing.plots[0].energyAtTop=false;std::ofstream("y-title-spacing-preview.svg")<<toSvg(makeScene(spacing));
+    }
+    {
         Document styled;auto graph=newEnergyPlot(0,true);graph.id=styled.nextId++;graph.title="";graph.xLabel="";graph.showYTicks=false;graph.states={{"A",0},{"B",20}};graph.series[0].values={0,20};graph.series[0].color="#137faa";
         graph.fixedValueFontSize=true;graph.stateFontSize=26;graph.valueFontSize=24;graph.xAxisWidth=3;graph.yAxisWidth=5;graph.curveWidth=7;graph.thinLines=true;graph.inkScale=1.5;
         int a=styled.addAtom({40,40},6),b=styled.addAtom({65,40},6);int bond=styled.addBond(a,b);graph.states[0].above={a,b,bond};styled.plots={graph};

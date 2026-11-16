@@ -254,6 +254,8 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else if(formAction>=15&&formAction<=17){
         SendDlgItemMessageW(dialog,116,CB_SETCURSEL,formAction==17?0:1,0);
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction==27||formAction==28){
+        SetDlgItemTextW(dialog,100,formAction==27?L"60":L"80");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==25){
         SetDlgItemTextW(dialog,100,L"4");
     }else if(formAction==26){
@@ -293,7 +295,7 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else{
         SetDlgItemTextW(dialog,101,L"30");previewObserved=toNative(doc)!=formBefore;
     }
-    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20)?IDCANCEL:IDOK,0);
+    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28)?IDCANCEL:IDOK,0);
 }
 static void graphCaptionChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection.clear();tool=Select;guides=true;fit();
@@ -484,7 +486,7 @@ int main(int argc,char** argv){
             auto before=toNative(doc);command(183);repaint();
             check(present(137)&&present(139)&&present(138)&&!present(141)&&present(addEnergyGapCommand)&&present(plotAnnotationsCommand)&&present(changePlotStyleCommand)&&present(plotAxisLengthsCommand)&&present(151)&&!present(127)&&!present(126),"graph tab consolidates creation and explicit gap insertion without example buttons");
             check(hit(151).Y==hit(137).Y&&!helpText(151).empty(),"spin crossing control fits in the graph tools row and has help");
-            check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow+140,"graph sidebar keeps tool ordering below the independent appearance controls");
+            check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow+176,"graph sidebar keeps tool ordering below the independent appearance controls");
             for(int id=plotAppearanceFirstCommand;id<=plotAppearanceLastCommand;id++)check(present(id)&&hit(id).Y<hit(130).Y&&!helpText(id).empty(),"independent graph appearance controls are accessible above graph tools");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;
@@ -616,6 +618,13 @@ int main(int argc,char** argv){
             check(history.undo(doc)&&toNative(doc)==before,"graph thickness changes undo in one step");check(history.redo(doc)&&doc.plots[0].thinLines,"graph thickness can be redone");
             formAction=17;formDriven=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(formDriven&&!doc.plots[0].thinLines,"graph settings can restore the existing bold preset");
             writePreview(L"graph-bold-preset.png",doc);
+            const auto spacingBefore=toNative(doc);formBefore=spacingBefore;formAction=28;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotAppearanceLastCommand);
+            check(formDriven&&previewObserved&&toNative(doc)==spacingBefore,"canceling sidebar Y title spacing restores the document after preview");
+            formAction=27;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotAppearanceLastCommand);
+            check(formDriven&&previewObserved&&doc.plots[0].yTitleGap==60,"sidebar Y title spacing applies the requested clearance");
+            writePreview(L"y-title-spacing.png",doc);
+            check(history.undo(doc)&&toNative(doc)==spacingBefore,"Y title spacing is one undo action");
+            check(history.redo(doc)&&doc.plots[0].yTitleGap==60,"Y title spacing can be redone");
             doc={};history.clear();selection.clear();dirty=false;
         }
         {
