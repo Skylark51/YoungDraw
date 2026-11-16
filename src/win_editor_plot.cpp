@@ -56,6 +56,15 @@ void editPlot(int id){auto* ptr=plot(id);if(!ptr)return;Document before=doc;Ener
     }else{doc=before;redraw();}
 
 }
+void changePlotStyle(int id){
+    const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("스타일을 바꿀 에너지 그래프를 선택하세요.");
+    const Document before=doc;const int originalMode=p->mode;
+    auto preview=[&](int mode){doc=before;plot(id)->mode=mode;redraw();UpdateWindow(win);};
+    const auto choice=ui::graphChoice(win,originalMode,true,preview);
+    if(!choice){doc=before;redraw();return;}
+    preview(choice->mode);
+    if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();status=L"그래프 스타일을 변경했습니다. 데이터·구조·주석은 유지됩니다. Ctrl+Z: 되돌리기";}
+}
 void addBilateralBranch(int id){
     auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");
     Document before=doc;EnergyPlot original=*p;std::vector<std::wstring> names;

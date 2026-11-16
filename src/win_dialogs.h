@@ -8,7 +8,7 @@ namespace ui {
 inline std::wstring wide(const std::string& s){if(s.empty())return {};int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),w.data(),n);return w;}
 inline std::string utf8(const std::wstring& w){if(w.empty())return {};int n=WideCharToMultiByte(CP_UTF8,0,w.data(),int(w.size()),nullptr,0,nullptr,nullptr);std::string s(n,0);WideCharToMultiByte(CP_UTF8,0,w.data(),int(w.size()),s.data(),n,nullptr,nullptr);return s;}
 struct GraphChoice {int mode=0;bool freeEnergy=true;};
-std::optional<GraphChoice> graphChoice(HWND owner,int initialMode=0);
+std::optional<GraphChoice> graphChoice(HWND owner,int initialMode=0,bool editStyle=false,const std::function<void(int)>& preview={});
 struct SearchItem {std::wstring title,detail;};
 std::optional<size_t> search(HWND owner,const std::wstring& title,const std::vector<SearchItem>& entries,
     const wchar_t* action=L"열기",bool showDetails=false);

@@ -7,7 +7,7 @@
 namespace ui {
 namespace {
 struct GraphPicker {
-    GraphChoice choice;DialogColors colors;HFONT font=nullptr;bool done=false,ok=false;
+    GraphChoice choice;DialogColors colors;HFONT font=nullptr;bool done=false,ok=false,editStyle=false;std::function<void(int)> preview;
 };
 const wchar_t* graphNames[]={L"부드러운 곡선",L"직선",L"준위 · 점선 연결",L"준위 · 실선 연결",L"독립 에너지 준위"};
 const wchar_t* graphDetails[]={L"봉우리와 중간체를 부드럽게 연결",L"상태 사이를 직선으로 연결",L"평평한 준위를 점선으로 연결",L"평평한 준위를 실선으로 연결",L"스핀 다중도 등 개별 상태 비교"};
@@ -42,14 +42,17 @@ LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
         picker=static_cast<GraphPicker*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(picker));
         picker->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
         auto control=[&](const wchar_t* kind,const wchar_t* label,DWORD style,int id,int x,int y,int w,int h){auto c=CreateWindowW(kind,label,WS_CHILD|WS_VISIBLE|style,x,y,w,h,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);SendMessageW(c,WM_SETFONT,WPARAM(picker->font),TRUE);return c;};
-        control(L"STATIC",L"그래프 형태를 선택하세요",0,0,22,16,680,30);
+        control(L"STATIC",picker->editStyle?L"현재 그래프의 스타일을 선택하세요":L"그래프 형태를 선택하세요",0,0,22,16,680,30);
         for(int i=0;i<5;++i)control(L"BUTTON",graphNames[i],WS_TABSTOP|BS_OWNERDRAW,100+i,22+(i%3)*228,53+(i/3)*169,216,156);
-        control(L"STATIC",L"에너지 표기",0,0,22,402,170,25);
-        control(L"BUTTON",L"ΔE · 에너지",WS_TABSTOP|BS_OWNERDRAW,200,22,435,216,43);
-        control(L"BUTTON",L"ΔG · 자유 에너지",WS_TABSTOP|BS_OWNERDRAW,201,250,435,216,43);
-        control(L"STATIC",L"형태와 표기는 만든 뒤에도 바꿀 수 있습니다.\n에너지 갭과 구간 생략은 필요할 때 추가하세요.",0,0,22,491,680,45);
-        control(L"BUTTON",L"만들기",WS_TABSTOP|BS_OWNERDRAW,IDOK,476,546,100,34);
-        control(L"BUTTON",L"취소",WS_TABSTOP|BS_OWNERDRAW,IDCANCEL,588,546,100,34);
+        if(!picker->editStyle){
+            control(L"STATIC",L"에너지 표기",0,0,22,402,170,25);
+            control(L"BUTTON",L"ΔE · 에너지",WS_TABSTOP|BS_OWNERDRAW,200,22,435,216,43);
+            control(L"BUTTON",L"ΔG · 자유 에너지",WS_TABSTOP|BS_OWNERDRAW,201,250,435,216,43);
+        }
+        const int hintY=picker->editStyle?402:491,buttonY=picker->editStyle?457:546;
+        control(L"STATIC",picker->editStyle?L"카드를 누르면 현재 그래프에 미리보기로 반영됩니다.\n데이터·색상·구조·주석은 유지하며, 취소하면 원래 스타일로 돌아갑니다.":L"형태와 표기는 만든 뒤에도 바꿀 수 있습니다.\n에너지 갭과 구간 생략은 필요할 때 추가하세요.",0,0,22,hintY,680,45);
+        control(L"BUTTON",picker->editStyle?L"적용":L"만들기",WS_TABSTOP|BS_OWNERDRAW,IDOK,476,buttonY,100,34);
+        control(L"BUTTON",L"취소",WS_TABSTOP|BS_OWNERDRAW,IDCANCEL,588,buttonY,100,34);
         return 0;
     }
     if(!picker)return DefWindowProcW(hwnd,message,wp,lp);
@@ -62,20 +65,20 @@ LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
     }
     if(message==DM_GETDEFID)return MAKELRESULT(IDOK,DC_HASDEFID);
     if(message==WM_COMMAND){int id=LOWORD(wp);
-        if(id>=100&&id<105){picker->choice.mode=id-100;for(int i=100;i<105;++i)InvalidateRect(GetDlgItem(hwnd,i),nullptr,TRUE);return 0;}
-        if(id==200||id==201){picker->choice.freeEnergy=id==201;for(int i=200;i<=201;++i)InvalidateRect(GetDlgItem(hwnd,i),nullptr,TRUE);return 0;}
+        if(id>=100&&id<105){picker->choice.mode=id-100;if(picker->preview)picker->preview(picker->choice.mode);for(int i=100;i<105;++i)InvalidateRect(GetDlgItem(hwnd,i),nullptr,TRUE);return 0;}
+        if(!picker->editStyle&&(id==200||id==201)){picker->choice.freeEnergy=id==201;for(int i=200;i<=201;++i)InvalidateRect(GetDlgItem(hwnd,i),nullptr,TRUE);return 0;}
         if(id==IDOK||id==IDCANCEL){picker->done=true;picker->ok=id==IDOK;PostMessageW(hwnd,WM_NULL,0,0);return 0;}
     }
     if(message==WM_CLOSE){picker->done=true;PostMessageW(hwnd,WM_NULL,0,0);return 0;}
     return DefWindowProcW(hwnd,message,wp,lp);
 }
 }
-std::optional<GraphChoice> graphChoice(HWND owner,int initialMode){
+std::optional<GraphChoice> graphChoice(HWND owner,int initialMode,bool editStyle,const std::function<void(int)>& preview){
     static bool registered=false;if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=graphPickerProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawGraphPicker";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);registered=true;}
-    GraphPicker picker;picker.choice.mode=std::clamp(initialMode,0,4);
-    RECT area{0,0,710,598};AdjustWindowRectEx(&area,WS_CAPTION|WS_SYSMENU|WS_POPUP,FALSE,WS_EX_DLGMODALFRAME);
-    const int w=area.right-area.left,h=area.bottom-area.top;const auto r=ownedWindowRect(owner,w,h);
-    auto hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawGraphPicker",L"새 에너지 그래프",WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,w,h,owner,nullptr,GetModuleHandleW(nullptr),&picker);
+    GraphPicker picker;picker.choice.mode=std::clamp(initialMode,0,4);picker.editStyle=editStyle;picker.preview=preview;
+    RECT area{0,0,710,editStyle?509:598};AdjustWindowRectEx(&area,WS_CAPTION|WS_SYSMENU|WS_POPUP,FALSE,WS_EX_DLGMODALFRAME);
+    const int w=area.right-area.left,h=area.bottom-area.top;const auto r=ownedWindowRect(owner,w,h,editStyle);
+    auto hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawGraphPicker",editStyle?L"그래프 스타일 변경":L"새 에너지 그래프",WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,w,h,owner,nullptr,GetModuleHandleW(nullptr),&picker);
     if(!hwnd)return {};
     appearance::titlebar(hwnd);EnableWindow(owner,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(GetDlgItem(hwnd,100+picker.choice.mode));
     MSG msg{};while(!picker.done&&GetMessageW(&msg,nullptr,0,0)>0)if(!IsDialogMessageW(hwnd,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}

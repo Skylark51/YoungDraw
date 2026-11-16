@@ -14,11 +14,13 @@
 using namespace yd;
 using namespace yd::editor;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
-static bool pickerCancel=false,pickerDriven=false;
+static bool pickerCancel=false,pickerDriven=false,stylePreviewSeen=false;
+static int pickerMode=3;
 static void CALLBACK driveGraphPicker(HWND owner,UINT,UINT_PTR timer,DWORD){
     HWND picker=nullptr;while((picker=FindWindowExW(nullptr,picker,L"YoungDrawGraphPicker",nullptr)))if(GetWindow(picker,GW_OWNER)==owner)break;
     if(!picker)return;KillTimer(owner,timer);pickerDriven=true;
-    SendMessageW(picker,WM_COMMAND,103,0);SendMessageW(picker,WM_COMMAND,200,0);
+    SendMessageW(picker,WM_COMMAND,100+pickerMode,0);SendMessageW(picker,WM_COMMAND,200,0);
+    if(!doc.plots.empty())stylePreviewSeen=doc.plots[0].mode==pickerMode;
     SendMessageW(picker,WM_COMMAND,pickerCancel?IDCANCEL:IDOK,0);
 }
 int main(){
@@ -65,6 +67,23 @@ int main(){
         check((doc.plots[0].states[1].gapOffset-placedOffset-Vec{30,20}).length()<1e-5,"drag moves gap arrow horizontally and caption vertically");
         check(history.undo(doc)&&(doc.plots[0].states[1].gapOffset-placedOffset).length()<1e-5,"gap drag is one reversible edit");
         check(history.undo(doc)&&toNative(doc)==cleanGraph,"gap creation is one reversible edit");
+        // A style edit may only change mode, including during preview and cancellation.
+        auto& styled=doc.plots[0];styled.states[1].gapFrom=0;styled.states[1].transitionState=true;styled.states[0].breakAfter=true;
+        auto second=styled.series[0];second.name="Alternative";second.color="#b44758";second.values={0,18,-8};styled.series.push_back(second);
+        styled.crossings.push_back({"Crossing",0,0,1,.5,12});styled.legendOffset={21,35};styled.showYAxis=false;
+        int structure=doc.addAtom({200,20},8);styled.states[1].above={structure};selection={styled.id};dirty=false;history.clear();
+        const auto originalStyle=toNative(doc);
+        pickerCancel=true;pickerMode=4;stylePreviewSeen=false;SetTimer(hwnd,990,10,driveGraphPicker);changePlotStyle(styled.id);
+        check(stylePreviewSeen&&toNative(doc)==originalStyle&&!dirty&&!history.undo(doc),"style preview cancels without changing data, annotations, dirty state or undo history");
+        const int plotId=doc.plots[0].id;
+        for(int mode:{1,2,3,4,0}){
+            auto expected=fromNative(originalStyle);expected.plots[0].mode=mode;pickerCancel=false;pickerMode=mode;stylePreviewSeen=false;
+            SetTimer(hwnd,990,10,driveGraphPicker);changePlotStyle(plotId);
+            check(stylePreviewSeen&&toNative(doc)==toNative(expected),"all style choices preserve energies, quantity, paths, colors, structures and annotations");
+            if(mode!=0){check(history.undo(doc)&&toNative(doc)==originalStyle&&!history.undo(doc),"style change is exactly one undoable edit");}
+            else check(!history.undo(doc),"applying the original style adds no undo entry");
+            dirty=false;
+        }
         DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();
         std::cout<<"PASS: hidden editor pointer, tab, save and zoom checks\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}

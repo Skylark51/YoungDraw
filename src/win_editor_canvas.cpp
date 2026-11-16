@@ -294,7 +294,7 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
         row(429,{{145,L"단계 연결",mechanismConnecting},{147,L"연결 삭제"},{149,L"화살표 길이"}});
         row(482,{{127,L"배치·단위"},{125,L"자동 정렬"}});
     }else{
-        row(323,{{130,L"새 그래프"},{131,L"에너지 표"}});
+        row(323,{{130,L"새 그래프"},{131,L"에너지 표"},{changePlotStyleCommand,L"스타일 변경"}});
         row(376,{{132,L"경로 추가"},{135,L"왼쪽 분기"},{133,L"경로 스타일"}});
         row(429,{{142,L"구간 색"},{139,L"이름·범위"},{136,L"화살표 배치",snapPlot!=0}});
         row(482,{{137,L"제목·축"},{151,L"스핀 교차점"},{plotAnnotationsCommand,L"TS·위치"}});
