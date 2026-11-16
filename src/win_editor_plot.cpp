@@ -101,6 +101,21 @@ void editPlotAppearance(int id,int field){
     if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }
+void editPlotFont(int id){
+    const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("글꼴을 바꿀 그래프를 선택하세요.");
+    std::vector<std::wstring> fonts;LOGFONTW query{};query.lfCharSet=DEFAULT_CHARSET;HDC dc=GetDC(win);
+    EnumFontFamiliesExW(dc,&query,[](const LOGFONTW* font,const TEXTMETRICW*,DWORD,LPARAM data)->int{auto& list=*reinterpret_cast<std::vector<std::wstring>*>(data);if(font->lfFaceName[0]!=L'@')list.emplace_back(font->lfFaceName);return 1;},reinterpret_cast<LPARAM>(&fonts),0);ReleaseDC(win,dc);
+    std::sort(fonts.begin(),fonts.end());fonts.erase(std::unique(fonts.begin(),fonts.end()),fonts.end());
+    const Document before=doc;const auto family=p->fontFamily;const int face=p->fontFace;
+    auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
+        const auto name=ui::wide(values[0]);FontFamily chosen(name.c_str());if(values[0].empty()||values[0].size()>128||chosen.GetLastStatus()!=Ok)return L"설치된 글꼴 이름을 선택하세요.";
+        const int style=std::stoi(values[1])-1;if(style< -1||style>3)return L"글꼴 스타일을 선택하세요.";
+        doc=before;auto* graph=plot(id);graph->fontFamily=values[0];graph->fontFace=style;redraw();UpdateWindow(win);return {};
+    }catch(const std::exception& e){return ui::wide(e.what());}};
+    const auto result=ui::form(win,L"그래프 글꼴",{{L"글꼴",family,false,fonts,false,4,false,true},{L"스타일",std::to_string(face+1),false,{L"문서·두께 설정 따름",L"보통",L"굵게",L"기울임",L"굵게 기울임"}},{L"적용 범위","축·눈금·상태 이름·데이터 값·범례·반응 이름"}},update);
+    if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+    else{doc=before;redraw();}
+}
 void changePlotStyle(int id){
     const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("스타일을 바꿀 에너지 그래프를 선택하세요.");
     const Document before=doc;const int originalMode=p->mode;

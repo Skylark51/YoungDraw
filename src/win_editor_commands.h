@@ -24,6 +24,8 @@ inline constexpr int plotAppearanceLastCommand = 246; // Existing controls retai
 inline constexpr int plotLegendSizeCommand = 249;
 inline constexpr int plotWaveWidthCommand = 250;
 inline constexpr int plotWaveGapCommand = 251;
+inline constexpr int plotManagerCommand = 252;
+inline constexpr int plotFontCommand = 253;
 inline constexpr int exportPngCommand = 247;
 inline constexpr int copyPngCommand = 248;
 

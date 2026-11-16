@@ -30,6 +30,7 @@ if(WIN32)
     src/win_editor_reaction.cpp
     src/win_mechanism_editor.cpp
     src/win_editor_plot.cpp
+    src/win_plot_manager.cpp
     src/win_editor_structure.cpp
     src/win_editor_commands.cpp
     src/win_editor_canvas.cpp
@@ -96,6 +97,8 @@ if(WIN32)
   add_test(NAME document_tabs COMMAND document_tabs_tests)
   set_tests_properties(document_tabs PROPERTIES TIMEOUT 90)
   add_test(NAME graph_energy_units COMMAND document_tabs_tests --plot-units-only)
+  add_test(NAME graph_manager COMMAND document_tabs_tests --plot-manager-only)
+  set_tests_properties(graph_manager PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
   add_test(NAME png_export COMMAND document_tabs_tests --png-export-only)
   set_tests_properties(png_export PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
   add_executable(theme_tests tests/theme_tests.cpp resources/youngdraw.rc)

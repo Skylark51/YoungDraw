@@ -3,6 +3,7 @@
 #include "win_editor_files.h"
 #include "win_editor_images.h"
 #include "win_editor_plot.h"
+#include "win_plot_manager.h"
 #include "win_editor_pointer.h"
 #include "win_editor_reaction.h"
 #include "win_editor_render.h"
@@ -161,6 +162,7 @@ bool switchDocumentTab(size_t index){
     if(index>=documents.size())return false;
     if(!finishInline(true)){TabCtrl_SetCurSel(documentTabs,int(activeDocument));return false;}
     if(index==activeDocument)return true;
+    closePlotManager();
     cancel();
     selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();storeDocumentTab();activeDocument=index;const auto& next=documents[index];
     doc=next.document;history=next.history;filePath=next.path;status=next.status;selection=next.selection;
@@ -169,6 +171,7 @@ bool switchDocumentTab(size_t index){
     title();redraw();return true;
 }
 void newDocumentTab(Document document,std::wstring path,bool fromOffice){
+    closePlotManager();
     cancelStageCopy();
     selectedCycleOwner=0;selectedCycleArrow=-1;
     snapPlot=0;snapStart.reset();
@@ -182,6 +185,7 @@ void newDocumentTab(Document document,std::wstring path,bool fromOffice){
 bool closeDocumentTab(size_t index){
     snapPlot=0;snapStart.reset();
     if(!switchDocumentTab(index)||!discard())return false;
+    closePlotManager();
     bool closingOffice=officeDocument&&office::editing();if(closingOffice)office::close();
     documents.erase(documents.begin()+index);
     if(documents.empty()){documents.emplace_back();activeDocument=0;doc={};history.clear();filePath.clear();selection.clear();targetContainer=0;targetSlot=0;targetAbove=false;dirty=officeDocument=false;tool=Select;fit();storeDocumentTab();title();}

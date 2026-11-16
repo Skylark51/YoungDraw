@@ -13,6 +13,7 @@ void editPlot(int id);
 void addBilateralBranch(int id);
 void publicationLayout(int id);
 void plotSettings(int id);
+void editPlotFont(int id);
 void changePlotStyle(int id);
 void editPlotAxisLengths(int id);
 void editPlotAppearance(int id,int field);

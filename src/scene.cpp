@@ -467,7 +467,8 @@ Scene makeScene(const Document& d,const Measure& measure){
     }
     for(auto& plot:d.plots){
         size_t firstPlotItem=s.items.size();
-        int plotFace=plot.thinLines?(d.style.labelFace&~1):d.style.labelFace;
+        int plotFace=plot.fontFace>=0?plot.fontFace:plot.thinLines?(d.style.labelFace&~1):d.style.labelFace;
+        auto graphFont=[&](const std::string& value){if(plot.fontFamily=="Arial")for(unsigned char c:value)if(c>=0xe3)return std::string("Malgun Gothic");return plot.fontFamily;};
         auto faceFor=[&](const std::string& value){
             int face=plotFace;
             for(size_t i=0;i<value.size();i++)if(value[i]=='S'&&(i==0||value[i-1]==' '||value[i-1]=='('||value[i-1]=='\n')){
@@ -482,16 +483,16 @@ Scene makeScene(const Document& d,const Measure& measure){
         auto axisText=[&](const std::string& value,Vec anchor,double size,const std::string& color,bool vertical,int role=0,int index=-1){
             struct Run{std::string text;int script;};std::vector<Run> runs;std::string normal;
             for(size_t i=0;i<value.size();){if((value[i]=='^'||value[i]=='_')&&i+1<value.size()&&value[i+1]=='{'){if(!normal.empty()){runs.push_back({normal,0});normal.clear();}int script=value[i]=='^'?1:-1;size_t end=value.find('}',i+2);if(end==std::string::npos){normal+=value.substr(i);break;}runs.push_back({value.substr(i+2,end-i-2),script});i=end+1;}else normal+=value[i++];}if(!normal.empty())runs.push_back({normal,0});
-            double total=0;for(auto& r:runs)total+=textWidth(measure,r.text,size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),"Arial",faceFor(value));double cursor=-total/2;
-            for(auto& r:runs){double fs=size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),offset=r.script==1?-size*.4:r.script==-1?size*.35:0;Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=r.text;for(unsigned char c:r.text)if(c>=0xe3)t.font="Malgun Gothic";t.fontSize=fs;t.face=faceFor(value);t.color=color;t.rotation=vertical?-90:0;t.points={vertical?anchor+Vec{offset,-cursor}:anchor+Vec{cursor,offset}};s.items.push_back(t);cursor+=textWidth(measure,r.text,fs,"Arial",t.face);}
+            double total=0;for(auto& r:runs)total+=textWidth(measure,r.text,size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),graphFont(r.text),faceFor(value));double cursor=-total/2;
+            for(auto& r:runs){double fs=size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),offset=r.script==1?-size*.4:r.script==-1?size*.35:0;Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=r.text;t.font=graphFont(r.text);t.fontSize=fs;t.face=faceFor(value);t.color=color;t.rotation=vertical?-90:0;t.points={vertical?anchor+Vec{offset,-cursor}:anchor+Vec{cursor,offset}};s.items.push_back(t);cursor+=textWidth(measure,r.text,fs,t.font,t.face);}
         };
         auto scriptWidth=[&](const std::string& text,double size){
             double width=0;for(size_t i=0;i<text.size();){
                 if((text[i]=='^'||text[i]=='_')&&i+1<text.size()&&text[i+1]=='{'){
-                    size_t end=text.find('}',i+2);if(end!=std::string::npos){width+=textWidth(measure,text.substr(i+2,end-i-2),size*(text[i]=='^'?chemicalScriptScale(text.substr(i+2,end-i-2)):.7),"Arial",faceFor(text));i=end+1;continue;}
+                    size_t end=text.find('}',i+2);if(end!=std::string::npos){width+=textWidth(measure,text.substr(i+2,end-i-2),size*(text[i]=='^'?chemicalScriptScale(text.substr(i+2,end-i-2)):.7),graphFont(text.substr(i+2,end-i-2)),faceFor(text));i=end+1;continue;}
                 }
                 size_t end=i+1;while(end<text.size()&&!(end+1<text.size()&&(text[end]=='^'||text[end]=='_')&&text[end+1]=='{'))end++;
-                width+=textWidth(measure,text.substr(i,end-i),size,"Arial",faceFor(text));i=end;
+                width+=textWidth(measure,text.substr(i,end-i),size,graphFont(text.substr(i,end-i)),faceFor(text));i=end;
             }return width;
         };
         owner=plot.id;auto axis=energyAxis(plot);double low=axis.low,high=axis.high;
@@ -504,7 +505,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         double axisFont=plot.axisFontSize>0?plot.axisFontSize:tickFont;
         double energyFont=plot.energyLabelFontSize>0?plot.energyLabelFontSize:tickFont;
         double valueFont=plot.valueFontSize>0?plot.valueFontSize:12.5*scale;
-        auto widthOf=[&](const std::string& text,double size){return textWidth(measure,text,size,"Arial",faceFor(text));};
+        auto widthOf=[&](const std::string& text,double size){return textWidth(measure,text,size,graphFont(text),faceFor(text));};
         std::string yCaption=plot.yLabel+(plot.unit.empty()?"":" ( "+plot.unit+" )");
         // Requested sizes are upper bounds: shrink only when the physical graph cannot fit them.
         axisFont=std::min(axisFont,std::max(4.,(plot.width-114)/std::max(1.,widthOf(plot.xLabel,1))));
@@ -575,7 +576,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         energyFont=std::min(energyFont,std::max(4.,(plot.energyAtTop?w*.95:h*.95)/std::max(1.,scriptWidth(plot.energyAtTop?(plot.energySymbol.empty()?"E":plot.energySymbol)+" ("+plot.unit+")":yCaption,1))));
         auto plotText=[&](const std::string& text,Vec at,double size,const std::string& color="#000000",bool centered=false,int role=0,int index=-1){
             Primitive item;item.type=Primitive::Text;item.owner=owner;item.textRole=role;item.textIndex=index;item.text=text;item.fontSize=size;item.face=faceFor(text);item.color=color;
-            for(unsigned char c:text)if(c>=0xe3)item.font="Malgun Gothic";
+            item.font=graphFont(text);
             emitText(s.items,item,at,centered,measure);
         };
         auto overlaps=[](Rect a,Rect b,double pad=4.){return a.x<b.x+b.w+pad&&a.x+a.w+pad>b.x&&a.y<b.y+b.h+pad&&a.y+a.h+pad>b.y;};

@@ -11,6 +11,7 @@
 #include "win_editor_text.h"
 #include "win_editor_reaction.h"
 #include "win_editor_plot.h"
+#include "win_plot_manager.h"
 #include "win_editor_structure.h"
 #include "win_editor_commands.h"
 #include "win_editor_canvas.h"
@@ -254,6 +255,8 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else if(formAction>=15&&formAction<=17){
         SendDlgItemMessageW(dialog,116,CB_SETCURSEL,formAction==17?0:1,0);
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction==35||formAction==36){
+        SetDlgItemTextW(dialog,100,formAction==35?L"Times New Roman":L"Arial");SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(100,CBN_EDITCHANGE),(LPARAM)GetDlgItem(dialog,100));SendDlgItemMessageW(dialog,101,CB_SETCURSEL,formAction==35?3:2,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,101));previewObserved=toNative(doc)!=formBefore;
     }else if(formAction>=31&&formAction<=34){
         SetDlgItemTextW(dialog,100,formAction==31?L"3.2":formAction==32?L"4":formAction==33?L"5":L"12");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==29||formAction==30){
@@ -299,7 +302,7 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else{
         SetDlgItemTextW(dialog,101,L"30");previewObserved=toNative(doc)!=formBefore;
     }
-    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28||formAction==30||formAction==33||formAction==34)?IDCANCEL:IDOK,0);
+    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28||formAction==30||formAction==33||formAction==34||formAction==36)?IDCANCEL:IDOK,0);
 }
 static void graphCaptionChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection.clear();tool=Select;guides=true;fit();
@@ -352,12 +355,38 @@ static void pngExportChecks(HWND hwnd){
     check(opaque>10&&partial>10,"transparent PNG contains visible strokes and antialiased alpha edges");
     writePreview(L"transparent-png-export.png",doc,true);Bitmap saved(L"transparent-png-export.png");check(saved.GetLastStatus()==Ok&&saved.GetWidth()==bitmap->GetWidth(),"exported PNG is a decodable image");saved.GetPixel(0,0,&corner);check(corner.GetA()==0,"file export preserves transparent background");
     auto clipboardPng=[&](){check(OpenClipboard(hwnd)!=0,"open PNG clipboard for verification");auto bytes=clipboardMemoryBytes(GetClipboardData(RegisterClipboardFormatW(L"PNG")));auto alias=clipboardMemoryBytes(GetClipboardData(RegisterClipboardFormatW(L"image/png")));CloseClipboard();check(bytes==alias&&bytes.size()>8&&bytes.substr(0,8)==std::string("\x89PNG\r\n\x1a\n",8),"clipboard carries real PNG bytes in both native and MIME formats");return bytes;};
-    command(copyPngCommand);check(clipboardPng()==encodePng(*bitmap),"PNG copy without selection copies the whole document");
+    std::cerr<<"PNG file alpha verified; copying entire document\n";SendMessageW(hwnd,WM_COMMAND,copyPngCommand,0);std::cerr<<"PNG document copy returned\n";check(clipboardPng()==encodePng(*bitmap),"PNG copy without selection copies the whole document");
     selection={first.id};auto selected=drawingBitmap(selectedDocument(),true);check(selected->GetWidth()<bitmap->GetWidth(),"selected image bounds omit unselected objects");command(copyPngCommand);check(clipboardPng()==encodePng(*selected),"PNG copy uses only the selection when present");
     check(toNative(doc)==before&&!dirty,"PNG export and copy never modify the source document");
     auto menu=GetSubMenu(GetMenu(hwnd),0);wchar_t label[128]{};check(GetMenuStringW(menu,exportPngCommand,label,128,MF_BYCOMMAND)>0,"file menu exposes PNG picture export");
     Document wavePreview;auto graph=reactionProfilePlot();graph.id=wavePreview.nextId++;graph.states[1].breakAfter=true;graph.states[1].breakStyle=1;graph.states[1].breakScale=.1;graph.inkScale=1.5;graph.series[0].width=4;graph.series[0].name="Reaction pathway";graph.legendFontSize=20;wavePreview.plots={graph};writePreview(L"wave-legend-preview.png",wavePreview,true);
     doc={};selection.clear();history.clear();std::cout<<"Transparent PNG file and clipboard checks passed\n";
+}
+static void graphManagerChecks(HWND hwnd){
+    doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
+    const auto before=toNative(doc);managePlot(owner,false);auto manager=plotManagerWindow;check(manager&&IsWindow(manager)&&toNative(doc)==before,"graph manager opens without modifying the selected graph");
+    for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");}
+    SendMessageW(manager,WM_COMMAND,4001,0);formBefore=before;formAction=36;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotFontCommand,0);
+    check(formDriven&&previewObserved&&toNative(doc)==before,"manager font cancellation restores the previewed graph");
+    formAction=35;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotFontCommand,0);
+    check(formDriven&&previewObserved&&doc.plots[0].fontFamily=="Times New Roman"&&doc.plots[0].fontFace==2,"manager applies independent graph font family and italic style");
+    bool lettering=false;for(const auto& item:makeScene(doc,measure).items)if(item.owner==owner&&item.type==Primitive::Text){lettering=true;check(item.font=="Times New Roman"&&(item.face&2),"axis, labels, legend and annotations use the selected graph font");}check(lettering,"graph font renders visible text");
+    for(const auto& restored:{fromNative(toNative(doc)),fromCdxml(toCdxml(doc))})check(toNative(restored)==toNative(doc),"graph font persists through native and CDXML saving");
+    SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"manager edits undo in one action");SendMessageW(manager,WM_COMMAND,105,0);check(doc.plots[0].fontFamily=="Times New Roman","manager redo restores font edits");
+    Document fragment;fragment.addAtom({0,0},7);replaceSlotStructure(doc,fragment,owner,0,true);history.clear();const auto originalSlot=toNative(structureInSlot(doc,owner,0,true));const auto otherSlot=toNative(structureInSlot(doc,owner,1,true));const auto energies=doc.plots[0].series[0].values;
+    auto savedEditor=structureEditor;structureEditor=[](const Document& current)->std::optional<Document>{auto changed=current;check(!changed.atoms.empty(),"manager passes only the selected structure to its editor");changed.atoms[0].element=8;return changed;};
+    SendMessageW(manager,WM_COMMAND,4003,0);SendDlgItemMessageW(manager,4200,CB_SETCURSEL,0,0);SendDlgItemMessageW(manager,4201,CB_SETCURSEL,0,0);SendMessageW(manager,WM_COMMAND,4300,0);structureEditor=savedEditor;
+    check(structureInSlot(doc,owner,0,true).atoms[0].element==8&&toNative(structureInSlot(doc,owner,1,true))==otherSlot&&doc.plots[0].series[0].values==energies,"manager edits a chosen structure independently of other states and graph data");
+    SendMessageW(manager,WM_COMMAND,104,0);check(toNative(structureInSlot(doc,owner,0,true))==originalSlot,"independent structure edit undoes through the manager");
+    SendMessageW(manager,WM_COMMAND,4004,0);formBefore=toNative(doc);formAction=31;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotWaveWidthCommand,0);check(formDriven&&doc.plots[0].waveWidth==3.2,"manager retains custom wave controls");
+    RECT bounds{};GetClientRect(manager,&bounds);Bitmap snapshot(bounds.right,bounds.bottom,PixelFormat32bppARGB);
+    auto capture=[&](){Graphics graphics(&snapshot);auto dc=graphics.GetHDC();SendMessageW(manager,WM_PRINTCLIENT,(WPARAM)dc,PRF_CLIENT);struct Context{HWND manager;HDC dc;};Context context{manager,dc};
+        EnumChildWindows(manager,[](HWND child,LPARAM data)->BOOL{auto& context=*reinterpret_cast<Context*>(data);if(GetParent(child)!=context.manager||!(GetWindowLongPtrW(child,GWL_STYLE)&WS_VISIBLE))return TRUE;RECT rect{};GetWindowRect(child,&rect);MapWindowPoints(HWND_DESKTOP,context.manager,reinterpret_cast<POINT*>(&rect),2);int saved=SaveDC(context.dc);SetViewportOrgEx(context.dc,rect.left,rect.top,nullptr);wchar_t type[32]{};GetClassNameW(child,type,32);
+            if(std::wstring(type)==L"Button"){DRAWITEMSTRUCT item{};item.CtlType=ODT_BUTTON;item.CtlID=GetDlgCtrlID(child);item.hwndItem=child;item.hDC=context.dc;item.rcItem={0,0,rect.right-rect.left,rect.bottom-rect.top};SendMessageW(context.manager,WM_DRAWITEM,item.CtlID,(LPARAM)&item);}else SendMessageW(child,WM_PRINTCLIENT,(WPARAM)context.dc,PRF_CLIENT);RestoreDC(context.dc,saved);return TRUE;},(LPARAM)&context);graphics.ReleaseHDC(dc);
+    };
+    CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};capture();check(snapshot.Save(L"graph-manager-preview.png",&png,nullptr)==Ok,"capture the graph manager and live preview");
+    SendMessageW(manager,WM_COMMAND,4001,0);capture();check(snapshot.Save(L"graph-manager-font-preview.png",&png,nullptr)==Ok,"capture graph font and axis tools");
+    newDocumentTab();check(!plotManagerWindow,"document changes close the manager before graph IDs can be reused");std::cout<<"Graph manager categories, font, structures, undo and document lifetime checks passed\n";
 }
 int main(int argc,char** argv){
     BYTE initialKeys[256]{};SetKeyboardState(initialKeys);
@@ -420,6 +449,9 @@ int main(int argc,char** argv){
         check(RegisterClassW(&wc)!=0,"register window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
+        if(argc>1&&std::string(argv[1])=="--plot-manager-only"){
+            graphManagerChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
         if(argc>1&&std::string(argv[1])=="--png-export-only"){
             pngExportChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }
@@ -497,7 +529,6 @@ int main(int argc,char** argv){
             sidebarPage=0;showLayers=false;repaint();
             check(present(140)&&!present(143)&&!present(144)&&present(169)&&present(145)&&present(146)&&present(147)&&present(149)&&!present(122)&&!present(126)&&!present(148)&&!present(141),"mechanism sidebar consolidates stage addition, table editing and layout controls");
             check(hit(recognizeMechanismCommand).Y<hit(120).Y&&hit(120).Y==hit(121).Y&&hit(121).Y<hit(146).Y&&hit(145).Y<hit(127).Y&&hit(127).Y<hit(134).Y,"mechanism sidebar follows creation, editing, layout and structure insertion");
-            const auto structureRow=hit(134).Y;
             for(int id:{100,101,102,104,105,107,125,155,156,170,171,172,173,174,160,161,162,163,164}){
                 check(present(id)&&hit(id).Y==hit(100).Y&&hit(id).Width==44&&hit(id).GetBottom()<89,"icon toolbar fits one row above document tabs");
                 check(!helpText(id).empty(),"each toolbar icon has Korean help");
@@ -509,12 +540,9 @@ int main(int argc,char** argv){
             check(hit(164).GetRight()<1200,"all toolbar groups fit minimum window width");
             check(present(218)&&present(219)&&hit(150).GetBottom()<=wh-bottom,"orbital tools and style button fit the client height");
             auto before=toNative(doc);command(183);repaint();
-            check(present(137)&&present(139)&&present(138)&&!present(141)&&present(addEnergyGapCommand)&&present(plotAnnotationsCommand)&&present(changePlotStyleCommand)&&present(plotAxisLengthsCommand)&&present(151)&&!present(127)&&!present(126),"graph tab consolidates creation and explicit gap insertion without example buttons");
-            check(hit(151).Y==hit(137).Y&&!helpText(151).empty(),"spin crossing control fits in the graph tools row and has help");
-            check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow+212,"graph sidebar keeps tool ordering below the independent appearance controls");
-            check(present(plotWaveWidthCommand)&&present(plotWaveGapCommand)&&hit(plotWaveWidthCommand).Y<hit(130).Y&&!helpText(plotWaveWidthCommand).empty()&&!helpText(plotWaveGapCommand).empty(),"wave stroke and clearance controls are accessible in the right sidebar");
-            check(present(plotLegendSizeCommand)&&hit(plotLegendSizeCommand).Y<hit(130).Y&&!helpText(plotLegendSizeCommand).empty(),"independent legend font control is accessible in the sidebar");
-            for(int id=plotAppearanceFirstCommand;id<=plotAppearanceLastCommand;id++)check(present(id)&&hit(id).Y<hit(130).Y&&!helpText(id).empty(),"independent graph appearance controls are accessible above graph tools");
+            check(present(plotManagerCommand)&&present(130)&&!helpText(plotManagerCommand).empty(),"graph sidebar exposes the manager and new graph entry");
+            check(hit(plotManagerCommand).Y<hit(130).Y,"graph management is the primary sidebar action");
+            for(int id:{131,132,133,137,139,138,151,plotAnnotationsCommand,plotWaveWidthCommand,plotWaveGapCommand,plotLegendSizeCommand,plotAxisLengthsCommand})check(!present(id),"individual graph controls are consolidated into the manager window");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;
             check(present(dottedBondCommand)&&!helpText(dottedBondCommand).empty(),"dotted single bond tool is available in the sidebar with help");

@@ -1,4 +1,5 @@
 #include "win_editor_state.h"
+#include "win_plot_manager.h"
 #include "win_editor_tabs.h"
 #include "office.h"
 #include "win_dialogs.h"
@@ -24,7 +25,7 @@ bool drawing=false,dragging=false,boxing=false,panning=false,moved=false,copyDra
 std::optional<Scene> canvasSceneCache;
 Vec annotationStart;
 bool contains(const std::vector<int>& v,int id){return std::find(v.begin(),v.end(),id)!=v.end();}
-void redraw(){canvasSceneCache.reset();InvalidateRect(win,nullptr,FALSE);}
+void redraw(){canvasSceneCache.reset();InvalidateRect(win,nullptr,FALSE);refreshPlotManager();}
 void repaintOnly(const RECT* region){InvalidateRect(win,region,FALSE);}
 void title(){std::wstring s=(isolatedStructureEditing?L"단계 구조 편집 | ":L"YoungDraw 0.4 | ")+(filePath.empty()?L"제목 없음":fs::path(filePath).filename().wstring())+(officeDocument&&office::editing()?L" [Office 개체 편집]":L"")+(dirty?L" *":L"");SetWindowTextW(win,s.c_str());refreshDocumentTabs();}
 void pruneLockedSelection(){selection.erase(std::remove_if(selection.begin(),selection.end(),[](int id){return doc.isLocked(id);}),selection.end());if(doc.isLocked(targetContainer))targetContainer=0;}

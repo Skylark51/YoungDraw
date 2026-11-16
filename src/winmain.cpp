@@ -2,6 +2,7 @@
 #include "win_editor_images.h"
 #include "win_editor_render.h"
 #include "win_editor_state.h"
+#include "win_plot_manager.h"
 #include "win_editor_tabs.h"
 #include "win_editor_window.h"
 #include "cdxml.h"
@@ -102,6 +103,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIA
  auto accelerators=CreateAcceleratorTableW(&commandSearch,1);
  MSG msg{};
  while(GetMessageW(&msg,nullptr,0,0)>0){
+     if(handlePlotManagerMessage(msg))continue;
      if(accelerators&&IsWindowEnabled(hwnd)&&(msg.hwnd==hwnd||IsChild(hwnd,msg.hwnd))&&TranslateAcceleratorW(hwnd,accelerators,&msg))continue;
      TranslateMessage(&msg);DispatchMessageW(&msg);
  }
