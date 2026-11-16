@@ -569,7 +569,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         double stageBand=0;for(double height:laneHeights){laneOffsets.push_back(stageBand);stageBand+=height;}
         if(!plot.stages.empty())y0-=stageBand+8;
         double topY=plot.p.y+std::max(25.,valueFont*1.3+12),h=std::max(25.,y0-topY);topY=y0-h;s.plotDragScales.emplace(owner,PlotDragScale{(high-low)/h,low,high});
-        energyFont=std::min(energyFont,std::max(4.,(plot.energyAtTop?w*.95:h*.95)/std::max(1.,scriptWidth(plot.energyAtTop?"E ("+plot.unit+")":yCaption,1))));
+        energyFont=std::min(energyFont,std::max(4.,(plot.energyAtTop?w*.95:h*.95)/std::max(1.,scriptWidth(plot.energyAtTop?(plot.energySymbol.empty()?"E":plot.energySymbol)+" ("+plot.unit+")":yCaption,1))));
         auto plotText=[&](const std::string& text,Vec at,double size,const std::string& color="#000000",bool centered=false,int role=0,int index=-1){
             Primitive item;item.type=Primitive::Text;item.owner=owner;item.textRole=role;item.textIndex=index;item.text=text;item.fontSize=size;item.face=faceFor(text);item.color=color;
             for(unsigned char c:text)if(c>=0xe3)item.font="Malgun Gothic";
@@ -604,9 +604,10 @@ Scene makeScene(const Document& d,const Measure& measure){
             // E and the unit share one baseline above the arrowhead. Reserve
             // the whole header, including superscripts, before laying out legends.
             const double headerY=topY-14*plot.axisScale-energyFont*1.7-4;
-            const double eWidth=scriptWidth("E",energyFont);
+            const auto header=plot.energySymbol.empty()?std::string("E"):plot.energySymbol;
+            const double eWidth=scriptWidth(header,energyFont);
             const double unitWidth=plot.unit.empty()?0:scriptWidth("("+plot.unit+")",energyFont);
-            axisText("E",{x0,headerY},energyFont,plot.yColor,false);
+            axisText(header,{x0,headerY},energyFont,plot.yColor,false);
             if(unitWidth>0)axisText("("+plot.unit+")",{x0+eWidth/2+6+unitWidth/2,headerY},energyFont,plot.yColor,false);
             external.push_back({x0-eWidth/2,headerY-energyFont*.4,eWidth+(unitWidth>0?6+unitWidth:0),energyFont*1.7});
         }else if(plot.showYAxis)axisText(yCaption,{yAxisBox.x,y0-h/2},energyFont,plot.yColor,true);
@@ -695,7 +696,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             crossings.emplace(i,std::make_pair(&crossing,left+(right-left)*crossing.position));
         }
         auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX){
-            if(breakX>a.x&&breakX<b.x&&b.x-a.x>20){
+            if(std::isfinite(breakX)&&breakX>a.x&&breakX<b.x&&b.x-a.x>20){
                 breakX=std::clamp(breakX,a.x+9.01,b.x-9.01);
                 // Split the real path instead of painting a white rectangle over other objects.
                 Vec c1{a.x+(b.x-a.x)*.42,a.y},c2{b.x-(b.x-a.x)*.42,b.y};
@@ -751,7 +752,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 const auto colorIndex=right.crossing?right.index:left.index;
                 path.color=colorIndex<basePath.segmentColors.size()&&!basePath.segmentColors[colorIndex].empty()
                     ?basePath.segmentColors[colorIndex]:basePath.color;
-                double breakX=-1;
+                double breakX=std::numeric_limits<double>::quiet_NaN();
                 if(left.index<plot.states.size()&&plot.states[left.index].breakAfter&&left.index+1<plot.states.size()){
                     const double inset=plot.mode>=2?half:0;
                     double start=stateX(left.index)+inset,end=stateX(left.index+1)-inset;
@@ -906,7 +907,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             Primitive shaft;shaft.owner=owner;shaft.width=.9;shaft.dash=1;shaft.points={{x,start.y},{x,end.y}};s.items.push_back(shaft);
             for(auto pair:{std::pair{start.y,end.y},std::pair{end.y,start.y}}){double dy=pair.second>pair.first?head:-head;Primitive tip;tip.type=Primitive::Polygon;tip.owner=owner;tip.filled=true;tip.width=0;tip.points={{x,pair.first},{x-2.5,pair.first+dy},{x+2.5,pair.first+dy}};s.items.push_back(tip);}
             std::ostringstream value;value.imbue(std::locale::classic());value<<std::fixed<<std::setprecision(1)<<(path.values[i]-path.values[from]);
-            std::string label=state.gapLabel.empty()?std::string(state.transitionState?"ΔG^{‡} = ":"ΔG = ")+value.str():state.gapLabel;
+            std::string label=state.gapLabel.empty()?plotEnergySymbol(plot)+(state.transitionState?"^{‡} = ":" = ")+value.str():state.gapLabel;
             double tw=widthOf(label,valueFont),tx=x-tw/2-8,ty=mid-valueFont*.65+state.gapOffset.y;
             if(state.gapOffset.y==0){
                 // Keep automatic gap captions clear of curves and state names.
@@ -923,7 +924,9 @@ Scene makeScene(const Document& d,const Measure& measure){
                 }
             }
             plotText(label,{tx,ty},valueFont,"#000000",true);
-            external.push_back({tx-tw/2,ty-valueFont*.4,tw,valueFont*1.7});
+            Rect gapBox{tx-tw/2,ty-valueFont*.4,tw,valueFont*1.7};
+            s.gapCaptions.push_back({owner,i,gapBox,{state.gapOffset.x,ty-(mid-valueFont*.65)}});
+            external.push_back(gapBox);
         }
         Rect xAxisBox{x0+w/2-widthOf(plot.xLabel,axisFont)/2,stateBottom+10,widthOf(plot.xLabel,axisFont),axisFont*1.3};
         for(size_t pass=0;pass<=external.size();pass++){bool moved=false;for(auto other:external)if(overlaps(xAxisBox,other)){xAxisBox.y=other.y+other.h+8;moved=true;}if(!moved)break;}

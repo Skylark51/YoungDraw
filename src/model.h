@@ -113,6 +113,7 @@ struct EnergyPlot {
     Vec legendOffset; // Offset from the automatic legend position, in points.
     bool boldLevels=false; // Keep plateau strokes at their original weight in thin mode.
     std::vector<EnergyCrossing> crossings;
+    std::string energySymbol; // Empty preserves legacy axis titles; new graphs choose ΔE or ΔG.
 };
 struct Group { int id=0; std::vector<int> members; };
 struct Document {

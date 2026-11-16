@@ -13,7 +13,18 @@ static bool textContains(const Scene& s,const std::string& text){for(const auto&
 static size_t curves(const Scene& s){return std::count_if(s.items.begin(),s.items.end(),[](const auto& p){return p.type==Primitive::Bezier;});}
 static Vec caption(const Scene& s,int i){for(const auto& p:s.items)if(p.type==Primitive::Text&&p.textRole==6&&p.textIndex==i)return p.points.front();throw std::runtime_error("missing caption");}
 int main(){try{
-    Document d;auto p=reactionProfilePlot();p.id=d.nextId++;d.plots={p};validateEnergyAnnotations(p);
+    for(int mode=0;mode<=4;++mode)for(bool freeEnergy:{false,true}){
+        auto p=newEnergyPlot(mode,freeEnergy);validateEnergyAnnotations(p);check(p.mode==mode&&p.energySymbol==(freeEnergy?"ΔG":"ΔE")&&p.yLabel==p.energySymbol,"new graph applies selected shape and quantity");
+        check(std::all_of(p.states.begin(),p.states.end(),[](const auto& state){return state.gapFrom==-1&&!state.breakAfter;}),"new graphs have no unsolicited gaps or breaks");
+        Document fresh;p.id=fresh.nextId++;p.p={-390,-120};fresh.plots={p};
+        if(mode==0)check(curves(makeScene(fresh))==2,"translated new curve has no accidental break at negative world coordinates");check(makeScene(fresh).gapCaptions.empty(),"new graphs render without gap annotations");
+        fresh.plots[0].states[1].gapFrom=0;auto gapScene=makeScene(fresh);check(gapScene.gapCaptions.size()==1&&textContains(gapScene,p.energySymbol),"added gap uses selected energy quantity");
+#ifdef TEST_CDXML
+        for(const auto& copy:{fromNative(toNative(fresh)),fromCdxml(toCdxml(fresh))})check(toNative(copy)==toNative(fresh),"shape and quantity selections survive native and CDXML saving");
+#endif
+    }
+    Document d;auto p=reactionProfilePlot();check(std::all_of(p.states.begin(),p.states.end(),[](const auto& state){return state.gapFrom==-1;}),"profile factory has no automatic gaps");
+    for(size_t i=1;i<p.states.size();i+=2)p.states[i].gapFrom=int(i)-1;p.id=d.nextId++;d.plots={p};validateEnergyAnnotations(p);
     auto scene=makeScene(d);check(curves(scene)==7,"six smooth connectors, including two pieces around the break");
     check(textContains(scene,"12.1")&&textContains(scene,"5.6")&&textContains(scene,"7.9"),"gaps reflect actual barriers");
     check(textContains(scene,"‡"),"TS double dagger is rendered");

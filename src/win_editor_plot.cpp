@@ -109,6 +109,7 @@ void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에�
      if(p.yMax)*p.yMax*=factor;
      p.yTickStep*=factor;
  }
+ if(v[25]!="0"){p.energySymbol=v[25]=="1"?"ΔE":"ΔG";p.yLabel=p.energySymbol;}
  p.showXAxis=v[23]=="1";p.showYAxis=v[24]=="1";p.showYTicks=v[19]=="1";p.energyAtTop=v[20]=="1";p.legendOffset={numeric(v[21],-10000,10000),numeric(v[22],-10000,10000)};
  energyAxis(p);if(p.yTickStep>0&&(p.yTickStep<1e-9||energyAxis(p).step>p.yTickStep*1.001))return L"y축 눈금이 너무 촘촘합니다. 더 큰 간격을 입력하세요.";doc=before;relocatePlot(original,p);*plot(id)=p;redraw();UpdateWindow(win);return {};}catch(const std::exception& e){return ui::wide(e.what());}};
     auto r=ui::form(win,L"그래프·축 설정",{{L"제목",p->title,false,{},false,4,true},{L"에너지 단위 (선택 / 직접 입력)",p->unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):p->unit,false,{L"kcal/mol",L"kcal mol⁻¹",L"kJ/mol",L"eV"},false,4,true,true},{L"x축 (위·아래첨자 버튼)",p->xLabel,false,{},false,4,true},{L"y축 (위·아래첨자 버튼)",p->yLabel,false,{},false,4,true},{L"x축 글자색",p->xColor,false,{},true},{L"y축 글자색",p->yColor,false,{},true},{L"너비 / 높이 (pt)",number(p->width)+" "+number(p->height)},{L"그래프 형태",std::to_string(p->mode),false,{L"부드러운 곡선",L"직선",L"에너지 준위 (점선 연결)",L"평평한 준위와 직선",L"독립 에너지 준위"}},{L"에너지 값 표시",p->showValues?"1":"0",false,{L"아니요",L"예"}},{L"y축 눈금 간격 (0: 자동)",number(p->yTickStep)},
@@ -120,8 +121,43 @@ void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에�
  {L"범례 X 이동 (pt, 오른쪽 +)",number(p->legendOffset.x)},
  {L"범례 Y 이동 (pt, 아래 +)",number(p->legendOffset.y)},
  {L"x축 (선·제목) 표시",p->showXAxis?"1":"0",false,{L"숨김",L"표시"}},
- {L"y축 (선·눈금·제목) 표시",p->showYAxis?"1":"0",false,{L"숨김",L"표시"}}},update,
- {{L"기본",{0,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{23,24,19,20}},{L"글자",{4,5,8,12,13,14,15}},{L"선 스타일",{7,16,17}},{L"범례 위치",{21,22}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
+ {L"y축 (선·눈금·제목) 표시",p->showYAxis?"1":"0",false,{L"숨김",L"표시"}},
+ {L"에너지 표기", "0",false,{L"현재 표기 유지",L"ΔE · 에너지",L"ΔG · 자유 에너지"}}},update,
+ {{L"기본",{0,25,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{23,24,19,20}},{L"글자",{4,5,8,12,13,14,15}},{L"선 스타일",{7,16,17}},{L"범례 위치",{21,22}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
+}
+std::optional<PendingEnergyGap> pendingEnergyGap;
+void addEnergyGap(int id){
+    const auto* p=plot(id);if(!p||doc.isLocked(id)||p->states.size()<2)throw std::runtime_error("에너지 갭을 넣을 그래프를 선택하세요.");
+    std::vector<std::wstring> names,paths;for(size_t i=0;i<p->states.size();++i)names.push_back(std::to_wstring(i+1)+L". "+ui::wide(p->states[i].label));
+    for(const auto& path:p->series)paths.push_back(ui::wide(path.name));if(paths.empty())paths.push_back(L"Path 1");
+    const std::vector<ui::Field> fields={
+        {L"출발 상태","0",false,names},{L"도착 상태","1",false,names},{L"경로","0",false,paths},
+        {L"갭 문구 (빈칸: "+ui::wide(plotEnergySymbol(*p))+L" 자동 계산)","",true,{},false,2,true},
+        {L"배치 방법","적용 후 캔버스에서 원하는 위치를 클릭하세요."}};
+    auto validate=[&](const std::vector<std::string>& v)->std::wstring{
+        const size_t from=std::stoul(v[0]),to=std::stoul(v[1]),path=std::stoul(v[2]);if(from==to)return L"서로 다른 출발·도착 상태를 선택하세요.";
+        if(!p->series.empty()&&(!p->series[path].hasValue(from)||!p->series[path].hasValue(to)))return L"두 상태에 모두 에너지 값이 있어야 합니다.";
+        const double a=p->series.empty()?p->states[from].energy:p->series[path].values[from],b=p->series.empty()?p->states[to].energy:p->series[path].values[to];
+        if(std::abs(a-b)<1e-10)return L"두 상태의 에너지가 같아 표시할 갭이 없습니다.";
+        const auto sc=scene();const auto points=sc.plotSnapPoints.find(id);
+        if(points==sc.plotSnapPoints.end()||std::none_of(points->second.begin(),points->second.end(),[&](const auto& point){return point.path==int(path)&&point.state==int(from);})||std::none_of(points->second.begin(),points->second.end(),[&](const auto& point){return point.path==int(path)&&point.state==int(to);}))return L"두 상태가 보이도록 y축 범위를 조정하세요.";
+        return {};
+    };
+    auto result=ui::form(win,L"에너지 갭 추가",fields,validate);if(!result)return;
+    pendingEnergyGap=PendingEnergyGap{id,std::stoi((*result)[0]),std::stoi((*result)[1]),std::stoi((*result)[2]),(*result)[3]};
+    tool=Select;selection={id};status=L"갭을 넣을 위치를 클릭하세요. 가로: 화살표 위치 · 세로: 문구 위치 · Esc: 취소";redraw();
+}
+bool placeEnergyGap(Vec at){
+    if(!pendingEnergyGap)return false;const auto pending=*pendingEnergyGap;auto* p=plot(pending.owner);
+    if(!p||doc.isLocked(pending.owner)){pendingEnergyGap.reset();return true;}
+    const auto sc=scene();auto found=sc.plotSnapPoints.find(pending.owner);if(found==sc.plotSnapPoints.end()){pendingEnergyGap.reset();return true;}
+    std::optional<Vec> from,to;
+    for(const auto& point:found->second)if(point.path==pending.path&&point.edge==0){if(point.state==pending.from)from=point.p;if(point.state==pending.to)to=point.p;}
+    if(!from||!to){pendingEnergyGap.reset();return true;}
+    auto& state=p->states.at(size_t(pending.to));const auto where=world(at);const double dx=where.x-to->x,dy=where.y-(from->y+to->y)/2;
+    if(std::abs(dx)>10000||std::abs(dy)>10000){status=L"그래프 가까이에 갭을 배치하세요. Esc: 취소";redraw();return true;}
+    history.checkpoint(doc);state.gapFrom=pending.from;state.gapPath=pending.path;state.gapLabel=pending.label;
+    state.gapOffset={dx,std::abs(dy)<1e-6?1e-6:dy};pendingEnergyGap.reset();changed();status=L"에너지 갭을 추가했습니다. 갭 문구를 드래그해 이동 · TS·위치에서 수정·제거 · Ctrl+Z: 되돌리기";return true;
 }
 void editPlotAnnotations(int id){
     auto* p=plot(id);if(!p||doc.isLocked(id)||p->states.empty())throw std::runtime_error("편집할 에너지 그래프를 선택하세요.");
@@ -144,7 +180,7 @@ void editPlotAnnotations(int id){
         {L"에너지 갭 경로",std::to_string(state.gapPath),false,paths},
         {L"갭 화살표 X (현재 상태 기준 pt)",number(state.gapOffset.x)},
         {L"갭 글자 Y 이동 (pt, 아래 +)",number(state.gapOffset.y)},
-        {L"갭 문구 (빈칸: ΔG / ΔG‡ 자동 계산)",state.gapLabel,true,{},false,2,true}
+        {L"갭 문구 (빈칸: "+ui::wide(plotEnergySymbol(original))+L" 자동 계산)",state.gapLabel,true,{},false,2,true}
     };
     auto update=[&](const std::vector<std::string>& v)->std::wstring{try{
         auto candidate=original;auto& edit=candidate.states[index];edit.label=v[0];edit.labelPlacement=std::stoi(v[1]);edit.labelPath=std::stoi(v[2]);

@@ -5,6 +5,83 @@
 #include <commctrl.h>
 #include <commdlg.h>
 namespace ui {
+namespace {
+struct GraphPicker {
+    GraphChoice choice;DialogColors colors;HFONT font=nullptr;bool done=false,ok=false;
+};
+const wchar_t* graphNames[]={L"부드러운 곡선",L"직선",L"준위 · 점선 연결",L"준위 · 실선 연결",L"독립 에너지 준위"};
+const wchar_t* graphDetails[]={L"봉우리와 중간체를 부드럽게 연결",L"상태 사이를 직선으로 연결",L"평평한 준위를 점선으로 연결",L"평평한 준위를 실선으로 연결",L"스핀 다중도 등 개별 상태 비교"};
+void drawGraphCard(const DRAWITEMSTRUCT& item,GraphPicker& picker,int mode){
+    using namespace Gdiplus;
+    Graphics g(item.hDC);g.SetSmoothingMode(SmoothingModeAntiAlias);
+    const auto& palette=picker.colors.palette;const bool selected=picker.choice.mode==mode;
+    RectF box(float(item.rcItem.left),float(item.rcItem.top),float(item.rcItem.right-item.rcItem.left),float(item.rcItem.bottom-item.rcItem.top));
+    SolidBrush fill(selected?palette.hover:palette.raised);g.FillRectangle(&fill,box);
+    Pen border(selected?palette.accent:palette.edge,selected?2.f:1.f);g.DrawRectangle(&border,box.X+1,box.Y+1,box.Width-2,box.Height-2);
+    if(item.itemState&ODS_FOCUS){RECT focus=item.rcItem;InflateRect(&focus,-4,-4);DrawFocusRect(item.hDC,&focus);}
+    const float x=box.X+22,y=box.Y+20,w=box.Width-44,h=60;
+    Pen axis(palette.muted,1);g.DrawLine(&axis,x,y+h,x+w,y+h);g.DrawLine(&axis,x,y+h,x,y);
+    Pen path(palette.text,2.1f);PointF pts[]={{x+10,y+46},{x+w*.5f,y+9},{x+w-10,y+50}};
+    if(mode==0){g.DrawBezier(&path,pts[0],PointF(x+w*.3f,y+46),PointF(x+w*.3f,y+9),pts[1]);g.DrawBezier(&path,pts[1],PointF(x+w*.7f,y+9),PointF(x+w*.7f,y+50),pts[2]);}
+    else if(mode==1)g.DrawLines(&path,pts,3);
+    else{
+        const float half=13;
+        for(int i=0;i<3;++i){
+            if(i&&mode!=4){Pen join(palette.muted,1.4f);if(mode==2)join.SetDashStyle(DashStyleDash);g.DrawLine(&join,pts[i-1].X+half,pts[i-1].Y,pts[i].X-half,pts[i].Y);}
+            g.DrawLine(&path,pts[i].X-half,pts[i].Y,pts[i].X+half,pts[i].Y);
+        }
+    }
+    SolidBrush dot(palette.accent);for(auto pt:pts)g.FillEllipse(&dot,pt.X-2.8f,pt.Y-2.8f,5.6f,5.6f);
+    ui::drawLabel(g,graphNames[mode],{box.X+12,box.Y+91,box.Width-24,25},14,palette.text,true,true);
+    ui::drawLabel(g,graphDetails[mode],{box.X+10,box.Y+118,box.Width-20,26},10.5f,palette.muted,false,true);
+    if(selected){SolidBrush chosen(palette.accent);g.FillEllipse(&chosen,box.X+box.Width-19.f,box.Y+9.f,8.f,8.f);}
+}
+LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
+    auto* picker=reinterpret_cast<GraphPicker*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+    if(message==WM_CREATE){
+        picker=static_cast<GraphPicker*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(picker));
+        picker->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
+        auto control=[&](const wchar_t* kind,const wchar_t* label,DWORD style,int id,int x,int y,int w,int h){auto c=CreateWindowW(kind,label,WS_CHILD|WS_VISIBLE|style,x,y,w,h,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);SendMessageW(c,WM_SETFONT,WPARAM(picker->font),TRUE);return c;};
+        control(L"STATIC",L"그래프 형태를 선택하세요",0,0,22,16,680,30);
+        for(int i=0;i<5;++i)control(L"BUTTON",graphNames[i],WS_TABSTOP|BS_OWNERDRAW,100+i,22+(i%3)*228,53+(i/3)*169,216,156);
+        control(L"STATIC",L"에너지 표기",0,0,22,402,170,25);
+        control(L"BUTTON",L"ΔE · 에너지",WS_TABSTOP|BS_OWNERDRAW,200,22,435,216,43);
+        control(L"BUTTON",L"ΔG · 자유 에너지",WS_TABSTOP|BS_OWNERDRAW,201,250,435,216,43);
+        control(L"STATIC",L"형태와 표기는 만든 뒤에도 바꿀 수 있습니다.\n에너지 갭과 구간 생략은 필요할 때 추가하세요.",0,0,22,491,680,45);
+        control(L"BUTTON",L"만들기",WS_TABSTOP|BS_OWNERDRAW,IDOK,476,546,100,34);
+        control(L"BUTTON",L"취소",WS_TABSTOP|BS_OWNERDRAW,IDCANCEL,588,546,100,34);
+        return 0;
+    }
+    if(!picker)return DefWindowProcW(hwnd,message,wp,lp);
+    if(message==WM_ERASEBKGND){RECT r{};GetClientRect(hwnd,&r);FillRect(HDC(wp),&r,picker->colors.panel);return 1;}
+    if(message==WM_CTLCOLORSTATIC)return picker->colors.control(message,HDC(wp));
+    if(message==WM_DRAWITEM){const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+        if(item.CtlID>=100&&item.CtlID<105)drawGraphCard(item,*picker,int(item.CtlID)-100);
+        else picker->colors.draw(item,item.CtlID==IDOK||(item.CtlID==200&&!picker->choice.freeEnergy)||(item.CtlID==201&&picker->choice.freeEnergy));
+        return TRUE;
+    }
+    if(message==DM_GETDEFID)return MAKELRESULT(IDOK,DC_HASDEFID);
+    if(message==WM_COMMAND){int id=LOWORD(wp);
+        if(id>=100&&id<105){picker->choice.mode=id-100;for(int i=100;i<105;++i)InvalidateRect(GetDlgItem(hwnd,i),nullptr,TRUE);return 0;}
+        if(id==200||id==201){picker->choice.freeEnergy=id==201;for(int i=200;i<=201;++i)InvalidateRect(GetDlgItem(hwnd,i),nullptr,TRUE);return 0;}
+        if(id==IDOK||id==IDCANCEL){picker->done=true;picker->ok=id==IDOK;PostMessageW(hwnd,WM_NULL,0,0);return 0;}
+    }
+    if(message==WM_CLOSE){picker->done=true;PostMessageW(hwnd,WM_NULL,0,0);return 0;}
+    return DefWindowProcW(hwnd,message,wp,lp);
+}
+}
+std::optional<GraphChoice> graphChoice(HWND owner,int initialMode){
+    static bool registered=false;if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=graphPickerProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawGraphPicker";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);registered=true;}
+    GraphPicker picker;picker.choice.mode=std::clamp(initialMode,0,4);
+    RECT area{0,0,710,598};AdjustWindowRectEx(&area,WS_CAPTION|WS_SYSMENU|WS_POPUP,FALSE,WS_EX_DLGMODALFRAME);
+    const int w=area.right-area.left,h=area.bottom-area.top;const auto r=ownedWindowRect(owner,w,h);
+    auto hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawGraphPicker",L"새 에너지 그래프",WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,w,h,owner,nullptr,GetModuleHandleW(nullptr),&picker);
+    if(!hwnd)return {};
+    appearance::titlebar(hwnd);EnableWindow(owner,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(GetDlgItem(hwnd,100+picker.choice.mode));
+    MSG msg{};while(!picker.done&&GetMessageW(&msg,nullptr,0,0)>0)if(!IsDialogMessageW(hwnd,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}
+    DestroyWindow(hwnd);EnableWindow(owner,TRUE);SetActiveWindow(owner);DeleteObject(picker.font);
+    if(picker.ok)return picker.choice;return {};
+}
 static HWND editSurface(HWND control){COMBOBOXINFO info{sizeof(info)};return GetComboBoxInfo(control,&info)&&info.hwndItem?info.hwndItem:control;}
 static LRESULT CALLBACK scriptEditProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR ref){
     const auto& field=*reinterpret_cast<const Field*>(ref);

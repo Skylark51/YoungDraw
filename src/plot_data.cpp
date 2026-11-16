@@ -25,11 +25,24 @@ EnergyPlot reactionProfilePlot(){
     EnergyPlot p;p.width=920;p.height=490;p.mode=0;p.title="";p.yLabel="ΔG";p.showYTicks=false;
     p.states={{"Reactant",7.7},{"TS1",19.8},{"Int1",8.6},{"TS2",14.2},{"Int2",7.7},{"TS3",15.6},{"Product",-.3}};
     EnergySeries path;path.values={7.7,19.8,8.6,14.2,7.7,15.6,-.3};path.dash=0;path.width=2;path.markerSize=3;p.series={path};
-    for(size_t i=0;i<p.states.size();++i){auto& state=p.states[i];state.transitionState=i%2==1;state.labelPlacement=state.transitionState?1:2;state.labelOffset={0,state.transitionState?-24.:12.};if(state.transitionState)state.gapFrom=int(i)-1;}
+    for(size_t i=0;i<p.states.size();++i){auto& state=p.states[i];state.transitionState=i%2==1;state.labelPlacement=state.transitionState?1:2;state.labelOffset={0,state.transitionState?-24.:12.};}
     p.states[2].breakAfter=true;p.states[2].breakPosition=.35;
     return p;
 }
+std::string plotEnergySymbol(const EnergyPlot& p){return p.energySymbol.empty()?"ΔG":p.energySymbol;}
+EnergyPlot newEnergyPlot(int mode,bool freeEnergy){
+    if(mode<0||mode>independentEnergyLevels)throw std::runtime_error("Invalid graph mode");
+    EnergyPlot p=mode==independentEnergyLevels?spinMultiplicityPlot():EnergyPlot{};
+    p.mode=mode;p.title="";p.energySymbol=freeEnergy?"ΔG":"ΔE";p.yLabel=p.energySymbol;
+    p.width=640;p.height=370;p.thinLines=true;p.showYTicks=mode>=2;
+    if(mode!=independentEnergyLevels){
+        p.states={{"R",0},{"TS",20},{"P",-10}};EnergySeries path;path.values={0,20,-10};path.width=2.4;path.dash=0;path.markerSize=2.8;p.series={path};
+        if(mode<2)for(auto& state:p.states){state.labelPlacement=2;state.labelOffset.y=8;}
+    }
+    return p;
+}
 void validateEnergyAnnotations(const EnergyPlot& p){
+    if(!p.energySymbol.empty()&&p.energySymbol!="ΔE"&&p.energySymbol!="ΔG")throw std::runtime_error("Invalid energy symbol");
     const size_t paths=std::max(size_t(1),p.series.size());
     auto offset=[](Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::abs(v.x)<=10000&&std::abs(v.y)<=10000;};
     for(size_t i=0;i<p.states.size();++i){const auto& s=p.states[i];

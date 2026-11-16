@@ -6,11 +6,21 @@
 #include "win_editor_images.h"
 #include "win_theme.h"
 #include "cdxml.h"
+#include "plot_data.h"
+#include "win_editor_plot.h"
+#include "win_dialogs.h"
 #include <iostream>
 #include <stdexcept>
 using namespace yd;
 using namespace yd::editor;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+static bool pickerCancel=false,pickerDriven=false;
+static void CALLBACK driveGraphPicker(HWND owner,UINT,UINT_PTR timer,DWORD){
+    HWND picker=nullptr;while((picker=FindWindowExW(nullptr,picker,L"YoungDrawGraphPicker",nullptr)))if(GetWindow(picker,GW_OWNER)==owner)break;
+    if(!picker)return;KillTimer(owner,timer);pickerDriven=true;
+    SendMessageW(picker,WM_COMMAND,103,0);SendMessageW(picker,WM_COMMAND,200,0);
+    SendMessageW(picker,WM_COMMAND,pickerCancel?IDCANCEL:IDOK,0);
+}
 int main(){
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
     try{
@@ -41,6 +51,20 @@ int main(){
         check(std::abs(zoom-2*1.15*1.15)<1e-8&&(world(at)-anchor).length()<1e-8,"multi-notch wheel keeps cursor anchor and applies full delta");
         double beforeZoom=zoom;SendMessageW(hwnd,WM_MOUSEWHEEL,0,MAKELPARAM(screenPoint.x,screenPoint.y));
         check(zoom==beforeZoom,"zero wheel delta does not zoom out");
+        auto pickerBefore=toNative(doc);SetTimer(hwnd,990,10,driveGraphPicker);auto choice=ui::graphChoice(hwnd);
+        check(pickerDriven&&choice&&choice->mode==3&&!choice->freeEnergy,"icon selection dialog returns selected shape and energy quantity");
+        pickerDriven=false;pickerCancel=true;SetTimer(hwnd,990,10,driveGraphPicker);check(!ui::graphChoice(hwnd)&&pickerDriven&&toNative(doc)==pickerBefore,"canceling graph selection does not modify the document");
+        doc={};auto graph=newEnergyPlot(0,false);graph.id=doc.nextId++;graph.p={100,100};doc.plots={graph};history.clear();zoom=1;origin={200,150};tool=Select;selection={graph.id};
+        auto cleanGraph=toNative(doc);pendingEnergyGap=PendingEnergyGap{graph.id,0,1,0,""};cancel();
+        check(!pendingEnergyGap&&toNative(doc)==cleanGraph,"canceling gap placement leaves the graph unchanged");
+        pendingEnergyGap=PendingEnergyGap{graph.id,0,1,0,""};check(placeEnergyGap({700,500}),"click places pending gap");
+        check(!pendingEnergyGap&&doc.plots[0].states[1].gapFrom==0&&scene().gapCaptions.size()==1,"gap exists only after placement click");
+        auto placedOffset=doc.plots[0].states[1].gapOffset;auto caption=scene().gapCaptions.front();
+        Vec captionCenter=screen({caption.bounds.x+caption.bounds.w/2,caption.bounds.y+caption.bounds.h/2});
+        mouseDown(captionCenter);mouseUp(captionCenter+Vec{30,20});
+        check((doc.plots[0].states[1].gapOffset-placedOffset-Vec{30,20}).length()<1e-5,"drag moves gap arrow horizontally and caption vertically");
+        check(history.undo(doc)&&(doc.plots[0].states[1].gapOffset-placedOffset).length()<1e-5,"gap drag is one reversible edit");
+        check(history.undo(doc)&&toNative(doc)==cleanGraph,"gap creation is one reversible edit");
         DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();
         std::cout<<"PASS: hidden editor pointer, tab, save and zoom checks\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}

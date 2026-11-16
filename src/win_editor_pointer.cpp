@@ -17,7 +17,7 @@ namespace yd::editor {
 
 static std::vector<int> dragSelection;
 static std::optional<InlineTarget> energyDrag;
-static std::optional<CrossingCaption> crossingDrag;
+static std::optional<CrossingCaption> crossingDrag,gapDrag;
 struct PlotLevelDrag { int owner,state,path; PlotDragScale scale; bool horizontal; };
 static std::optional<PlotLevelDrag> plotLevelDrag;
 struct StagePositionDrag { int owner; size_t slot; };
@@ -189,6 +189,10 @@ void updateDrag(){
     if((mouse-down).length()<=2&&!moved)return;moved=true;if(energyDrag)return;doc=dragBase;
     if(plotLevelDrag){updatePlotLevel((mouse-down)*(1/zoom));return;}
     if(stagePositionDrag){updateStagePosition(delta);return;}
+    if(gapDrag){
+        auto* graph=plot(gapDrag->owner);auto offset=gapDrag->offset+delta;
+        graph->states.at(gapDrag->index).gapOffset={std::clamp(offset.x,-1e4,1e4),std::abs(offset.y)<1e-6?1e-6:std::clamp(offset.y,-1e4,1e4)};return;
+    }
     if(crossingDrag){
         auto* graph=plot(crossingDrag->owner);
         auto offset=crossingDrag->offset+delta;
@@ -200,8 +204,9 @@ void updateDrag(){
     if(curveHandle>=0){for(auto& o:doc.objects)if(o.id==curveOwner){o.points[size_t(curveHandle)]=o.points[size_t(curveHandle)]+delta;}return;}
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
-void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();if(dragging){doc=dragBefore;if(!dragSelection.empty())selection=dragSelection;}dragSelection.clear();energyDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();plotLevelDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
-void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contains(float(p.x),float(p.y))){command(156);return;}if(!finishInline(true))return;SetFocus(win);for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();crossingDrag.reset();plotLevelDrag.reset();stagePositionDrag.reset();
+void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(!dragSelection.empty())selection=dragSelection;}dragSelection.clear();energyDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
+void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contains(float(p.x),float(p.y))){command(156);return;}if(!finishInline(true))return;SetFocus(win);for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();stagePositionDrag.reset();
+ if(placeEnergyGap(p))return;
  if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000)&&!mechanismConnecting&&!mechanismConnectionDrag&&!isolatedStructureEditing){
     int owner=0;size_t edge=0;double nearest=10;
     for(const auto& r:doc.reactions)for(const auto& [index,at]:mechanismSplitButtons(r)){
@@ -226,6 +231,11 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
     auto sc=scene();
     const auto w=world(p);
     const bool alt=(GetKeyState(VK_MENU)&0x8000)!=0;
+    for(auto i=sc.gapCaptions.rbegin();i!=sc.gapCaptions.rend();++i){
+        if(doc.isLocked(i->owner))continue;const auto& b=i->bounds;double pad=4/zoom;
+        if(w.x<b.x-pad||w.x>b.x+b.w+pad||w.y<b.y-pad||w.y>b.y+b.h+pad)continue;
+        gapDrag=*i;selection={i->owner};dragBefore=dragBase=doc;dragging=true;moved=copyDrag=false;curveHandle=-1;SetCapture(win);redraw();return;
+    }
     if((alt&&beginStagePositionDrag(w))||beginPlotLevelDrag(sc,p,alt)){
         dragBefore=dragBase=doc;
         curveHandle=-1;
@@ -264,7 +274,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
  if((GetKeyState(VK_MENU)&0x8000)&&aid){selection={aid};editObject(aid);return;}
  if(!aid&&bid){history.checkpoint(doc);auto b=doc.bond(bid);if(b->kind==BondKind::Aromatic&&kind()==BondKind::Aromatic){Vec a=doc.atom(b->a)->p,v=doc.atom(b->b)->p-a;for(auto& stroke:scene().items)if(stroke.owner==bid&&stroke.dash&&stroke.points.size()==2){Vec offset=(stroke.points[0]+stroke.points[1])*.5-a;b->doubleSide=(v.x*offset.y-v.y*offset.x)>0?-1:1;break;}}else if(b->kind==kind()&&(kind()==BondKind::Wedge||kind()==BondKind::Hash))std::swap(b->a,b->b);else setBondKind(doc,bid,kind());b->customOrder.clear();b->customDisplay.clear();selection={bid};changed();return;}
  startAtom=aid;drawing=true;SetCapture(win);redraw();}
-void mouseUp(Vec p){if(mechanismConnectionDrag){finishMechanismConnection(p);return;}if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging&&energyDrag){dragging=false;if((p-down).length()>2)dropEnergy(world(p));energyDrag.reset();ReleaseCapture();redraw();return;}if(dragging){mouse=p;updateDrag();crossingDrag.reset();
+void mouseUp(Vec p){if(mechanismConnectionDrag){finishMechanismConnection(p);return;}if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging&&energyDrag){dragging=false;if((p-down).length()>2)dropEnergy(world(p));energyDrag.reset();ReleaseCapture();redraw();return;}if(dragging){mouse=p;updateDrag();crossingDrag.reset();gapDrag.reset();
  if(plotLevelDrag&&!plotLevelDrag->horizontal&&moved){
     auto* graph=plot(plotLevelDrag->owner);
     for(const auto& original:dragBefore.plots)if(original.id==graph->id){graph->yMin=original.yMin;graph->yMax=original.yMax;break;}

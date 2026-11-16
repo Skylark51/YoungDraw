@@ -16,6 +16,7 @@ inline constexpr int dottedBondCommand = 229;
 inline constexpr int thirdPartyNoticesCommand = 234;
 inline constexpr int reactionProfilePlotCommand = 235;
 inline constexpr int plotAnnotationsCommand = 236;
+inline constexpr int addEnergyGapCommand = 237;
 
 void command(int id);
 

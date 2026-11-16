@@ -6,6 +6,8 @@ struct EnergyAxis { double low=0,high=1,step=1; int intervals=1; double firstTic
 inline constexpr int independentEnergyLevels = 4;
 EnergyPlot spinMultiplicityPlot();
 EnergyPlot reactionProfilePlot();
+EnergyPlot newEnergyPlot(int mode,bool freeEnergy);
+std::string plotEnergySymbol(const EnergyPlot& plot);
 void validateEnergyAnnotations(const EnergyPlot& plot);
 EnergyPlot publicationPlot(const EnergyPlot& original);
 // Mirror a pathway to the left of the first (shared) state; keep existing paths on the right.
