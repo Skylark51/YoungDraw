@@ -295,6 +295,19 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }
     SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20)?IDCANCEL:IDOK,0);
 }
+static void graphCaptionChecks(HWND hwnd){
+    doc=coordinateDemo();history.clear();selection.clear();tool=Select;guides=true;fit();
+    auto& plot=doc.plots[0];plot.series[0].name="Editable pathway";
+    auto picture=scene();auto text=std::find_if(picture.items.begin(),picture.items.end(),[&](const Primitive& p){return p.owner==plot.id&&p.type==Primitive::Text&&p.textRole==7;});
+    check(text!=picture.items.end(),"legend exists for caption test");
+    auto at=plotAnchor(plot,1,true);plot.legendOffset=at-text->points[0]-Vec{3,3};fit();
+    auto target=textAt(at);check(target&&target->role==7&&pickSlot(at),"legend text overlaps an insertion frame");
+    cancel();auto point=screen(at);SendMessageW(hwnd,WM_LBUTTONDBLCLK,0,MAKELPARAM(int(point.x),int(point.y)));
+    check(inlineEdit&&inlineTarget.role==7,"double-click edits caption before opening overlapping structure frame");
+    SetWindowTextW(inlineEdit,L"Verified pathway");check(finishInline(true)&&doc.plots[0].series[0].name=="Verified pathway","caption edit applies to graph data");
+    check(history.undo(doc)&&doc.plots[0].series[0].name=="Editable pathway","caption edit remains undoable");
+    doc={};history.clear();selection.clear();tool=Select;dirty=false;
+}
 static void graphUnitChecks(HWND hwnd){
     doc=coordinateDemo();doc.plots[0].unit="kcal/mol";history.clear();selection={doc.plots[0].id};dirty=false;int owner=selection[0];
     auto before=toNative(doc);formBefore=before;formAction=20;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
@@ -384,6 +397,10 @@ int main(int argc,char** argv){
         check(RegisterClassW(&wc)!=0,"register window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
+        graphCaptionChecks(hwnd);
+        if(argc>1&&std::string(argv[1])=="--plot-caption-only"){
+            DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
         graphUnitChecks(hwnd);
         if(argc>1&&std::string(argv[1])=="--plot-units-only"){
             DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;

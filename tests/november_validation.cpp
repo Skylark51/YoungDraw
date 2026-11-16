@@ -47,7 +47,12 @@ int wmain(int argc,wchar_t** argv){try{
         std::ifstream input(file.path(),std::ios::binary);std::string xml((std::istreambuf_iterator<char>(input)),{});
         if(xml.find("ChemDraw")==std::string::npos)continue;
         try{
-            auto d=fromCdxml(xml);roundtrip(d);
+            auto d=fromCdxml(xml);
+            if(argc>2&&std::wstring(argv[2])==L"--source-import"){
+                check(!d.sourceXml.empty(),"original CDXML source unavailable");
+                d=fromCdxml(d.sourceXml); // Reparse original visible ChemDraw data, not smart state.
+            }
+            roundtrip(d);
             d.style.lineWidth+=.1;roundtrip(d);
             auto before=d;
             int stages=0;
