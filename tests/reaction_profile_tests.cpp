@@ -152,6 +152,16 @@ int main(){try{
         check(std::abs(displayEnergy(bands,19.8)-displayEnergy(bands,7.7)-12.1)<1e-8,"compression preserves the complete local activation barrier");
         const auto after=makeScene(profile);check(vertical(after,0)-vertical(after,1)>1.5*(vertical(before,0)-vertical(before,1)),"large negative product energies no longer flatten the first peak");
         check(profile.plots[0].series[0].values==graph.series[0].values,"wave omission preserves the supplied energies");
+        const auto gentle=after;state.breakOmit=50;state.breakUpperScale=3;const auto strong=makeScene(profile);const auto strongBands=energyDisplayBands(profile.plots[0]);
+        const auto omitted=strongBands.front();check(std::abs((omitted.high-omitted.low)*(1-omitted.scale)-50)<1e-8,"an explicit amount removes fifty energy units from the displayed interval");
+        check(std::abs(displayEnergy(strongBands,19.8)-displayEnergy(strongBands,7.7)-12.1*3)<1e-8,"upper panel independently magnifies the local peak threefold");
+        check(vertical(strong,0)-vertical(strong,1)>1.5*(vertical(gentle,0)-vertical(gentle,1)),"strong omission makes the local peak substantially higher than gentle compression");
+        check(textContains(strong,"19.8")&&textContains(strong,"56.9"),"strong omission still displays the original energy numbers");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(profile)),fromCdxml(toCdxml(profile))})check(toNative(restored)==toNative(profile),"omission amount and upper magnification survive saving");
+#endif
+        for(double value:{-100.,-53.3,0.,7.7,19.8,35.})check(std::abs(energyFromDisplay(strongBands,displayEnergy(strongBands,value))-value)<1e-8,"upper magnification mapping remains invertible");
+        state.breakOmit=0;state.breakUpperScale=1;
         state.breakLow=-50;state.breakHigh=0;validateEnergyAnnotations(profile.plots[0]);auto explicitBands=energyDisplayBands(profile.plots[0]);check(explicitBands.size()==1&&explicitBands[0].low==-50&&explicitBands[0].high==0,"explicit energy bounds control the omitted interval");
 #ifdef TEST_CDXML
         for(const auto& restored:{fromNative(toNative(profile)),fromCdxml(toCdxml(profile))})check(toNative(restored)==toNative(profile),"wave and explicit omission bounds survive saving");

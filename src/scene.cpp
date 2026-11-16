@@ -634,7 +634,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 curve.points={center+along*shift+across*start,center+along*(shift+side)+across*(start+3.3),center+along*(shift+side)+across*(start+6.7),center+along*shift+across*(start+10)};s.items.push_back(curve);
             }
         };
-        if(plot.showYAxis)for(const auto& band:displayBands)if(band.high>=low&&band.low<=high){
+        if(plot.showYAxis)for(const auto& band:displayBands)if(band.marker&&band.high>=low&&band.low<=high){
             const double y=(yAt(std::max(low,band.low))+yAt(std::min(high,band.high)))/2;
             // Cut the axis itself instead of masking with a background-colored patch.
             for(size_t k=0,count=s.items.size();k<count;++k){const auto shaft=s.items[k];
@@ -643,7 +643,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 if(top<y-8&&bottom>y+8){s.items[k].points={{x0,top},{x0,y-8}};auto lower=shaft;lower.points={{x0,y+8},{x0,bottom}};s.items.push_back(lower);}
             }
 
-            if(std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakStyle==1&&state.breakScale!=1;})){wave({x0,y},{0,1},{1,0},.9,"#000000");continue;}
+            if(std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakStyle==1&&(state.breakScale!=1||state.breakOmit>0);})){wave({x0,y},{0,1},{1,0},.9,"#000000");continue;}
             for(double shift:{-3.,3.}){Primitive slash;slash.owner=owner;slash.width=.9;slash.points={{x0-5,y+shift+3},{x0+5,y+shift-3}};s.items.push_back(slash);}
         }
         std::vector<EnergySeries> paths=plot.series;if(paths.empty()){EnergySeries path;for(auto& st:plot.states)path.values.push_back(st.energy);paths.push_back(path);}
@@ -789,7 +789,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                     double start=stateX(left.index)+inset,end=stateX(left.index+1)-inset;
                     breakX=start+(end-start)*plot.states[left.index].breakPosition;
                 }
-                connect(left.right,right.left,path,breakX,left.index<plot.states.size()?plot.states[left.index].breakScale:1.,left.index<plot.states.size()?plot.states[left.index].breakStyle:0);
+                connect(left.right,right.left,path,breakX,left.index<plot.states.size()?(plot.states[left.index].breakOmit>0?1.:plot.states[left.index].breakScale):1.,left.index<plot.states.size()?plot.states[left.index].breakStyle:0);
                 if(plot.mode==0||(plot.mode!=2&&!path.dash))continue;
                 auto solidEnd=[&](Vec point,Vec other){
                     const auto toward=other-point;

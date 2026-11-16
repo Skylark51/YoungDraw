@@ -135,7 +135,8 @@ int main(){
             doc={};auto graph=newEnergyPlot(0,true);graph.id=doc.nextId++;graph.p={50,30};graph.states[0].breakAfter=true;graph.states[0].breakScale=.5;graph.yMin=-20;graph.yMax=30;
             graph.stages=mechanismStageData({{"Reaction","0","100","14","1.4","0"}});doc.plots={graph};selection={graph.id};history.clear();zoom=1;origin={150,150};tool=Select;
             auto peak=[&](){const auto snapshot=scene();for(auto point:snapshot.plotSnapPoints.at(graph.id))if(point.state==1&&point.path==0&&point.edge==0)return screen(point.p);throw std::runtime_error("missing scaled peak");};
-            auto original=toNative(doc);auto start=peak();mouseDown(start);check(dragging,"scaled energy peak can be selected for dragging");mouse=start+Vec{0,-15};updateDrag();
+            BYTE neutralKeys[256]{};SetKeyboardState(neutralKeys);
+            auto original=toNative(doc);auto start=peak();mouseDown(start);check(dragging,"scaled energy peak can be selected for dragging");mouse=start+Vec{0,-15};SetKeyboardState(neutralKeys);updateDrag();
             check(std::abs(peak().y-start.y+15)<1.5&&doc.plots[0].series[0].values[1]>20,"scaled peak follows the pointer while its interval endpoint changes");
             mouseUp(start+Vec{0,-15});check(history.undo(doc)&&toNative(doc)==original,"scaled energy drag is one reversible edit");
             start=peak();mouseDown(start);mouse=start+Vec{0,15};updateDrag();cancel();check(toNative(doc)==original&&!history.undo(doc),"cancel restores scaled peak data and display settings");
@@ -146,7 +147,7 @@ int main(){
             doc={};auto graph=newEnergyPlot(0,true);graph.id=doc.nextId++;graph.width=920;graph.height=420;graph.states={{"A2",7.7},{"A2-TS",19.8},{"B2",-56.9},{"C2",-60.1},{"D2",-53.3},{"E2",-87.4}};graph.states[1].transitionState=true;
             graph.series[0].values={7.7,19.8,-56.9,-60.1,-53.3,-87.4};doc.plots={graph};history.clear();const auto original=toNative(doc);
             writePreview(L"energy-wave-before.png",doc);compressPlotEnergyInterval(graph.id,1);
-            check(doc.plots[0].states[1].breakStyle==1&&doc.plots[0].states[1].breakScale==.1,"canvas command inserts a wave and compresses the empty energy band");
+            check(doc.plots[0].states[1].breakStyle==1&&doc.plots[0].states[1].breakOmit==50&&doc.plots[0].states[1].breakUpperScale==3,"canvas command inserts a wave and compresses the empty energy band");
             writePreview(L"energy-wave-after.png",doc);check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"wave compression is one reversible edit");
         }
         DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();

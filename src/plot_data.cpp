@@ -91,7 +91,7 @@ std::vector<EnergyDisplayBand> energyDisplayBands(const EnergyPlot& p){
     std::vector<EnergyDisplayBand> requested;std::vector<double> stops;
     if(p.mode==independentEnergyLevels)return {};
     for(size_t i=0;i+1<p.states.size();++i){const auto& state=p.states[i];
-        if(!state.breakAfter||std::abs(state.breakScale-1)<1e-10)continue;
+        if(!state.breakAfter||(std::abs(state.breakScale-1)<1e-10&&state.breakOmit==0&&state.breakUpperScale==1))continue;
         double a=p.states[i].energy,b=p.states[i+1].energy;
         if(!p.series.empty()){
             if(state.breakPath<0||size_t(state.breakPath)>=p.series.size())continue;
@@ -108,16 +108,19 @@ std::vector<EnergyDisplayBand> energyDisplayBands(const EnergyPlot& p){
             for(const auto& crossing:p.crossings)include(crossing.energy);
             std::sort(levels.begin(),levels.end());double widest=0,left=a,right=b;
             for(size_t k=1;k<levels.size();++k)if(levels[k]-levels[k-1]>widest){widest=levels[k]-levels[k-1];left=levels[k-1];right=levels[k];}
-            a=left+widest*.1;b=right-widest*.1;
+            const double inset=state.breakOmit>0?.05:.1;
+            a=left+widest*inset;b=right-widest*inset;
         }
 
-        requested.push_back({a,b,state.breakScale});stops.push_back(a);stops.push_back(b);
+        const double scale=state.breakOmit>0?std::max(.01,1-state.breakOmit/(b-a)):state.breakScale;
+        requested.push_back({a,b,scale});stops.push_back(a);stops.push_back(b);
+        if(state.breakUpperScale!=1){requested.push_back({b,1e8,state.breakUpperScale,false});stops.push_back(1e8);}
     }
     std::sort(stops.begin(),stops.end());stops.erase(std::unique(stops.begin(),stops.end()),stops.end());
     std::vector<EnergyDisplayBand> result;
-    for(size_t i=1;i<stops.size();++i){double scale=0,middle=(stops[i-1]+stops[i])/2;
-        for(auto band:requested)if(middle>=band.low&&middle<=band.high)scale=scale?std::min(scale,band.scale):band.scale;
-        if(scale&&std::abs(scale-1)>1e-10)result.push_back({stops[i-1],stops[i],scale});
+    for(size_t i=1;i<stops.size();++i){double scale=0,middle=(stops[i-1]+stops[i])/2;bool marker=false;
+        for(auto band:requested)if(middle>=band.low&&middle<=band.high){scale=scale?std::min(scale,band.scale):band.scale;marker|=band.marker;}
+        if(scale&&std::abs(scale-1)>1e-10)result.push_back({stops[i-1],stops[i],scale,marker});
     }
     return result;
 }
@@ -141,6 +144,7 @@ void validateEnergyAnnotations(const EnergyPlot& p){
     for(size_t i=0;i<p.states.size();++i){const auto& s=p.states[i];
         if(s.labelPlacement<0||s.labelPlacement>3||s.labelPath<0||size_t(s.labelPath)>=paths||!offset(s.labelOffset)||
            !std::isfinite(s.breakPosition)||s.breakPosition<.05||s.breakPosition>.95||
+           !std::isfinite(s.breakOmit)||s.breakOmit<0||s.breakOmit>1e6||!std::isfinite(s.breakUpperScale)||s.breakUpperScale<1||s.breakUpperScale>10||
            s.breakStyle<0||s.breakStyle>1||s.breakLow.has_value()!=s.breakHigh.has_value()||
            (s.breakLow&&(!std::isfinite(*s.breakLow)||!std::isfinite(*s.breakHigh)||std::abs(*s.breakLow)>1e6||std::abs(*s.breakHigh)>1e6||*s.breakHigh-*s.breakLow<1e-6))||
            !std::isfinite(s.breakScale)||s.breakScale<.01||s.breakScale>4||s.breakPath<0||size_t(s.breakPath)>=paths||
@@ -191,7 +195,7 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     for(size_t i=0;i+1<n;i++)if(i<source.segmentColors.size())left.segmentColors[n-2-i]=source.segmentColors[i];
     result.series.push_back(std::move(left));
     for(size_t i=0;i<result.states.size();++i){auto& state=result.states[i];
-        if(i<n-1){state.labelPath=int(result.series.size())-1;state.gapPath=state.labelPath;if(state.gapFrom>=0)state.gapFrom=int(n)-1-state.gapFrom;state.breakAfter=original.states[n-2-i].breakAfter;state.breakPosition=1-original.states[n-2-i].breakPosition;state.breakScale=original.states[n-2-i].breakScale;state.breakStyle=original.states[n-2-i].breakStyle;state.breakLow=original.states[n-2-i].breakLow;state.breakHigh=original.states[n-2-i].breakHigh;state.breakPath=int(result.series.size())-1;}
+        if(i<n-1){state.labelPath=int(result.series.size())-1;state.gapPath=state.labelPath;if(state.gapFrom>=0)state.gapFrom=int(n)-1-state.gapFrom;state.breakAfter=original.states[n-2-i].breakAfter;state.breakPosition=1-original.states[n-2-i].breakPosition;state.breakScale=original.states[n-2-i].breakScale;state.breakOmit=original.states[n-2-i].breakOmit;state.breakUpperScale=original.states[n-2-i].breakUpperScale;state.breakStyle=original.states[n-2-i].breakStyle;state.breakLow=original.states[n-2-i].breakLow;state.breakHigh=original.states[n-2-i].breakHigh;state.breakPath=int(result.series.size())-1;}
         else if(state.gapFrom>=0)state.gapFrom+=int(n)-1;
     }
     for(auto& crossing:result.crossings)crossing.segment+=int(n)-1;

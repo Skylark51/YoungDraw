@@ -84,6 +84,7 @@ struct EnergyState {
     int gapFrom=-1,gapPath=0; // -1 hides the gap; otherwise a state on the selected path.
     Vec gapOffset{-24,0};
     double breakScale=1;int breakPath=0; // Vertical display scale over the energy interval across //; data stays unchanged.
+    double breakOmit=0,breakUpperScale=1; // Omitted energy amount (0 uses percentage), and scale above the break.
     int breakStyle=0; // 0 double slash, 1 wave with automatic empty-energy interval selection.
     std::optional<double> breakLow,breakHigh; // Explicit compressed energy interval; both empty selects automatically.
     std::string gapLabel; // Empty: automatically calculated signed delta G (double dagger for TS).

@@ -2,7 +2,7 @@
 #include "model.h"
 namespace yd {
 struct EnergyRow { std::string label; double energy=0; int marker=-1; };
-struct EnergyDisplayBand {double low,high,scale;};
+struct EnergyDisplayBand {double low,high,scale;bool marker=true;};
 std::vector<EnergyDisplayBand> energyDisplayBands(const EnergyPlot& plot);
 double displayEnergy(const std::vector<EnergyDisplayBand>& bands,double value);
 double energyFromDisplay(const std::vector<EnergyDisplayBand>& bands,double value);
