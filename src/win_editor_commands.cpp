@@ -32,7 +32,8 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  if(id==198||id==199){groupSelected(id==199);return;}
  if(id>=190&&id<=197){alignSelection(id);return;}
  if(id==110||id==125||id==126||(id>=160&&id<=165))repeatAction=[id](){command(id);};
- if(id==plotLegendSizeCommand){editPlotAppearance(primary(),7);return;}
+ if(id==plotWaveWidthCommand||id==plotWaveGapCommand){editPlotAppearance(primary(),id==plotWaveWidthCommand?8:9);return;}
+  if(id==plotLegendSizeCommand){editPlotAppearance(primary(),7);return;}
   if(id>=plotAppearanceFirstCommand&&id<=plotAppearanceLastCommand){editPlotAppearance(primary(),id-plotAppearanceFirstCommand);return;}
  if(id==182||id==183){sidebarPage=id-182;showLayers=false;redraw();return;}if(id==219){auto r=ui::form(win,L"오비탈 설정",{{L"모양",std::to_string(int(orbitalKind)),false,{L"s (원형)",L"p (두 로브)",L"d (네 로브)",L"혼성 (큰 로브 / 작은 로브)"}},{L"위상 표시",std::to_string(orbitalPhase),false,{L"흑백 (채움 / 윤곽)",L"윤곽선",L"색상 (청색 / 적색)"}}});if(r){orbitalKind=OrbitalKind(std::stoi((*r)[0]));orbitalPhase=std::stoi((*r)[1]);tool=Orbital;selection.clear();status=L"오비탈: 클릭하거나 중심에서 바깥으로 드래그하세요.";}redraw();return;}if(id==175||id==176){showLayers=id==176;redraw();return;}
  if(id>=177&&id<=181){

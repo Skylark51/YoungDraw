@@ -137,6 +137,7 @@ double energyFromDisplay(const std::vector<EnergyDisplayBand>& bands,double valu
     return value-correction;
 }
 void validateEnergyAnnotations(const EnergyPlot& p){
+    if(!std::isfinite(p.waveWidth)||p.waveWidth<0||p.waveWidth>20||(p.waveWidth>0&&p.waveWidth<.1)||!std::isfinite(p.waveGap)||p.waveGap>100||(p.waveGap<0&&p.waveGap!=-1))throw std::runtime_error("Invalid wave stroke or clearance");
     if(!std::isfinite(p.legendFontSize)||(p.legendFontSize!=0&&(p.legendFontSize<4||p.legendFontSize>72)))throw std::runtime_error("Invalid legend font size");
     if(!std::isfinite(p.yTitleGap)||p.yTitleGap<0||p.yTitleGap>300)throw std::runtime_error("Invalid Y-axis title gap");
     if(!std::isfinite(p.valueGap)||p.valueGap<0||p.valueGap>200||!std::isfinite(p.yAxisWidth)||p.yAxisWidth<0||p.yAxisWidth>100)throw std::runtime_error("Invalid plot label clearance or axis width");

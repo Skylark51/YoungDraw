@@ -174,6 +174,8 @@ void button(Graphics& g,int id,std::wstring label,RectF r,bool active){
 
 HWND tooltip=nullptr;bool tipActive=false;RECT tipRect{};int tipCommand=0;std::wstring tipText;
 std::wstring helpText(int id){
+    if(id==plotWaveWidthCommand)return L"물결 굵기\n생략 표시의 물결 획을 본선과 독립적으로 조절합니다. 0은 자동이며 0.1~20 pt를 지정할 수 있습니다.";
+    if(id==plotWaveGapCommand)return L"물결·곡선 간격\n물결 표시 주변에서 본선을 끊는 추가 여백입니다. -1은 자동, 0은 가장 좁게, 양수는 더 넓게 벌립니다. Y축 물결에도 적용됩니다.";
     if(id==plotLegendSizeCommand)return L"범례 글자 크기\n범례 크기를 눈금·이름·데이터 값과 독립적으로 조절합니다. 0은 자동이며 4~72 pt로 지정한 크기는 자동 축소하지 않습니다.";
     if(id==copyPngCommand)return L"투명 PNG로 복사\n선택한 항목을 배경이 투명한 PNG 그림으로 클립보드에 복사합니다. 선택이 없으면 문서 전체를 복사합니다. 격자·선택 테두리는 포함하지 않습니다.";
     if(id==exportPngCommand)return L"그림으로 내보내기 (PNG)\n문서 전체를 투명 배경의 PNG 파일로 저장합니다.";

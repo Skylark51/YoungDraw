@@ -638,9 +638,12 @@ Scene makeScene(const Document& d,const Measure& measure){
         }
         auto waveSpacing=[&](double width){return std::clamp(width*inkFactor*.2+1.6,2.4,3.8);};
         auto waveHalfLength=[&](double width){return std::clamp(12.+width*inkFactor,13.,21.);};
+        auto automaticWaveStroke=[&](double width){return std::clamp(width*inkFactor*.65,.7,2.6);};
+        auto waveStroke=[&](double width){return plot.waveWidth>0?plot.waveWidth:automaticWaveStroke(width);};
+        auto waveClearance=[&](double width){return (plot.waveGap>=0?plot.waveGap:1.)+std::max(0.,waveStroke(width)-automaticWaveStroke(width))*.5;};
         auto wave=[&](Vec center,Vec along,Vec across,double width,const std::string& color){
             const double spacing=waveSpacing(width),length=waveHalfLength(width);
-            const double stroke=std::clamp(width*inkFactor*.65,.7,2.6)/inkFactor;
+            const double stroke=waveStroke(width)/inkFactor;
             for(double shift:{-spacing,spacing})for(int half=0;half<2;++half){
                 const double start=-length+length*half,side=(half==0?1.:-1.)*length*.25;
                 Primitive curve;curve.type=Primitive::Bezier;curve.owner=owner;curve.color=color;curve.width=stroke;
@@ -649,7 +652,8 @@ Scene makeScene(const Document& d,const Measure& measure){
         };
         if(plot.showYAxis)for(const auto& band:displayBands)if(band.marker&&band.high>=low&&band.low<=high){
             const double y=(yAt(std::max(low,band.low))+yAt(std::min(high,band.high)))/2;
-            const double axisHole=std::max(7.,waveSpacing(yAxisStroke)+waveHalfLength(yAxisStroke)*.1875+yAxisStroke*inkFactor*.4+1);
+            const bool waveBreak=std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakStyle==1&&(state.breakScale!=1||state.breakOmit>0);});
+            const double axisHole=std::max(7.,waveSpacing(yAxisStroke)+waveHalfLength(yAxisStroke)*.1875+yAxisStroke*inkFactor*.4+(waveBreak?waveClearance(yAxisStroke):1.));
             // Cut the axis itself instead of masking with a background-colored patch.
             for(size_t k=0,count=s.items.size();k<count;++k){const auto shaft=s.items[k];
                 if(shaft.owner!=owner||shaft.type!=Primitive::Line||shaft.points.size()!=2||std::abs(shaft.points[0].x-x0)>1e-8||std::abs(shaft.points[1].x-x0)>1e-8)continue;
@@ -657,7 +661,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 if(top<y-axisHole&&bottom>y+axisHole){s.items[k].points={{x0,top},{x0,y-axisHole}};auto lower=shaft;lower.points={{x0,y+axisHole},{x0,bottom}};s.items.push_back(lower);}
             }
 
-            if(std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakStyle==1&&(state.breakScale!=1||state.breakOmit>0);})){wave({x0,y},{0,1},{1,0},yAxisStroke,"#000000");continue;}
+            if(waveBreak){wave({x0,y},{0,1},{1,0},yAxisStroke,"#000000");continue;}
             for(double shift:{-3.,3.}){Primitive slash;slash.owner=owner;slash.width=yAxisStroke;slash.points={{x0-5,y+shift+3},{x0+5,y+shift-3}};s.items.push_back(slash);}
         }
         std::vector<EnergySeries> paths=plot.series;if(paths.empty()){EnergySeries path;for(auto& st:plot.states)path.values.push_back(st.energy);paths.push_back(path);}
@@ -739,7 +743,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX,double breakScale,int breakStyle){
             if(std::isfinite(breakX)&&breakX>a.x&&breakX<b.x&&b.x-a.x>20){
                 Vec tangent=(b-a)*(1/std::max(1e-9,(b-a).length()));
-                const double hole=breakStyle==1?std::min((b.x-a.x)*.25,std::max(7.,std::abs(tangent.x)*(waveSpacing(path.width)+waveHalfLength(path.width)*.1875)+std::abs(tangent.y)*waveHalfLength(path.width)+path.width*inkFactor*.4+1)):8.;
+                const double hole=breakStyle==1?std::min((b.x-a.x)*.25,std::max(7.,std::abs(tangent.x)*(waveSpacing(path.width)+waveHalfLength(path.width)*.1875)+std::abs(tangent.y)*waveHalfLength(path.width)+path.width*inkFactor*.4+waveClearance(path.width))):8.;
                 breakX=std::clamp(breakX,a.x+hole+1,b.x-hole-1);
                 // Split the real path instead of painting a white rectangle over other objects.
                 Vec c1{a.x+(b.x-a.x)*.42,a.y},c2{b.x-(b.x-a.x)*.42,b.y};

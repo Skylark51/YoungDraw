@@ -254,6 +254,8 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else if(formAction>=15&&formAction<=17){
         SendDlgItemMessageW(dialog,116,CB_SETCURSEL,formAction==17?0:1,0);
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction>=31&&formAction<=34){
+        SetDlgItemTextW(dialog,100,formAction==31?L"3.2":formAction==32?L"4":formAction==33?L"5":L"12");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==29||formAction==30){
         SetDlgItemTextW(dialog,100,formAction==29?L"28":L"40");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==27||formAction==28){
@@ -297,7 +299,7 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else{
         SetDlgItemTextW(dialog,101,L"30");previewObserved=toNative(doc)!=formBefore;
     }
-    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28||formAction==30)?IDCANCEL:IDOK,0);
+    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28||formAction==30||formAction==33||formAction==34)?IDCANCEL:IDOK,0);
 }
 static void graphCaptionChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection.clear();tool=Select;guides=true;fit();
@@ -509,7 +511,8 @@ int main(int argc,char** argv){
             auto before=toNative(doc);command(183);repaint();
             check(present(137)&&present(139)&&present(138)&&!present(141)&&present(addEnergyGapCommand)&&present(plotAnnotationsCommand)&&present(changePlotStyleCommand)&&present(plotAxisLengthsCommand)&&present(151)&&!present(127)&&!present(126),"graph tab consolidates creation and explicit gap insertion without example buttons");
             check(hit(151).Y==hit(137).Y&&!helpText(151).empty(),"spin crossing control fits in the graph tools row and has help");
-            check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow+176,"graph sidebar keeps tool ordering below the independent appearance controls");
+            check(hit(recognizeMechanismCommand).Y<hit(130).Y&&hit(130).Y==hit(131).Y&&hit(131).Y<hit(137).Y&&hit(137).Y<hit(134).Y&&hit(186).Y==hit(138).Y&&hit(186).X<hit(138).X&&hit(134).Y==structureRow+212,"graph sidebar keeps tool ordering below the independent appearance controls");
+            check(present(plotWaveWidthCommand)&&present(plotWaveGapCommand)&&hit(plotWaveWidthCommand).Y<hit(130).Y&&!helpText(plotWaveWidthCommand).empty()&&!helpText(plotWaveGapCommand).empty(),"wave stroke and clearance controls are accessible in the right sidebar");
             check(present(plotLegendSizeCommand)&&hit(plotLegendSizeCommand).Y<hit(130).Y&&!helpText(plotLegendSizeCommand).empty(),"independent legend font control is accessible in the sidebar");
             for(int id=plotAppearanceFirstCommand;id<=plotAppearanceLastCommand;id++)check(present(id)&&hit(id).Y<hit(130).Y&&!helpText(id).empty(),"independent graph appearance controls are accessible above graph tools");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
@@ -654,6 +657,15 @@ int main(int argc,char** argv){
             formAction=29;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotLegendSizeCommand);
             check(formDriven&&previewObserved&&doc.plots[0].legendFontSize==28,"sidebar legend control applies its own font size");
             check(history.undo(doc)&&toNative(doc)==legendBefore,"legend size is one undo action");
+            const auto waveBefore=toNative(doc);formBefore=waveBefore;formAction=33;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotWaveWidthCommand);
+            check(formDriven&&previewObserved&&toNative(doc)==waveBefore,"cancel restores wave stroke preview");
+            formAction=31;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotWaveWidthCommand);
+            check(formDriven&&previewObserved&&doc.plots[0].waveWidth==3.2,"wave stroke sidebar applies an independent width");
+            const auto gapBefore=toNative(doc);formBefore=gapBefore;formAction=34;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotWaveGapCommand);
+            check(formDriven&&previewObserved&&toNative(doc)==gapBefore,"cancel restores wave clearance preview");
+            formAction=32;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotWaveGapCommand);
+            check(formDriven&&previewObserved&&doc.plots[0].waveGap==4&&doc.plots[0].waveWidth==3.2,"wave clearance changes independently of wave stroke");
+            check(history.undo(doc)&&toNative(doc)==gapBefore&&history.undo(doc)&&toNative(doc)==waveBefore,"wave clearance and stroke each undo in one action");
             doc={};history.clear();selection.clear();dirty=false;
         }
         {
