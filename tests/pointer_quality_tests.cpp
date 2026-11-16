@@ -142,6 +142,13 @@ int main(){
             writePreview(L"energy-break-scale-and-arrows.png",doc);
             ww=nativeWidth;wh=nativeHeight;
         }
+        {
+            doc={};auto graph=newEnergyPlot(0,true);graph.id=doc.nextId++;graph.width=920;graph.height=420;graph.states={{"A2",7.7},{"A2-TS",19.8},{"B2",-56.9},{"C2",-60.1},{"D2",-53.3},{"E2",-87.4}};graph.states[1].transitionState=true;
+            graph.series[0].values={7.7,19.8,-56.9,-60.1,-53.3,-87.4};doc.plots={graph};history.clear();const auto original=toNative(doc);
+            writePreview(L"energy-wave-before.png",doc);compressPlotEnergyInterval(graph.id,1);
+            check(doc.plots[0].states[1].breakStyle==1&&doc.plots[0].states[1].breakScale==.1,"canvas command inserts a wave and compresses the empty energy band");
+            writePreview(L"energy-wave-after.png",doc);check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"wave compression is one reversible edit");
+        }
         DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();
         std::cout<<"PASS: hidden editor pointer, tab, save and zoom checks\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}

@@ -627,8 +627,23 @@ Scene makeScene(const Document& d,const Measure& measure){
             }
             Primitive mark;mark.owner=owner;mark.points={{x0-3*plot.axisScale,y},{x0,y}};mark.width=.5*plot.axisScale;s.items.push_back(mark);
         }
+        auto wave=[&](Vec center,Vec along,Vec across,double width,const std::string& color){
+            for(double shift:{-3.5,3.5})for(int half=0;half<2;++half){
+                const double start=-10+10*half,side=half==0?3.5:-3.5;
+                Primitive curve;curve.type=Primitive::Bezier;curve.owner=owner;curve.color=color;curve.width=width;
+                curve.points={center+along*shift+across*start,center+along*(shift+side)+across*(start+3.3),center+along*(shift+side)+across*(start+6.7),center+along*shift+across*(start+10)};s.items.push_back(curve);
+            }
+        };
         if(plot.showYAxis)for(const auto& band:displayBands)if(band.high>=low&&band.low<=high){
             const double y=(yAt(std::max(low,band.low))+yAt(std::min(high,band.high)))/2;
+            // Cut the axis itself instead of masking with a background-colored patch.
+            for(size_t k=0,count=s.items.size();k<count;++k){const auto shaft=s.items[k];
+                if(shaft.owner!=owner||shaft.type!=Primitive::Line||shaft.points.size()!=2||std::abs(shaft.points[0].x-x0)>1e-8||std::abs(shaft.points[1].x-x0)>1e-8)continue;
+                const double top=std::min(shaft.points[0].y,shaft.points[1].y),bottom=std::max(shaft.points[0].y,shaft.points[1].y);
+                if(top<y-8&&bottom>y+8){s.items[k].points={{x0,top},{x0,y-8}};auto lower=shaft;lower.points={{x0,y+8},{x0,bottom}};s.items.push_back(lower);}
+            }
+
+            if(std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakStyle==1&&state.breakScale!=1;})){wave({x0,y},{0,1},{1,0},.9,"#000000");continue;}
             for(double shift:{-3.,3.}){Primitive slash;slash.owner=owner;slash.width=.9;slash.points={{x0-5,y+shift+3},{x0+5,y+shift-3}};s.items.push_back(slash);}
         }
         std::vector<EnergySeries> paths=plot.series;if(paths.empty()){EnergySeries path;for(auto& st:plot.states)path.values.push_back(st.energy);paths.push_back(path);}
@@ -706,7 +721,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             const auto left=a+Vec{inset,0},right=b-Vec{inset,0};
             crossings.emplace(i,std::make_pair(&crossing,left+(right-left)*crossing.position));
         }
-        auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX,double breakScale){
+        auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX,double breakScale,int breakStyle){
             if(std::isfinite(breakX)&&breakX>a.x&&breakX<b.x&&b.x-a.x>20){
                 breakX=std::clamp(breakX,a.x+9.01,b.x-9.01);
                 // Split the real path instead of painting a white rectangle over other objects.
@@ -725,8 +740,9 @@ Scene makeScene(const Document& d,const Measure& measure){
                 };
                 part(0,t0);part(t1,1);
                 Vec middle=at(parameter(breakX));
-                if(middle.y>=topY&&middle.y<=y0)for(double shift:{-4.,4.}){Primitive slash;slash.owner=owner;slash.color=path.color;slash.width=path.width;slash.points={middle+Vec{shift-3,9},middle+Vec{shift+3,-9}};s.items.push_back(slash);}
-                if(std::abs(breakScale-1)>1e-9&&middle.y>=topY&&middle.y<=y0){
+                if(breakStyle==1&&middle.y>=topY&&middle.y<=y0){Vec tangent=(b-a)*(1/std::max(1e-9,(b-a).length()));wave(middle,tangent,{-tangent.y,tangent.x},path.width,path.color);}
+                if(breakStyle==0&&middle.y>=topY&&middle.y<=y0)for(double shift:{-4.,4.}){Primitive slash;slash.owner=owner;slash.color=path.color;slash.width=path.width;slash.points={middle+Vec{shift-3,9},middle+Vec{shift+3,-9}};s.items.push_back(slash);}
+                if(breakStyle==0&&std::abs(breakScale-1)>1e-9&&middle.y>=topY&&middle.y<=y0){
                     std::ostringstream label;label.imbue(std::locale::classic());label<<"× "<<std::setprecision(4)<<breakScale*100<<"%";
                     plotText(label.str(),middle+Vec{0,13},std::max(6.,tickFont*.7),path.color,true);
                 }
@@ -773,7 +789,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                     double start=stateX(left.index)+inset,end=stateX(left.index+1)-inset;
                     breakX=start+(end-start)*plot.states[left.index].breakPosition;
                 }
-                connect(left.right,right.left,path,breakX,left.index<plot.states.size()?plot.states[left.index].breakScale:1.);
+                connect(left.right,right.left,path,breakX,left.index<plot.states.size()?plot.states[left.index].breakScale:1.,left.index<plot.states.size()?plot.states[left.index].breakStyle:0);
                 if(plot.mode==0||(plot.mode!=2&&!path.dash))continue;
                 auto solidEnd=[&](Vec point,Vec other){
                     const auto toward=other-point;

@@ -217,6 +217,15 @@ void setPlotTransitionState(int id,size_t index,bool enabled){
     history.checkpoint(doc);p->states[index].transitionState=enabled;selection={id};changed();
     status=enabled?L"TS로 지정했습니다. 삽입 구조에 [ ]‡가 표시됩니다. Ctrl+Z: 되돌리기":L"TS 지정을 해제했습니다. 구조는 유지하고 [ ]‡만 숨깁니다. Ctrl+Z: 되돌리기";
 }
+void compressPlotEnergyInterval(int id,size_t index){
+    auto* p=plot(id);if(!p||doc.isLocked(id)||index+1>=p->states.size()||p->mode==independentEnergyLevels)return;
+    auto candidate=*p;auto& state=candidate.states[index];state.breakAfter=true;state.breakStyle=1;state.breakScale=.1;state.breakLow.reset();state.breakHigh.reset();
+    if(!candidate.series.empty()&&(!candidate.series[size_t(state.breakPath)].hasValue(index)||!candidate.series[size_t(state.breakPath)].hasValue(index+1)))throw std::runtime_error("두 상태의 에너지가 있는 경로를 TS·위치에서 선택하세요.");
+    const double a=candidate.series.empty()?candidate.states[index].energy:candidate.series[size_t(state.breakPath)].values[index],b=candidate.series.empty()?candidate.states[index+1].energy:candidate.series[size_t(state.breakPath)].values[index+1];
+    if(std::abs(a-b)<1e-9)throw std::runtime_error("두 상태의 에너지가 같아 생략할 구간이 없습니다.");
+    validateEnergyAnnotations(candidate);if(energyDisplayBands(candidate).empty())throw std::runtime_error("두 상태의 에너지가 같아 생략할 구간이 없습니다.");
+    history.checkpoint(doc);*p=std::move(candidate);selection={id};changed();status=L"큰 에너지 구간을 물결선으로 압축했습니다. TS·위치에서 범위·비율 조정 · Ctrl+Z: 되돌리기";
+}
 bool plotContextMenu(Vec at){
     if(isolatedStructureEditing||stageCopyOwner)return false;
     if(!finishInline(true))return true;
@@ -225,11 +234,13 @@ bool plotContextMenu(Vec at){
     const bool marked=plot(id)->states[index].transitionState;
     auto menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING|(marked?MF_CHECKED:0),1,marked?L"TS 지정 해제 ([ ]‡ 숨김)":L"TS로 지정 ([ ]‡ 표시)");
     AppendMenuW(menu,MF_STRING,2,L"상태 이름 편집…");AppendMenuW(menu,MF_STRING,3,L"TS·이름 위치 설정…");
+    if(index+1<plot(id)->states.size()&&plot(id)->mode!=independentEnergyLevels)AppendMenuW(menu,MF_STRING,4,L"다음 상태까지 큰 에너지 구간 압축 (물결선)");
     POINT position{LONG(at.x),LONG(at.y)};ClientToScreen(win,&position);
     const int choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,position.x,position.y,0,win,nullptr);DestroyMenu(menu);
     if(choice==1)setPlotTransitionState(id,index,!marked);
     if(choice==2){tool=Text;beginInline(InlineTarget{id,6,int(index),world(at),doc.style.fontSize},world(at));}
     if(choice==3)editPlotAnnotations(id);
+    if(choice==4)compressPlotEnergyInterval(id,index);
     return true;
 }
 void editPlotAnnotations(int id){
@@ -247,7 +258,7 @@ void editPlotAnnotations(int id){
         {L"이름 X 이동 (pt, 오른쪽 +)",number(state.labelOffset.x)},
         {L"이름 Y 이동 (pt, 아래 +)",number(state.labelOffset.y)},
         {L"상태 유형",state.transitionState?"1":"0",false,{L"일반 상태",L"TS · [구조]‡ 표시"}},
-        {L"다음 상태까지의 구간 //",state.breakAfter?"1":"0",false,{L"연결",L"구간 생략 표시"}},
+        {L"다음 상태까지의 생략 표시",state.breakAfter?(state.breakStyle==1?"2":"1"):"0",false,{L"연결",L"슬래시 //",L"물결선 · 큰 에너지 구간 압축"}},
         {L"// 위치 (5~95%, 구간 왼쪽 기준)",number(state.breakPosition*100)},
         {L"에너지 갭의 출발 상태",std::to_string(state.gapFrom+1),false,gapSources},
         {L"에너지 갭 경로",std::to_string(state.gapPath),false,paths},
@@ -255,11 +266,15 @@ void editPlotAnnotations(int id){
         {L"갭 글자 Y 이동 (pt, 아래 +)",number(state.gapOffset.y)},
         {L"갭 문구 (빈칸: "+ui::wide(plotEnergySymbol(original))+L" 자동 계산)",state.gapLabel,true,{},false,2,true},
         {L"// 생략 스케일 (%, 100: 원래 비율)",number(state.breakScale*100)},
-        {L"생략 에너지 구간의 기준 경로",std::to_string(state.breakPath),false,paths}
+        {L"생략 에너지 구간의 기준 경로",std::to_string(state.breakPath),false,paths},
+        {L"압축 구간 하한 (에너지, 빈칸: 자동)",state.breakLow?number(*state.breakLow):""},
+        {L"압축 구간 상한 (에너지, 빈칸: 자동)",state.breakHigh?number(*state.breakHigh):""}
     };
     auto update=[&](const std::vector<std::string>& v)->std::wstring{try{
         auto candidate=original;auto& edit=candidate.states[index];edit.label=v[0];edit.labelPlacement=std::stoi(v[1]);edit.labelPath=std::stoi(v[2]);
-        edit.labelOffset={numeric(v[3],-10000,10000),numeric(v[4],-10000,10000)};edit.transitionState=v[5]=="1";edit.breakAfter=v[6]=="1";
+        edit.labelOffset={numeric(v[3],-10000,10000),numeric(v[4],-10000,10000)};edit.transitionState=v[5]=="1";edit.breakAfter=v[6]!="0";edit.breakStyle=v[6]=="2"?1:0;
+        if(v[15].empty()!=v[16].empty())return L"압축 구간의 하한과 상한을 모두 입력하거나 둘 다 비워 두세요.";
+        edit.breakLow=v[15].empty()?std::optional<double>{}:numeric(v[15],-1e6,1e6);edit.breakHigh=v[16].empty()?std::optional<double>{}:numeric(v[16],-1e6,1e6);
         edit.breakScale=numeric(v[13],1,400)/100;edit.breakPath=std::stoi(v[14]);
         if(edit.breakAfter&&std::abs(edit.breakScale-1)>1e-9){
             if(index+1>=candidate.states.size())return L"생략할 다음 상태가 없습니다.";
@@ -276,7 +291,7 @@ void editPlotAnnotations(int id){
         validateEnergyAnnotations(candidate);doc=before;*plot(id)=std::move(candidate);redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
     auto result=ui::form(win,L"곡선·TS·에너지 갭 — "+states[index],fields,update,
-        {{L"이름·위치",{0,1,2,3,4}},{L"TS·구간 생략",{5,6,7,13,14}},{L"에너지 갭",{8,9,10,11,12}}});
+        {{L"이름·위치",{0,1,2,3,4}},{L"TS·구간 생략",{5,6,7,13,14,15,16}},{L"에너지 갭",{8,9,10,11,12}}});
     if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }

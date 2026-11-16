@@ -98,6 +98,19 @@ std::vector<EnergyDisplayBand> energyDisplayBands(const EnergyPlot& p){
             const auto& path=p.series[size_t(state.breakPath)];if(!path.hasValue(i)||!path.hasValue(i+1))continue;a=path.values[i];b=path.values[i+1];
         }
         if(a>b)std::swap(a,b);if(b-a<1e-9)continue;
+        if(state.breakLow&&state.breakHigh){a=*state.breakLow;b=*state.breakHigh;}
+        else if(state.breakStyle==1){
+            // Compress unoccupied energies, preserving the local rise into a TS peak.
+            std::vector<double> levels={a,b};
+            auto include=[&](double v){if(v>a&&v<b)levels.push_back(v);};
+            if(p.series.empty()){for(const auto& point:p.states)include(point.energy);}
+            else for(const auto& path:p.series)for(size_t k=0;k<path.values.size();++k)if(path.hasValue(k))include(path.values[k]);
+            for(const auto& crossing:p.crossings)include(crossing.energy);
+            std::sort(levels.begin(),levels.end());double widest=0,left=a,right=b;
+            for(size_t k=1;k<levels.size();++k)if(levels[k]-levels[k-1]>widest){widest=levels[k]-levels[k-1];left=levels[k-1];right=levels[k];}
+            a=left+widest*.1;b=right-widest*.1;
+        }
+
         requested.push_back({a,b,state.breakScale});stops.push_back(a);stops.push_back(b);
     }
     std::sort(stops.begin(),stops.end());stops.erase(std::unique(stops.begin(),stops.end()),stops.end());
@@ -128,6 +141,8 @@ void validateEnergyAnnotations(const EnergyPlot& p){
     for(size_t i=0;i<p.states.size();++i){const auto& s=p.states[i];
         if(s.labelPlacement<0||s.labelPlacement>3||s.labelPath<0||size_t(s.labelPath)>=paths||!offset(s.labelOffset)||
            !std::isfinite(s.breakPosition)||s.breakPosition<.05||s.breakPosition>.95||
+           s.breakStyle<0||s.breakStyle>1||s.breakLow.has_value()!=s.breakHigh.has_value()||
+           (s.breakLow&&(!std::isfinite(*s.breakLow)||!std::isfinite(*s.breakHigh)||std::abs(*s.breakLow)>1e6||std::abs(*s.breakHigh)>1e6||*s.breakHigh-*s.breakLow<1e-6))||
            !std::isfinite(s.breakScale)||s.breakScale<.01||s.breakScale>4||s.breakPath<0||size_t(s.breakPath)>=paths||
            s.gapFrom< -1||(s.gapFrom>=0&&(size_t(s.gapFrom)>=p.states.size()||size_t(s.gapFrom)==i))||
            s.gapPath<0||size_t(s.gapPath)>=paths||!offset(s.gapOffset))throw std::runtime_error("Invalid energy profile annotation");
@@ -176,7 +191,7 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     for(size_t i=0;i+1<n;i++)if(i<source.segmentColors.size())left.segmentColors[n-2-i]=source.segmentColors[i];
     result.series.push_back(std::move(left));
     for(size_t i=0;i<result.states.size();++i){auto& state=result.states[i];
-        if(i<n-1){state.labelPath=int(result.series.size())-1;state.gapPath=state.labelPath;if(state.gapFrom>=0)state.gapFrom=int(n)-1-state.gapFrom;state.breakAfter=original.states[n-2-i].breakAfter;state.breakPosition=1-original.states[n-2-i].breakPosition;state.breakScale=original.states[n-2-i].breakScale;state.breakPath=int(result.series.size())-1;}
+        if(i<n-1){state.labelPath=int(result.series.size())-1;state.gapPath=state.labelPath;if(state.gapFrom>=0)state.gapFrom=int(n)-1-state.gapFrom;state.breakAfter=original.states[n-2-i].breakAfter;state.breakPosition=1-original.states[n-2-i].breakPosition;state.breakScale=original.states[n-2-i].breakScale;state.breakStyle=original.states[n-2-i].breakStyle;state.breakLow=original.states[n-2-i].breakLow;state.breakHigh=original.states[n-2-i].breakHigh;state.breakPath=int(result.series.size())-1;}
         else if(state.gapFrom>=0)state.gapFrom+=int(n)-1;
     }
     for(auto& crossing:result.crossings)crossing.segment+=int(n)-1;
@@ -257,7 +272,9 @@ EnergyAxis energyAxis(const EnergyPlot& plot){
     if(plot.series.empty()){for(auto& state:plot.states)include(state.energy);}else for(auto& path:plot.series)for(size_t i=0;i<path.values.size();i++)if(path.hasValue(i))include(path.values[i]);
     if(plot.mode!=independentEnergyLevels)
         for(const auto& crossing:plot.crossings)if(hasCrossingPaths(plot,crossing))include(crossing.energy);
-    if(high-low<1e-8){high+=1;low-=1;}double margin=(high-low)*.22;low-=margin;high+=margin;
+    if(high-low<1e-8){high+=1;low-=1;}const auto bands=energyDisplayBands(plot);
+    if(bands.empty()){double margin=(high-low)*.22;low-=margin;high+=margin;}
+    else{const double a=displayEnergy(bands,low),b=displayEnergy(bands,high),margin=(b-a)*.22;low=energyFromDisplay(bands,a-margin);high=energyFromDisplay(bands,b+margin);}
     double autoSpan=high-low;
     if(plot.yMin){if(!std::isfinite(*plot.yMin)||std::abs(*plot.yMin)>1e8)throw std::runtime_error("y축 최솟값이 올바르지 않습니다.");low=*plot.yMin;}
     if(plot.yMax){if(!std::isfinite(*plot.yMax)||std::abs(*plot.yMax)>1e8)throw std::runtime_error("y축 최댓값이 올바르지 않습니다.");high=*plot.yMax;}
@@ -272,8 +289,8 @@ EnergyAxis energyAxis(const EnergyPlot& plot){
     // of the requested interval rather than generating millions of labels.
     double count=(high-low)/step;if(count>198)step*=std::ceil(count/198);
     double begin=std::floor(low/step+1e-10),end=std::ceil(high/step-1e-10);
-    if(plot.yMin||plot.yMax){
-        if(!plot.yMin)low=begin*step;if(!plot.yMax)high=end*step;
+    if(plot.yMin||plot.yMax||!bands.empty()){
+        if(bands.empty()){if(!plot.yMin)low=begin*step;if(!plot.yMax)high=end*step;}
         double firstTick=std::ceil(low/step-1e-10)*step;
         return {low,high,step,int(std::floor((high-firstTick)/step+1e-10)),firstTick};
     }

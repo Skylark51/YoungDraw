@@ -22,6 +22,7 @@ void editPlotAnnotations(int id);
 std::optional<std::pair<int,size_t>> plotStateAt(Vec at); // Canvas coordinates.
 void setPlotTransitionState(int id,size_t index,bool enabled);
 bool plotContextMenu(Vec at);
+void compressPlotEnergyInterval(int id,size_t index);
 struct PendingEnergyGap {int owner,from,to,path;std::string label;};
 extern std::optional<PendingEnergyGap> pendingEnergyGap;
 void addEnergyGap(int id);

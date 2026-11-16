@@ -143,6 +143,22 @@ int main(){try{
         for(auto row:std::vector<std::vector<std::string>>{{"Bad","0","100","14","nan","0"},{"Bad","0","100","14","1","41"}}){bool rejected=false;try{mechanismStageData({row});}catch(...){rejected=true;}check(rejected,"invalid reaction arrow dimensions are rejected");}
         std::ofstream("reaction-arrow-style-preview.svg")<<toSvg(makeScene(arrows));
     }
+    {
+        Document profile;auto graph=newEnergyPlot(0,true);graph.id=profile.nextId++;graph.states={{"A2",7.7},{"A2-TS",19.8},{"B2",-56.9},{"C2",-60.1},{"D2",-53.3},{"E2",-87.4}};
+        graph.series[0].values={7.7,19.8,-56.9,-60.1,-53.3,-87.4};graph.states[1].transitionState=true;profile.plots={graph};
+        auto vertical=[&](const Scene& scene,int state){for(auto point:scene.plotSnapPoints.at(graph.id))if(point.state==state&&point.path==0&&point.edge==0)return point.p.y;throw std::runtime_error("missing profile state");};
+        const auto before=makeScene(profile);auto& state=profile.plots[0].states[1];state.breakAfter=true;state.breakStyle=1;state.breakScale=.1;
+        const auto bands=energyDisplayBands(profile.plots[0]);check(bands.size()==1&&bands[0].low>-53.3&&bands[0].high<7.7,"wave automatically selects the large empty energy interval below the peak");
+        check(std::abs(displayEnergy(bands,19.8)-displayEnergy(bands,7.7)-12.1)<1e-8,"compression preserves the complete local activation barrier");
+        const auto after=makeScene(profile);check(vertical(after,0)-vertical(after,1)>1.5*(vertical(before,0)-vertical(before,1)),"large negative product energies no longer flatten the first peak");
+        check(profile.plots[0].series[0].values==graph.series[0].values,"wave omission preserves the supplied energies");
+        state.breakLow=-50;state.breakHigh=0;validateEnergyAnnotations(profile.plots[0]);auto explicitBands=energyDisplayBands(profile.plots[0]);check(explicitBands.size()==1&&explicitBands[0].low==-50&&explicitBands[0].high==0,"explicit energy bounds control the omitted interval");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(profile)),fromCdxml(toCdxml(profile))})check(toNative(restored)==toNative(profile),"wave and explicit omission bounds survive saving");
+#endif
+        state.breakHigh=-60;bool rejected=false;try{validateEnergyAnnotations(profile.plots[0]);}catch(...){rejected=true;}check(rejected,"reversed energy omission limits are rejected");
+        state.breakHigh=0;std::ofstream("energy-wave-peak-preview.svg")<<toSvg(makeScene(profile));
+    }
     std::ofstream("reaction-profile-preview.svg")<<toSvg(makeScene(d));
 #ifdef TEST_CDXML
     std::ofstream("reaction-profile-preview.youngdraw")<<toNative(d);
