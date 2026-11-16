@@ -21,6 +21,24 @@ EnergyPlot spinMultiplicityPlot(){
     plot.series.push_back(std::move(levels));
     return plot;
 }
+EnergyPlot reactionProfilePlot(){
+    EnergyPlot p;p.width=920;p.height=490;p.mode=0;p.title="";p.yLabel="ΔG";p.showYTicks=false;
+    p.states={{"Reactant",7.7},{"TS1",19.8},{"Int1",8.6},{"TS2",14.2},{"Int2",7.7},{"TS3",15.6},{"Product",-.3}};
+    EnergySeries path;path.values={7.7,19.8,8.6,14.2,7.7,15.6,-.3};path.dash=0;path.width=2;path.markerSize=3;p.series={path};
+    for(size_t i=0;i<p.states.size();++i){auto& state=p.states[i];state.transitionState=i%2==1;state.labelPlacement=state.transitionState?1:2;state.labelOffset={0,state.transitionState?-24.:12.};if(state.transitionState)state.gapFrom=int(i)-1;}
+    p.states[2].breakAfter=true;p.states[2].breakPosition=.35;
+    return p;
+}
+void validateEnergyAnnotations(const EnergyPlot& p){
+    const size_t paths=std::max(size_t(1),p.series.size());
+    auto offset=[](Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::abs(v.x)<=10000&&std::abs(v.y)<=10000;};
+    for(size_t i=0;i<p.states.size();++i){const auto& s=p.states[i];
+        if(s.labelPlacement<0||s.labelPlacement>3||s.labelPath<0||size_t(s.labelPath)>=paths||!offset(s.labelOffset)||
+           !std::isfinite(s.breakPosition)||s.breakPosition<.05||s.breakPosition>.95||
+           s.gapFrom< -1||(s.gapFrom>=0&&(size_t(s.gapFrom)>=p.states.size()||size_t(s.gapFrom)==i))||
+           s.gapPath<0||size_t(s.gapPath)>=paths||!offset(s.gapOffset))throw std::runtime_error("Invalid energy profile annotation");
+    }
+}
 double plotStateFraction(const EnergyPlot& plot,size_t index){
     return plot.states.at(index).position.value_or(double(index)/std::max(size_t(1),plot.states.size()-1));
 }
@@ -63,6 +81,10 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     for(size_t i=0;i<n;i++)if(i<source.levelColors.size())left.levelColors[n-1-i]=source.levelColors[i];
     for(size_t i=0;i+1<n;i++)if(i<source.segmentColors.size())left.segmentColors[n-2-i]=source.segmentColors[i];
     result.series.push_back(std::move(left));
+    for(size_t i=0;i<result.states.size();++i){auto& state=result.states[i];
+        if(i<n-1){state.labelPath=int(result.series.size())-1;state.gapPath=state.labelPath;if(state.gapFrom>=0)state.gapFrom=int(n)-1-state.gapFrom;state.breakAfter=original.states[n-2-i].breakAfter;state.breakPosition=1-original.states[n-2-i].breakPosition;}
+        else if(state.gapFrom>=0)state.gapFrom+=int(n)-1;
+    }
     for(auto& crossing:result.crossings)crossing.segment+=int(n)-1;
     result.stages.clear();
     auto addStage=[&](MechanismStage stage){
@@ -187,6 +209,10 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
     bool sameOrder=rows.size()==old.states.size();
     for(size_t i=0;i<mapping.size();++i)sameOrder&=mapping[i]==int(i);
     if(!sameOrder)for(auto& state:states)state.position.reset();
+    for(size_t i=0;i<states.size();++i){auto& state=states[i];
+        if(state.gapFrom>=0){auto from=std::find(mapping.begin(),mapping.end(),state.gapFrom);state.gapFrom=from==mapping.end()?-1:int(from-mapping.begin());if(state.gapFrom==int(i))state.gapFrom=-1;}
+        if(i+1>=states.size()||mapping[i]<0||mapping[i+1]!=mapping[i]+1)state.breakAfter=false;
+    }
     plot.states=std::move(states);plot.series=std::move(series);
     plot.crossings.clear();
     for(auto crossing:old.crossings){

@@ -15,6 +15,7 @@ void publicationLayout(int id);
 void plotSettings(int id);
 void editPlotStages(int id);
 void editPlotCrossings(int id);
+void editPlotAnnotations(int id);
 void snapPlotStages(int id);
 void editPlotColors(int id);
 void editSeries(int id,bool add);

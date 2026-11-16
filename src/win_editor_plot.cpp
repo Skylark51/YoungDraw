@@ -123,6 +123,44 @@ void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에�
  {L"y축 (선·눈금·제목) 표시",p->showYAxis?"1":"0",false,{L"숨김",L"표시"}}},update,
  {{L"기본",{0,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{23,24,19,20}},{L"글자",{4,5,8,12,13,14,15}},{L"선 스타일",{7,16,17}},{L"범례 위치",{21,22}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
 }
+void editPlotAnnotations(int id){
+    auto* p=plot(id);if(!p||doc.isLocked(id)||p->states.empty())throw std::runtime_error("편집할 에너지 그래프를 선택하세요.");
+    std::vector<ui::SearchItem> entries;std::vector<std::wstring> states,paths;
+    for(size_t i=0;i<p->states.size();++i){auto name=std::to_wstring(i+1)+L". "+ui::wide(p->states[i].label);states.push_back(name);entries.push_back({name,L"이름 위치 · TS [ ]‡ · 다음 구간 // · 에너지 갭"});}
+    auto chosen=ui::search(win,L"곡선·TS·에너지 갭 — 상태 선택",entries,L"편집",true);if(!chosen)return;
+    const auto index=*chosen;const auto original=*p;const Document before=doc;const auto& state=original.states[index];
+    for(const auto& path:original.series)paths.push_back(ui::wide(path.name));if(paths.empty())paths.push_back(L"Path 1");
+    std::vector<std::wstring> gapSources={L"표시 안 함"};gapSources.insert(gapSources.end(),states.begin(),states.end());
+    std::vector<ui::Field> fields={
+        {L"구조 / 상태 이름",state.label,true,{},false,3,true},
+        {L"이름 배치",std::to_string(state.labelPlacement),false,{L"x축",L"곡선 위",L"곡선 아래",L"숨김"}},
+        {L"이름 기준 경로",std::to_string(state.labelPath),false,paths},
+        {L"이름 X 이동 (pt, 오른쪽 +)",number(state.labelOffset.x)},
+        {L"이름 Y 이동 (pt, 아래 +)",number(state.labelOffset.y)},
+        {L"TS 표기 [구조]‡",state.transitionState?"1":"0",false,{L"없음",L"사용 (위·아래 삽입 구조를 감쌈)"}},
+        {L"다음 상태까지의 구간 //",state.breakAfter?"1":"0",false,{L"연결",L"구간 생략 표시"}},
+        {L"// 위치 (5~95%, 구간 왼쪽 기준)",number(state.breakPosition*100)},
+        {L"에너지 갭의 출발 상태",std::to_string(state.gapFrom+1),false,gapSources},
+        {L"에너지 갭 경로",std::to_string(state.gapPath),false,paths},
+        {L"갭 화살표 X (현재 상태 기준 pt)",number(state.gapOffset.x)},
+        {L"갭 글자 Y 이동 (pt, 아래 +)",number(state.gapOffset.y)},
+        {L"갭 문구 (빈칸: ΔG / ΔG‡ 자동 계산)",state.gapLabel,true,{},false,2,true}
+    };
+    auto update=[&](const std::vector<std::string>& v)->std::wstring{try{
+        auto candidate=original;auto& edit=candidate.states[index];edit.label=v[0];edit.labelPlacement=std::stoi(v[1]);edit.labelPath=std::stoi(v[2]);
+        edit.labelOffset={numeric(v[3],-10000,10000),numeric(v[4],-10000,10000)};edit.transitionState=v[5]=="1";edit.breakAfter=v[6]=="1";
+        edit.breakPosition=numeric(v[7],5,95)/100;edit.gapFrom=std::stoi(v[8])-1;edit.gapPath=std::stoi(v[9]);
+        if(edit.gapFrom==int(index))return L"갭의 출발 상태는 현재 상태와 달라야 합니다.";
+        if(edit.breakAfter&&(index+1>=candidate.states.size()||candidate.mode==independentEnergyLevels))return L"구간 생략은 다음 상태로 이어지는 그래프에서 사용하세요.";
+        if(edit.gapFrom>=0&&!candidate.series.empty()){const auto& path=candidate.series[size_t(edit.gapPath)];if(!path.hasValue(index)||!path.hasValue(size_t(edit.gapFrom)))return L"갭의 두 상태 모두 선택 경로에 에너지가 있어야 합니다.";}
+        edit.gapOffset={numeric(v[10],-10000,10000),numeric(v[11],-10000,10000)};edit.gapLabel=v[12];
+        validateEnergyAnnotations(candidate);doc=before;*plot(id)=std::move(candidate);redraw();UpdateWindow(win);return {};
+    }catch(const std::exception& e){return ui::wide(e.what());}};
+    auto result=ui::form(win,L"곡선·TS·에너지 갭 — "+states[index],fields,update,
+        {{L"이름·위치",{0,1,2,3,4}},{L"TS·구간 생략",{5,6,7}},{L"에너지 갭",{8,9,10,11,12}}});
+    if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+    else{doc=before;redraw();}
+}
 void editPlotCrossings(int id){
     auto* p=plot(id);
     if(p&&p->mode==independentEnergyLevels)

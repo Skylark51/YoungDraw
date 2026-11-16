@@ -5,6 +5,8 @@ struct EnergyRow { std::string label; double energy=0; int marker=-1; };
 struct EnergyAxis { double low=0,high=1,step=1; int intervals=1; double firstTick=0; };
 inline constexpr int independentEnergyLevels = 4;
 EnergyPlot spinMultiplicityPlot();
+EnergyPlot reactionProfilePlot();
+void validateEnergyAnnotations(const EnergyPlot& plot);
 EnergyPlot publicationPlot(const EnergyPlot& original);
 // Mirror a pathway to the left of the first (shared) state; keep existing paths on the right.
 EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath=0,const std::string& leftName="Left branch");

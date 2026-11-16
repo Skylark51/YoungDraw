@@ -14,6 +14,8 @@ inline constexpr int mullikenSpinCommand = 227;
 inline constexpr int spinMultiplicityPlotCommand = 228;
 inline constexpr int dottedBondCommand = 229;
 inline constexpr int thirdPartyNoticesCommand = 234;
+inline constexpr int reactionProfilePlotCommand = 235;
+inline constexpr int plotAnnotationsCommand = 236;
 
 void command(int id);
 

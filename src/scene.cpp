@@ -694,7 +694,28 @@ Scene makeScene(const Document& d,const Measure& measure){
             const auto left=a+Vec{inset,0},right=b-Vec{inset,0};
             crossings.emplace(i,std::make_pair(&crossing,left+(right-left)*crossing.position));
         }
-        auto connect=[&](Vec a,Vec b,const EnergySeries& path){
+        auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX){
+            if(breakX>a.x&&breakX<b.x&&b.x-a.x>20){
+                breakX=std::clamp(breakX,a.x+9.01,b.x-9.01);
+                // Split the real path instead of painting a white rectangle over other objects.
+                Vec c1{a.x+(b.x-a.x)*.42,a.y},c2{b.x-(b.x-a.x)*.42,b.y};
+                auto at=[&](double t){double u=1-t;return plot.mode==0?a*(u*u*u)+c1*(3*u*u*t)+c2*(3*u*t*t)+b*(t*t*t):a+(b-a)*t;};
+                auto parameter=[&](double x){double lo=0,hi=1;for(int j=0;j<40;++j){double t=(lo+hi)/2;if(at(t).x<x)lo=t;else hi=t;}return (lo+hi)/2;};
+                const double t0=parameter(breakX-8),t1=parameter(breakX+8);
+                auto part=[&](double start,double end){
+                    Vec last=at(start);
+                    if(plot.mode==0&&a.y>=topY&&a.y<=y0&&b.y>=topY&&b.y<=y0){
+                        auto derivative=[&](double t){double u=1-t;return (c1-a)*(3*u*u)+(c2-c1)*(6*u*t)+(b-c2)*(3*t*t);};
+                        Primitive curve;curve.type=Primitive::Bezier;curve.owner=owner;curve.color=path.color;curve.width=path.width;curve.dash=path.dash;
+                        curve.points={last,last+derivative(start)*((end-start)/3),at(end)-derivative(end)*((end-start)/3),at(end)};s.items.push_back(curve);
+                        for(int j=1;j<=40;++j){auto next=at(start+(end-start)*j/40);remember(last,next);last=next;}
+                    }else for(int j=1;j<=40;++j){auto next=at(start+(end-start)*j/40);segment(last,next,path,plot.mode==2?1:path.dash);last=next;}
+                };
+                part(0,t0);part(t1,1);
+                Vec middle=at(parameter(breakX));
+                if(middle.y>=topY&&middle.y<=y0)for(double shift:{-4.,4.}){Primitive slash;slash.owner=owner;slash.color=path.color;slash.width=path.width;slash.points={middle+Vec{shift-3,9},middle+Vec{shift+3,-9}};s.items.push_back(slash);}
+                return;
+            }
             if(plot.mode!=0){segment(a,b,path,plot.mode==2?1:path.dash);return;}
             Vec c1{a.x+(b.x-a.x)*.42,a.y},c2{b.x-(b.x-a.x)*.42,b.y},last=a;
             const bool inRange=a.y>=topY-1e-9&&a.y<=y0+1e-9&&b.y>=topY-1e-9&&b.y<=y0+1e-9;
@@ -730,7 +751,13 @@ Scene makeScene(const Document& d,const Measure& measure){
                 const auto colorIndex=right.crossing?right.index:left.index;
                 path.color=colorIndex<basePath.segmentColors.size()&&!basePath.segmentColors[colorIndex].empty()
                     ?basePath.segmentColors[colorIndex]:basePath.color;
-                connect(left.right,right.left,path);
+                double breakX=-1;
+                if(left.index<plot.states.size()&&plot.states[left.index].breakAfter&&left.index+1<plot.states.size()){
+                    const double inset=plot.mode>=2?half:0;
+                    double start=stateX(left.index)+inset,end=stateX(left.index+1)-inset;
+                    breakX=start+(end-start)*plot.states[left.index].breakPosition;
+                }
+                connect(left.right,right.left,path,breakX);
                 if(plot.mode==0||(plot.mode!=2&&!path.dash))continue;
                 auto solidEnd=[&](Vec point,Vec other){
                     const auto toward=other-point;
@@ -827,19 +854,76 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(plot.showValues)
                 plotText(value.str(),anchor+Vec{0,labelHeight},numberFont,"#333333",true);
         }
-        // State captions can use separate lanes if long names would touch their neighbors.
+        // TS brackets follow the actual inserted structures, including labels and bonds.
+        for(size_t i=0;i<plot.states.size();++i)if(plot.states[i].transitionState){
+            for(const auto* members:{&plot.states[i].above,&plot.states[i].below}){
+                if(members->empty())continue;
+                double l=1e20,t=1e20,r=-1e20,b=-1e20;
+                for(const auto& item:s.items)if(std::find(members->begin(),members->end(),item.owner)!=members->end())for(auto pt:item.points){
+                    double right=pt.x,bottom=pt.y;
+                    if(item.type==Primitive::Text){right+=textWidth(measure,item.text,item.fontSize,item.font,item.face);bottom+=item.fontSize*1.3;}
+                    l=std::min(l,pt.x);t=std::min(t,pt.y);r=std::max(r,right);b=std::max(b,bottom);
+                }
+                if(l>r)continue;l-=8;r+=8;t-=7;b+=7;
+                for(bool right:{false,true}){double x=right?r:l,dx=right?-7:7;Primitive bracket;bracket.owner=owner;bracket.width=1.2;bracket.points={{x+dx,t},{x,t},{x,b},{x+dx,b}};s.items.push_back(bracket);}
+                plotText("‡",{r+5,t-6},tickFont);
+                external.push_back({l,t-6,r-l+tickFont+8,b-t+6});
+            }
+        }
         std::vector<Rect> stateBoxes;double stateBottom=axisY+10,stateScriptTop=0;
         for(auto& state:plot.states)if(state.label.find("^{")!=std::string::npos)stateScriptTop=-tickFont*.4;
         for(size_t i=0;i<plot.states.size();i++){
-            double x=pointAt(i,0).x,tw=scriptWidth(plot.states[i].label,tickFont);
-            double scriptTop=stateScriptTop;
-            Rect box{x-tw/2,axisY+10,tw,tickFont*1.3-scriptTop};
-            for(size_t pass=0;pass<=stateBoxes.size()+external.size();pass++){
+            const auto& state=plot.states[i];if(state.labelPlacement==3)continue;
+            bool onCurve=state.labelPlacement==1||state.labelPlacement==2;
+            if(onCurve&&(size_t(state.labelPath)>=paths.size()||!visible(paths[size_t(state.labelPath)],i)))continue;
+            std::string label=state.label;
+            if(state.transitionState&&state.above.empty()&&state.below.empty()&&!label.empty())label="["+label+"]^{‡}";
+            double x=stateX(i)+state.labelOffset.x,tw=scriptWidth(label,tickFont);
+            double scriptTop=label.find("^{")!=std::string::npos?-tickFont*.4:stateScriptTop;
+            double height=tickFont*1.3*(1+std::count(label.begin(),label.end(),'\n'))-scriptTop;
+            double y=axisY+10;
+            if(onCurve){double levelY=pointAt(i,paths[size_t(state.labelPath)].values[i]).y;y=state.labelPlacement==1?levelY-height-10:levelY+10;}
+            Rect box{x-tw/2,y+state.labelOffset.y,tw,height};
+            // Explicit offsets and curve placements are kept exactly as requested.
+            if(!onCurve&&state.labelOffset.x==0&&state.labelOffset.y==0)for(size_t pass=0;pass<=stateBoxes.size()+external.size();pass++){
                 bool moved=false;for(auto other:stateBoxes)if(overlaps(box,other)){box.y=other.y+other.h+5;moved=true;}
                 for(auto other:external)if(overlaps(box,other)){box.y=other.y+other.h+5;moved=true;}
                 if(!moved)break;
             }
-            stateBoxes.push_back(box);stateBottom=std::max(stateBottom,box.y+box.h);axisText(plot.states[i].label,{x,box.y-scriptTop},tickFont,"#000000",false,6,int(i));
+            stateBoxes.push_back(box);if(!onCurve)stateBottom=std::max(stateBottom,box.y+box.h);
+            plotText(label,{x,box.y-scriptTop},tickFont,"#000000",true,6,int(i));
+        }
+        // Gaps use current data, so changing energies or units updates the annotation.
+        for(size_t i=0;i<plot.states.size();++i){const auto& state=plot.states[i];
+            if(state.gapFrom<0||size_t(state.gapFrom)>=plot.states.size()||size_t(state.gapPath)>=paths.size())continue;
+            const auto& path=paths[size_t(state.gapPath)];size_t from=size_t(state.gapFrom);
+            if(!visible(path,i)||!visible(path,from)||std::abs(path.values[i]-path.values[from])<1e-10)continue;
+            Vec start=pointAt(from,path.values[from]),end=pointAt(i,path.values[i]);
+            double x=end.x+state.gapOffset.x,mid=(start.y+end.y)/2;
+            // Dashed reference guides and two arrowheads at the physical energies.
+            for(auto pt:{start,end}){Primitive guide;guide.owner=owner;guide.width=.8;guide.dash=1;guide.points={pt,{x,pt.y}};s.items.push_back(guide);}
+            double head=std::min(4.,std::abs(end.y-start.y)*.2);
+            Primitive shaft;shaft.owner=owner;shaft.width=.9;shaft.dash=1;shaft.points={{x,start.y},{x,end.y}};s.items.push_back(shaft);
+            for(auto pair:{std::pair{start.y,end.y},std::pair{end.y,start.y}}){double dy=pair.second>pair.first?head:-head;Primitive tip;tip.type=Primitive::Polygon;tip.owner=owner;tip.filled=true;tip.width=0;tip.points={{x,pair.first},{x-2.5,pair.first+dy},{x+2.5,pair.first+dy}};s.items.push_back(tip);}
+            std::ostringstream value;value.imbue(std::locale::classic());value<<std::fixed<<std::setprecision(1)<<(path.values[i]-path.values[from]);
+            std::string label=state.gapLabel.empty()?std::string(state.transitionState?"ΔG^{‡} = ":"ΔG = ")+value.str():state.gapLabel;
+            double tw=widthOf(label,valueFont),tx=x-tw/2-8,ty=mid-valueFont*.65+state.gapOffset.y;
+            if(state.gapOffset.y==0){
+                // Keep automatic gap captions clear of curves and state names.
+                auto clear=[&](double y){Rect box{tx-tw/2,y-valueFont*.4,tw,valueFont*1.7};
+                    for(auto other:external)if(overlaps(box,other,3))return false;
+                    for(auto other:stateBoxes)if(overlaps(box,other,3))return false;
+                    for(auto pt:obstacles)if(pt.x>box.x-4&&pt.x<box.x+box.w+4&&pt.y>box.y-4&&pt.y<box.y+box.h+4)return false;
+                    return true;
+                };
+                const double initial=ty;
+                for(int step=0;step<80;++step){double distance=step*valueFont*.3;
+                    if(clear(initial-distance)){ty=initial-distance;break;}
+                    if(clear(initial+distance)){ty=initial+distance;break;}
+                }
+            }
+            plotText(label,{tx,ty},valueFont,"#000000",true);
+            external.push_back({tx-tw/2,ty-valueFont*.4,tw,valueFont*1.7});
         }
         Rect xAxisBox{x0+w/2-widthOf(plot.xLabel,axisFont)/2,stateBottom+10,widthOf(plot.xLabel,axisFont),axisFont*1.3};
         for(size_t pass=0;pass<=external.size();pass++){bool moved=false;for(auto other:external)if(overlaps(xAxisBox,other)){xAxisBox.y=other.y+other.h+8;moved=true;}if(!moved)break;}

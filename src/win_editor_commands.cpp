@@ -23,7 +23,7 @@
 
 namespace yd::editor {
 
-void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==spinMultiplicityPlotCommand||id==167||id==insertBranchArrowsCommand||id==externalMechanismCommand||id==bondAnimationCommand||id==recognizeMechanismCommand)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();
+void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==spinMultiplicityPlotCommand||id==reactionProfilePlotCommand||id==167||id==insertBranchArrowsCommand||id==externalMechanismCommand||id==bondAnimationCommand||id==recognizeMechanismCommand)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();
  if(id==thirdPartyNoticesCommand){MessageBoxW(win,ui::wide(thirdPartyNotices).c_str(),L"오픈소스 라이선스",MB_OK|MB_ICONINFORMATION);return;}
  if(id==184){appearance::picker(win,[](){refreshAppearance();});status=std::wstring(L"작업실 · ")+appearance::palette().name+L" / 테마는 출력에 포함되지 않습니다.";redraw();return;}
  if(id==156){pruneLockedSelection();textColorPalette(colorTarget);return;}
@@ -108,10 +108,11 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
      if(details){edited.slots[source].label=(*details)[0];edited.slots[source].energy=(*details)[1];edited.slots.back().label=(*details)[2];edited.slots.back().energy=(*details)[3];edited.above.back()=(*details)[4];edited.below.back()=(*details)[5];}
      optimizeMechanism(candidate,{owner},edited.cyclic);history.checkpoint(doc);doc=std::move(candidate);changed();fit();break;
  }case 123:fillTarget(false);break;case 124:fillTarget(true);break;
- case 130:case spinMultiplicityPlotCommand:{
+ case 130:case spinMultiplicityPlotCommand:case reactionProfilePlotCommand:{
      sidebarPage=1;history.checkpoint(doc);
      EnergyPlot p;
-     if(id==spinMultiplicityPlotCommand)p=spinMultiplicityPlot();
+     if(id==reactionProfilePlotCommand)p=reactionProfilePlot();
+     else if(id==spinMultiplicityPlotCommand)p=spinMultiplicityPlot();
      else{
          p.stages=defaultMechanismStages();
          p.states={{"R",0,{},{}},{"TS",20,{},{}},{"P",-10,{},{}}};
@@ -128,7 +129,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
      p.p=target-midpoint;
      doc.plots.push_back(p);selection={p.id};tool=Select;changed();editPlot(p.id);break;}
  case 131:if(plot(primary()))editPlot(primary());else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 132:if(plot(primary()))editSeries(primary(),true);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 133:if(plot(primary()))editSeries(primary(),false);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;
- case 125:case 126:{Document before=doc;try{optimizeMechanism(doc,selection,id==126);}catch(...){doc=before;throw;}history.checkpoint(before);selection.clear();changed();fit();break;}case 127:reactionSettings(primary());break;case 135:addBilateralBranch(primary());break;case 137:plotSettings(primary());break;case 138:publicationLayout(primary());break;case 139:editPlotStages(primary());break;case 136:snapPlotStages(primary());break;case 142:editPlotColors(primary());break;case 151:editPlotCrossings(primary());break;case 150:history.checkpoint(doc);applyHouseStyle(doc);status=L"Arial 굵게, 14 pt 라벨, 2 pt 결합선을 적용했습니다.";changed();fit();break;case 134:guides=!guides;break;case 140:newDocumentTab(mechanismGuide());sidebarPage=0;tool=Select;status=L"메커니즘 예제·도움말입니다. 확대하여 직선·촉매 순환·분기·합류 예제를 편집하고 CDXML로 저장할 수 있습니다.";changed();fit();break;case 141:sidebarPage=1;history.checkpoint(doc);doc=coordinateDemo();selection.clear();targetContainer=0;filePath.clear();tool=Select;status=L"배치 예제입니다. Ctrl+Z로 이전 문서를 복원합니다.";changed();fit();break;
+ case 125:case 126:{Document before=doc;try{optimizeMechanism(doc,selection,id==126);}catch(...){doc=before;throw;}history.checkpoint(before);selection.clear();changed();fit();break;}case 127:reactionSettings(primary());break;case 135:addBilateralBranch(primary());break;case 137:plotSettings(primary());break;case 138:publicationLayout(primary());break;case 139:editPlotStages(primary());break;case 136:snapPlotStages(primary());break;case 142:editPlotColors(primary());break;case 151:editPlotCrossings(primary());break;case plotAnnotationsCommand:editPlotAnnotations(primary());break;case 150:history.checkpoint(doc);applyHouseStyle(doc);status=L"Arial 굵게, 14 pt 라벨, 2 pt 결합선을 적용했습니다.";changed();fit();break;case 134:guides=!guides;break;case 140:newDocumentTab(mechanismGuide());sidebarPage=0;tool=Select;status=L"메커니즘 예제·도움말입니다. 확대하여 직선·촉매 순환·분기·합류 예제를 편집하고 CDXML로 저장할 수 있습니다.";changed();fit();break;case 141:sidebarPage=1;history.checkpoint(doc);doc=coordinateDemo();selection.clear();targetContainer=0;filePath.clear();tool=Select;status=L"배치 예제입니다. Ctrl+Z로 이전 문서를 복원합니다.";changed();fit();break;
  }redraw();}
 
 } // namespace yd::editor
