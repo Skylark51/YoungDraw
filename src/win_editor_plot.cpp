@@ -219,12 +219,27 @@ void setPlotTransitionState(int id,size_t index,bool enabled){
 }
 void compressPlotEnergyInterval(int id,size_t index){
     auto* p=plot(id);if(!p||doc.isLocked(id)||index+1>=p->states.size()||p->mode==independentEnergyLevels)return;
-    auto candidate=*p;auto& state=candidate.states[index];state.breakAfter=true;state.breakStyle=1;state.breakScale=.1;state.breakOmit=50;state.breakUpperScale=3;state.breakLow.reset();state.breakHigh.reset();
+    auto candidate=*p;auto& state=candidate.states[index];state.breakAfter=true;state.breakStyle=1;state.breakScale=.1;state.breakOmit=50;state.breakUpperScale=3;state.breakLow.reset();state.breakHigh.reset();candidate.yMin.reset();candidate.yMax.reset();
     if(!candidate.series.empty()&&(!candidate.series[size_t(state.breakPath)].hasValue(index)||!candidate.series[size_t(state.breakPath)].hasValue(index+1)))throw std::runtime_error("두 상태의 에너지가 있는 경로를 TS·위치에서 선택하세요.");
     const double a=candidate.series.empty()?candidate.states[index].energy:candidate.series[size_t(state.breakPath)].values[index],b=candidate.series.empty()?candidate.states[index+1].energy:candidate.series[size_t(state.breakPath)].values[index+1];
     if(std::abs(a-b)<1e-9)throw std::runtime_error("두 상태의 에너지가 같아 생략할 구간이 없습니다.");
     validateEnergyAnnotations(candidate);if(energyDisplayBands(candidate).empty())throw std::runtime_error("두 상태의 에너지가 같아 생략할 구간이 없습니다.");
-    history.checkpoint(doc);*p=std::move(candidate);selection={id};changed();status=L"큰 에너지 구간을 생략하고 위쪽 봉우리를 3배 확대했습니다. TS·위치에서 생략량·높이 조정 · Ctrl+Z: 되돌리기";
+    Document fitted=doc;for(auto& graph:fitted.plots)if(graph.id==id)graph=candidate;
+    const auto axes=makeScene(fitted,measure).plotAxes.at(id);const double xLength=(axes.xEnd-axes.origin).length(),yLength=(axes.yEnd-axes.origin).length();
+    if(yLength<xLength*.45)fitted=resizedPlotAxes(fitted,id,xLength,xLength*.45,measure);
+    const auto beforeScene=makeScene(doc,measure),afterScene=makeScene(fitted,measure);
+    const auto fittedGraph=std::find_if(fitted.plots.begin(),fitted.plots.end(),[&](const auto& graph){return graph.id==id;});
+    auto statePoint=[&](const Scene& scene,size_t index,int path)->std::optional<Vec>{auto found=scene.plotSnapPoints.find(id);if(found!=scene.plotSnapPoints.end())for(auto point:found->second)if(point.state==int(index)&&point.path==path&&point.edge==0)return point.p;return {};};
+    std::set<int> moved;
+    for(size_t i=0;i<p->states.size();++i){const auto a=statePoint(beforeScene,i,p->states[i].labelPath),b=statePoint(afterScene,i,p->states[i].labelPath);if(!a||!b)continue;
+        for(bool above:{false,true}){std::vector<int> ids;for(int member:above?p->states[i].above:p->states[i].below)if(moved.insert(member).second)ids.push_back(member);
+            const auto alreadyMoved=plotAnchor(*fittedGraph,i,above)-plotAnchor(*p,i,above);fitted.translate(ids,*b-*a-alreadyMoved,false);
+            if(!ids.empty()){const auto box=makeScene(fitted.subset(ids),measure).bounds;const double gap=std::max(18.,candidate.valueFontSize*1.3);
+                if(b->x>=box.x-8&&b->x<=box.x+box.w+8&&b->y>=box.y-gap&&b->y<=box.y+box.h+gap)
+                    fitted.translate(ids,{0,above?b->y-gap-box.y-box.h:b->y+gap-box.y},false);}
+        }
+    }
+    history.checkpoint(doc);doc=std::move(fitted);selection={id};changed();status=L"큰 에너지 구간을 생략하고 위쪽 봉우리를 3배 확대했습니다. TS·위치에서 생략량·높이 조정 · Ctrl+Z: 되돌리기";
 }
 bool plotContextMenu(Vec at){
     if(isolatedStructureEditing||stageCopyOwner)return false;

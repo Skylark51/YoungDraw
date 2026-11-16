@@ -1027,6 +1027,8 @@ Scene makeScene(const Document& d,const Measure& measure){
         for(auto& caption:captions)mostLabels=std::max(mostLabels,++labelsPerState[caption.index]);
         // A shallow multi-path plot needs smaller text before labels drift far from their levels.
         valueFont=std::min(valueFont,std::max(6.,h/(8.+1.3*mostLabels)));
+        const bool strongOmission=std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakOmit>0;});
+        const double minimumValueFont=strongOmission&&plot.valueFontSize>0?valueFont:4.;
         bool fitted=captions.empty();
         for(int pass=0;pass<40&&!fitted;pass++){
             fitted=true;placedValueBoxes.clear();
@@ -1042,7 +1044,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 }
                 if(fitted)break;
             }
-            if(valueFont<=4.01)break;valueFont=std::max(4.,valueFont*.94);
+            if(valueFont<=minimumValueFont+.01)break;valueFont=std::max(minimumValueFont,valueFont*.94);
         }
         if(!fitted){
             // If the chosen physical height cannot hold a group, keep that group local above

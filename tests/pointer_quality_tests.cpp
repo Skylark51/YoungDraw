@@ -26,13 +26,19 @@ static void CALLBACK driveGraphPicker(HWND owner,UINT,UINT_PTR timer,DWORD){
     if(!doc.plots.empty())stylePreviewSeen=doc.plots[0].mode==pickerMode;
     SendMessageW(picker,WM_COMMAND,pickerCancel?IDCANCEL:IDOK,0);
 }
-int main(){
+int main(int argc,char** argv){
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
     try{
         WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawPointerQuality";
         check(RegisterClassW(&wc)!=0,"register hidden test window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Quality",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd!=nullptr,"create hidden editor");
+        if(argc==4&&std::string(argv[1])=="--fit-profile-preview"){
+            doc=fromNative(readFile(ui::wide(argv[2])));for(const auto& graph:doc.plots){size_t index=0;for(size_t i=0;i+1<graph.states.size();++i)if(graph.states[i].breakAfter){index=i;break;}compressPlotEnergyInterval(graph.id,index);break;}
+            const auto prefix=ui::wide(argv[3]);writePreview(prefix+L".png",doc);writeFile(prefix+L".ydraw",toNative(doc));writeFile(prefix+L".cdxml",toCdxml(doc));writeFile(prefix+L".svg",toSvg(scene()));
+            DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
+
         doc={};int a=doc.addAtom({50,50}),b=doc.addAtom({80,50});doc.addBond(a,b);history.clear();dirty=false;selection={a};zoom=2;origin={300,200};tool=Select;
         auto before=toNative(doc);Vec start=screen(doc.atom(a)->p);
         mouseDown(start);mouseUp(start+Vec{24,18});
@@ -144,10 +150,16 @@ int main(){
             ww=nativeWidth;wh=nativeHeight;
         }
         {
-            doc={};auto graph=newEnergyPlot(0,true);graph.id=doc.nextId++;graph.width=920;graph.height=420;graph.states={{"A2",7.7},{"A2-TS",19.8},{"B2",-56.9},{"C2",-60.1},{"D2",-53.3},{"E2",-87.4}};graph.states[1].transitionState=true;
-            graph.series[0].values={7.7,19.8,-56.9,-60.1,-53.3,-87.4};doc.plots={graph};history.clear();const auto original=toNative(doc);
+            doc={};auto graph=newEnergyPlot(0,true);graph.id=doc.nextId++;graph.width=1534.8;graph.height=398.28567;graph.yMin=-90;graph.yMax=50;graph.valueFontSize=23;graph.stages={{"Homolytic Cleavage Rearrangement",0,38,20},{"C-O bond Formation",40,77,20},{"Product Formation",78,100,20}};graph.states={{"A2",7.7},{"A2-TS",19.8},{"B2",-56.9},{"C2",-60.1},{"D2",-53.3},{"E2",-87.4}};graph.states[1].transitionState=true;
+            graph.series[0].values={7.7,19.8,-56.9,-60.1,-53.3,-87.4};doc.plots={graph};
+            Vec initialPoint;const auto initialScene=scene();for(auto point:initialScene.plotSnapPoints.at(graph.id))if(point.state==0&&point.edge==0)initialPoint=point.p;
+            const int overlappingStructure=doc.addAtom(initialPoint,8);doc.plots[0].states[0].below={overlappingStructure};history.clear();const auto original=toNative(doc);
             writePreview(L"energy-wave-before.png",doc);compressPlotEnergyInterval(graph.id,1);
             check(doc.plots[0].states[1].breakStyle==1&&doc.plots[0].states[1].breakOmit==50&&doc.plots[0].states[1].breakUpperScale==3,"canvas command inserts a wave and compresses the empty energy band");
+            const auto finalScene=scene();for(auto point:finalScene.plotSnapPoints.at(graph.id))if(point.state==0&&point.edge==0)check(doc.atom(overlappingStructure)->p.y>point.p.y+18,"attached structures are cleared away from the energy curve after fitting");
+            check(!doc.plots[0].yMin&&!doc.plots[0].yMax,"compression clears stale manual bounds that flatten the actual peak");
+            const auto fittedAxes=scene().plotAxes.at(graph.id);check((fittedAxes.yEnd-fittedAxes.origin).length()>=(fittedAxes.xEnd-fittedAxes.origin).length()*.45-1e-4,"wide energy figures gain enough vertical space for a visible peak");
+            check(fittedAxes.valueFont>15,"explicit energy numbers remain readable after compression");
             writePreview(L"energy-wave-after.png",doc);check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"wave compression is one reversible edit");
         }
         DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();
