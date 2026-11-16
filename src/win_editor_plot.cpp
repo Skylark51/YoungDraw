@@ -131,6 +131,7 @@ static std::optional<double> kilojoulesPerUnit(const std::string& unit){
 }
 void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");EnergyPlot original=*p;Document before=doc;
     auto update=[&](const std::vector<std::string>& v)->std::wstring{try{EnergyPlot p=original;p.title=v[0];p.unit=v[1]==ui::utf8(L"kcal mol⁻¹")?"kcal mol^{-1}":v[1];p.xLabel=v[2];p.yLabel=v[3];p.xColor=colorValue(v[4]);p.yColor=colorValue(v[5]);auto size=values(v[6]);if(size.size()!=2||size[0]<180||size[1]<140||size[0]>4000||size[1]>4000)return L"크기는 180×140 ~ 4000×4000 pt로 입력하세요.";p.width=size[0];p.height=size[1];p.mode=std::stoi(v[7]);p.showValues=v[8]=="1";p.yTickStep=v[9].empty()?0:numeric(v[9],0);p.yMin=v[10].empty()?std::optional<double>{}:numeric(v[10]);p.yMax=v[11].empty()?std::optional<double>{}:numeric(v[11]);
+ p.valueGap=numeric(v[26],0,200);p.yAxisWidth=numeric(v[27],0,20);
  p.axisFontSize=numeric(v[12],0,72);p.tickFontSize=numeric(v[13],0,72);p.valueFontSize=numeric(v[14],0,72);p.energyLabelFontSize=numeric(v[15],0,72);p.thinLines=v[16]=="1";p.boldLevels=v[17]=="1";
  for(double font:{p.axisFontSize,p.tickFontSize,p.valueFontSize,p.energyLabelFontSize})if(font>0&&font<4)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
  if(v[18]=="1"&&p.unit!=original.unit){
@@ -157,8 +158,8 @@ void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에�
  {L"범례 Y 이동 (pt, 아래 +)",number(p->legendOffset.y)},
  {L"x축 (선·제목) 표시",p->showXAxis?"1":"0",false,{L"숨김",L"표시"}},
  {L"y축 (선·눈금·제목) 표시",p->showYAxis?"1":"0",false,{L"숨김",L"표시"}},
- {L"에너지 표기", "0",false,{L"현재 표기 유지",L"ΔE · 에너지",L"ΔG · 자유 에너지"}}},update,
- {{L"기본",{0,25,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{23,24,19,20}},{L"글자",{4,5,8,12,13,14,15}},{L"선 스타일",{7,16,17}},{L"범례 위치",{21,22}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
+ {L"에너지 표기", "0",false,{L"현재 표기 유지",L"ΔE · 에너지",L"ΔG · 자유 에너지"}},{L"에너지 값과 곡선 간격 (pt)",number(p->valueGap)},{L"y축 굵기 (pt, 0: 그래프와 동일)",number(p->yAxisWidth)}},update,
+ {{L"기본",{0,25,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{23,24,19,20}},{L"글자",{4,5,8,12,13,14,15,26}},{L"선 스타일",{7,16,17,27}},{L"범례 위치",{21,22}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
 }
 std::optional<PendingEnergyGap> pendingEnergyGap;
 void addEnergyGap(int id){

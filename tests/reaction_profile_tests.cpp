@@ -169,6 +169,17 @@ int main(){try{
         state.breakHigh=-60;bool rejected=false;try{validateEnergyAnnotations(profile.plots[0]);}catch(...){rejected=true;}check(rejected,"reversed energy omission limits are rejected");
         state.breakHigh=0;std::ofstream("energy-wave-peak-preview.svg")<<toSvg(makeScene(profile));
     }
+    {
+        Document thick;auto g=newEnergyPlot(0,true);g.id=thick.nextId++;g.thinLines=false;g.inkScale=3;g.series[0].width=10;g.showYAxis=false;g.states[1].breakAfter=true;g.states[1].breakStyle=1;g.valueGap=28;thick.plots={g};
+        std::vector<Primitive> waves;for(auto item:makeScene(thick).items)if(item.type==Primitive::Bezier&&item.points.size()==4&&std::abs((item.points.back()-item.points.front()).length()-10)<1e-6)waves.push_back(item);
+        check(waves.size()==4&&(waves[0].points[0]-waves[2].points[0]).length()>waves[0].width+10,"thick waves have a real stroke-dependent separation");
+        thick.plots[0].showYAxis=true;auto rendered=makeScene(thick);auto axes=rendered.plotAxes.at(g.id);bool axis=false;
+        for(auto item:rendered.items)if(item.type==Primitive::Line&&item.points.size()==2&&std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8){axis=true;check(std::abs(item.width-30)<1e-8,"y-axis inherits the curve's displayed width");}check(axis,"y-axis shaft is present");
+        thick.plots[0].yAxisWidth=2;auto custom=makeScene(thick);for(auto item:custom.items)if(item.type==Primitive::Line&&item.points.size()==2&&std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8)check(std::abs(item.width-6)<1e-8,"y-axis width can be overridden independently");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(thick)),fromCdxml(toCdxml(thick))})check(toNative(restored)==toNative(thick),"label clearance and separate axis width survive saving");
+#endif
+    }
     std::ofstream("reaction-profile-preview.svg")<<toSvg(makeScene(d));
 #ifdef TEST_CDXML
     std::ofstream("reaction-profile-preview.youngdraw")<<toNative(d);

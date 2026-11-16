@@ -108,6 +108,7 @@ struct EnergyPlot {
     std::optional<double> yMin,yMax;
     double axisScale=1;
     double axisFontSize=0,tickFontSize=0,valueFontSize=0,energyLabelFontSize=0; // pt; 0 fits automatically to graph size.
+    double valueGap=0,yAxisWidth=0; // Extra energy-label clearance; y-axis width 0 follows the primary curve.
     double yTickStep=0; // 0: automatic; positive: spacing in the plot's energy unit.
     std::vector<MechanismStage> stages; // Empty in older documents; editable independently of energy states.
     std::vector<EnergyState> states; std::vector<EnergySeries> series; int mode=3; bool showValues=true;

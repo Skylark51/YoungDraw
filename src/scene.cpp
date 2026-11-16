@@ -587,16 +587,18 @@ Scene makeScene(const Document& d,const Measure& measure){
         }
         s.plotAxes[owner]={{x0,axisY},{x0+w+12*plot.axisScale,axisY},{x0,topY-14*plot.axisScale},axisFont,tickFont,valueFont,energyFont,h};
         if(plot.showXAxis)arrow({x0,axisY},{x0+w+12*plot.axisScale,axisY},"#000000",std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,plot.axisScale*(3.5/3.0));
-        if(plot.showYAxis)arrow({x0,axisY},{x0,topY-14*plot.axisScale},"#000000",std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,plot.axisScale*(3.5/3.0));
+        const double yAxisStroke=plot.yAxisWidth>0?plot.yAxisWidth:plot.series.empty()?2.4:plot.series.front().width;
+        const double inkFactor=plot.inkScale*(plot.thinLines?.5:1.);
+        if(plot.showYAxis)arrow({x0,axisY},{x0,topY-14*plot.axisScale},"#000000",yAxisStroke,1,std::max(plot.axisScale*(3.5/3.0),yAxisStroke*inkFactor*.6));
         for(size_t i=0;i<plot.stages.size();i++){
             const auto [a,b]=stageRange(plot.stages[i]);double c=(a+b)/2;
             const auto& layout=stageLayouts[i];double font=layout.font;
             double y=y0+8+laneOffsets[layout.lane]+laneHeights[layout.lane]/2;
             double gap=widthOf(layout.text,font)/2+std::min(font*.35,(b-a)*.04),shaft=std::max(.01,(b-a)/2-gap);
             const auto& stage=plot.stages[i];
-            const double automaticHead=std::min(font*.5,std::max(font*.16,shaft*.14));
-            const double headLength=std::min(stage.arrowHeadSize>0?stage.arrowHeadSize:automaticHead,shaft*.65);
             double weight=stage.arrowWidth>0?stage.arrowWidth:std::max(.6,std::min(font*.085,shaft*.08));
+            const double automaticHead=std::min(font*.7,std::max({font*.20,shaft*.18,weight*inkFactor*3}));
+            const double headLength=std::min(stage.arrowHeadSize>0?stage.arrowHeadSize:automaticHead,shaft*.65);
             double headScale=headLength/5;
             arrow({c-gap,y},{a,y},plot.xColor,weight,1,headScale);
             arrow({c+gap,y},{b,y},plot.xColor,weight,1,headScale);
@@ -627,8 +629,10 @@ Scene makeScene(const Document& d,const Measure& measure){
             }
             Primitive mark;mark.owner=owner;mark.points={{x0-3*plot.axisScale,y},{x0,y}};mark.width=.5*plot.axisScale;s.items.push_back(mark);
         }
+        auto waveSpacing=[&](double width){return std::max(3.5,width*inkFactor*.8+2.);};
         auto wave=[&](Vec center,Vec along,Vec across,double width,const std::string& color){
-            for(double shift:{-3.5,3.5})for(int half=0;half<2;++half){
+            const double spacing=waveSpacing(width);
+            for(double shift:{-spacing,spacing})for(int half=0;half<2;++half){
                 const double start=-10+10*half,side=half==0?3.5:-3.5;
                 Primitive curve;curve.type=Primitive::Bezier;curve.owner=owner;curve.color=color;curve.width=width;
                 curve.points={center+along*shift+across*start,center+along*(shift+side)+across*(start+3.3),center+along*(shift+side)+across*(start+6.7),center+along*shift+across*(start+10)};s.items.push_back(curve);
@@ -636,15 +640,16 @@ Scene makeScene(const Document& d,const Measure& measure){
         };
         if(plot.showYAxis)for(const auto& band:displayBands)if(band.marker&&band.high>=low&&band.low<=high){
             const double y=(yAt(std::max(low,band.low))+yAt(std::min(high,band.high)))/2;
+            const double axisHole=std::max(8.,waveSpacing(yAxisStroke)+5+yAxisStroke*inkFactor);
             // Cut the axis itself instead of masking with a background-colored patch.
             for(size_t k=0,count=s.items.size();k<count;++k){const auto shaft=s.items[k];
                 if(shaft.owner!=owner||shaft.type!=Primitive::Line||shaft.points.size()!=2||std::abs(shaft.points[0].x-x0)>1e-8||std::abs(shaft.points[1].x-x0)>1e-8)continue;
                 const double top=std::min(shaft.points[0].y,shaft.points[1].y),bottom=std::max(shaft.points[0].y,shaft.points[1].y);
-                if(top<y-8&&bottom>y+8){s.items[k].points={{x0,top},{x0,y-8}};auto lower=shaft;lower.points={{x0,y+8},{x0,bottom}};s.items.push_back(lower);}
+                if(top<y-axisHole&&bottom>y+axisHole){s.items[k].points={{x0,top},{x0,y-axisHole}};auto lower=shaft;lower.points={{x0,y+axisHole},{x0,bottom}};s.items.push_back(lower);}
             }
 
-            if(std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakStyle==1&&(state.breakScale!=1||state.breakOmit>0);})){wave({x0,y},{0,1},{1,0},.9,"#000000");continue;}
-            for(double shift:{-3.,3.}){Primitive slash;slash.owner=owner;slash.width=.9;slash.points={{x0-5,y+shift+3},{x0+5,y+shift-3}};s.items.push_back(slash);}
+            if(std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakStyle==1&&(state.breakScale!=1||state.breakOmit>0);})){wave({x0,y},{0,1},{1,0},yAxisStroke,"#000000");continue;}
+            for(double shift:{-3.,3.}){Primitive slash;slash.owner=owner;slash.width=yAxisStroke;slash.points={{x0-5,y+shift+3},{x0+5,y+shift-3}};s.items.push_back(slash);}
         }
         std::vector<EnergySeries> paths=plot.series;if(paths.empty()){EnergySeries path;for(auto& st:plot.states)path.values.push_back(st.energy);paths.push_back(path);}
         titleFont=std::min(titleFont,std::max(4.,w/std::max(1.,widthOf(plot.title,1))));
@@ -723,12 +728,14 @@ Scene makeScene(const Document& d,const Measure& measure){
         }
         auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX,double breakScale,int breakStyle){
             if(std::isfinite(breakX)&&breakX>a.x&&breakX<b.x&&b.x-a.x>20){
-                breakX=std::clamp(breakX,a.x+9.01,b.x-9.01);
+                Vec tangent=(b-a)*(1/std::max(1e-9,(b-a).length()));
+                const double hole=breakStyle==1?std::min((b.x-a.x)*.25,std::max(8.,std::abs(tangent.x)*(waveSpacing(path.width)+3.5)+std::abs(tangent.y)*10+path.width*inkFactor)):8.;
+                breakX=std::clamp(breakX,a.x+hole+1,b.x-hole-1);
                 // Split the real path instead of painting a white rectangle over other objects.
                 Vec c1{a.x+(b.x-a.x)*.42,a.y},c2{b.x-(b.x-a.x)*.42,b.y};
                 auto at=[&](double t){double u=1-t;return plot.mode==0?a*(u*u*u)+c1*(3*u*u*t)+c2*(3*u*t*t)+b*(t*t*t):a+(b-a)*t;};
                 auto parameter=[&](double x){double lo=0,hi=1;for(int j=0;j<40;++j){double t=(lo+hi)/2;if(at(t).x<x)lo=t;else hi=t;}return (lo+hi)/2;};
-                const double t0=parameter(breakX-8),t1=parameter(breakX+8);
+                const double t0=parameter(breakX-hole),t1=parameter(breakX+hole);
                 auto part=[&](double start,double end){
                     Vec last=at(start);
                     if(plot.mode==0&&a.y>=topY&&a.y<=y0&&b.y>=topY&&b.y<=y0){
@@ -984,7 +991,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         std::vector<Rect> placedValueBoxes;
         auto fitGroup=[&](size_t first,size_t end,double font,bool allowConnectors)->bool{
             size_t count=end-first;if(!count)return true;
-            double th=font*1.3,gap=std::max(2.,font*.20),pitch=th+gap;
+            double th=font*1.3,gap=std::max({2.,font*.20,plot.valueGap}),pitch=th+gap;
             double minY=topY+2,maxY=y0-th-4,step=std::max(.5,h/600.);
             int slots=int(std::floor((maxY-minY)/step))+1;if(slots<=0)return false;
             double maxShift=std::min(h*.45,std::max(2*th,count*pitch+gap));
@@ -1052,7 +1059,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             placedValueBoxes.clear();
             for(size_t first=0;first<captions.size();){size_t end=first+1;while(end<captions.size()&&captions[end].index==captions[first].index)end++;
                 if(!fitGroup(first,end,valueFont,false)&&!fitGroup(first,end,valueFont,true)){
-                    double th=valueFont*1.3,gap=2,top=captions[first].anchor.y-(end-first)*(th+gap)-5;
+                    double th=valueFont*1.3,gap=std::max(2.,plot.valueGap),top=captions[first].anchor.y-(end-first)*(th+gap)-5;
                     for(size_t c=first;c<end;c++)top=std::min(top,captions[c].anchor.y-(end-first)*(th+gap)-5);
                     bool clear=false;for(int pass=0;pass<300&&!clear;pass++){clear=true;
                         for(size_t c=first;c<end;c++){Rect box{captions[c].anchor.x-widthOf(captions[c].text,valueFont)/2,top+(c-first)*(th+gap),widthOf(captions[c].text,valueFont),th};

@@ -137,6 +137,7 @@ double energyFromDisplay(const std::vector<EnergyDisplayBand>& bands,double valu
     return value-correction;
 }
 void validateEnergyAnnotations(const EnergyPlot& p){
+    if(!std::isfinite(p.valueGap)||p.valueGap<0||p.valueGap>200||!std::isfinite(p.yAxisWidth)||p.yAxisWidth<0||p.yAxisWidth>20)throw std::runtime_error("Invalid plot label clearance or axis width");
     if(!std::isfinite(p.inkScale)||p.inkScale<.25||p.inkScale>4)throw std::runtime_error("Invalid graph ink scale");
     if(!p.energySymbol.empty()&&p.energySymbol!="ΔE"&&p.energySymbol!="ΔG")throw std::runtime_error("Invalid energy symbol");
     const size_t paths=std::max(size_t(1),p.series.size());
