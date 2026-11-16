@@ -4,6 +4,7 @@
 #include "win_editor_tabs.h"
 #include "win_editor_text.h"
 #include "cdxml.h"
+#include "plot_data.h"
 #include "mechanism_data.h"
 #include "win_dialogs.h"
 #include "win_scripts.h"
@@ -27,7 +28,7 @@ std::string inlineValue(const InlineTarget& t){
 void setInlineValue(const InlineTarget& t,const std::string& value){
     if(t.role==0){if(auto* o=textObject(t.owner)){o->text=chemicalScripts(value);o->runs.clear();return;}if(auto* a=doc.atom(t.owner)){int e=atomicNumber(value);if(e){setAtomElement(doc,a->id,e);a->label.clear();a->explicitH=-1;}else a->label=chemicalScripts(value);a->labelRuns.clear();return;}}
     if(auto* r=reaction(t.owner)){if(t.role==1)r->slots.at(size_t(t.index)).label=value;if(t.role==2||t.role==11){auto& raw=r->above.at(size_t(t.index));auto caption=transitionCaption(raw);if(t.role==2)caption.description=value;else{caption.name=value;caption.separated=true;}raw=transitionCaptionText(caption);}if(t.role==3)r->below.at(size_t(t.index))=value;if(t.role==9)r->slots.at(size_t(t.index)).energy=value;if(t.role==10)r->centerLabel=value;return;}
-    if(auto* p=plot(t.owner)){if(t.role==12){if(value.empty())throw std::runtime_error("단계 이름을 입력하세요.");p->stages.at(size_t(t.index)).label=value;}if(t.role==4)p->title=value;if(t.role==5)p->unit=value;if(t.role==6)p->states.at(size_t(t.index)).label=value;if(t.role==7)p->series.at(size_t(t.index)).name=value;if(t.role==8){double e=numeric(value);p->states.at(size_t(t.index)).energy=e;if(!p->series.empty()){auto& path=p->series[0];path.values.at(size_t(t.index))=e;if(!path.present.empty())path.present.at(size_t(t.index))=true;}}return;}
+    if(auto* p=plot(t.owner)){if(t.role==12){if(value.empty())throw std::runtime_error("단계 이름을 입력하세요.");p->stages.at(size_t(t.index)).label=value;}if(t.role==4)p->title=value;if(t.role==5)p->unit=value;if(t.role==6)setEnergyStateLabel(p->states.at(size_t(t.index)),value);if(t.role==7)p->series.at(size_t(t.index)).name=value;if(t.role==8){double e=numeric(value);p->states.at(size_t(t.index)).energy=e;if(!p->series.empty()){auto& path=p->series[0];path.values.at(size_t(t.index))=e;if(!path.present.empty())path.present.at(size_t(t.index))=true;}}return;}
 }
 std::optional<InlineTarget> textAt(Vec p){
     auto sc=scene();for(auto i=sc.items.rbegin();i!=sc.items.rend();++i){const auto& t=*i;if(t.type!=Primitive::Text||t.points.empty()||t.textRole==13||t.textRole==mullikenSpinTextRole||doc.isLocked(t.owner))continue;if(!t.textRole&&!textObject(t.owner)&&!doc.atom(t.owner))continue;

@@ -8,6 +8,7 @@
 #include "cdxml.h"
 #include "plot_data.h"
 #include "win_editor_plot.h"
+#include "win_editor_text.h"
 #include "win_dialogs.h"
 #include <iostream>
 #include <stdexcept>
@@ -67,6 +68,17 @@ int main(){
         check((doc.plots[0].states[1].gapOffset-placedOffset-Vec{30,20}).length()<1e-5,"drag moves gap arrow horizontally and caption vertically");
         check(history.undo(doc)&&(doc.plots[0].states[1].gapOffset-placedOffset).length()<1e-5,"gap drag is one reversible edit");
         check(history.undo(doc)&&toNative(doc)==cleanGraph,"gap creation is one reversible edit");
+        {const auto id=doc.plots[0].id;doc.plots[0].states[1].transitionState=false;history.clear();
+            int oxygen=doc.addAtom({220,35},8);doc.plots[0].states[1].above={oxygen};
+            auto target=plotStateAt(screen(doc.atom(oxygen)->p));check(target&&target->first==id&&target->second==1,"graph structure hit identifies its attached state");
+            const auto original=toNative(doc);setPlotTransitionState(id,1,true);int brackets=0;bool dagger=false;
+            for(const auto& item:scene().items)if(item.owner==id){brackets+=item.type==Primitive::Line&&item.points.size()==4;dagger|=item.type==Primitive::Text&&item.text=="‡";}
+            check(brackets==2&&dagger,"designating a graph structure as TS immediately draws both brackets and dagger");
+            check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"canvas TS designation is exactly one reversible edit");
+            setInlineValue({id,6,0},"TS2");check(doc.plots[0].states[0].transitionState,"canvas name editing automatically marks TS names");
+            setInlineValue({id,6,0},"R");check(!doc.plots[0].states[0].transitionState,"canvas renaming removes inferred TS designation");
+            doc.plots[0].states[1].above.clear();doc.erase({oxygen});history.clear();dirty=false;
+        }
         // A style edit may only change mode, including during preview and cancellation.
         auto& styled=doc.plots[0];styled.states[1].gapFrom=0;styled.states[1].transitionState=true;styled.states[0].breakAfter=true;
         auto second=styled.series[0];second.name="Alternative";second.color="#b44758";second.values={0,18,-8};styled.series.push_back(second);

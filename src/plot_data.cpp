@@ -29,6 +29,19 @@ EnergyPlot reactionProfilePlot(){
     p.states[2].breakAfter=true;p.states[2].breakPosition=.35;
     return p;
 }
+bool isTransitionStateLabel(const std::string& label){
+    const auto first=label.find_first_not_of(" \t\r\n");if(first==std::string::npos)return false;
+    const auto last=label.find_last_not_of(" \t\r\n");auto name=label.substr(first,last-first+1);
+    for(auto& c:name)if(static_cast<unsigned char>(c)<128)c=char(std::toupper(static_cast<unsigned char>(c)));
+    if(name=="TRANSITION STATE"||name=="전이상태"||name=="전이 상태")return true;
+    if(name.compare(0,2,"TS")!=0)return false;
+    return name.size()==2||std::isdigit(static_cast<unsigned char>(name[2]))||std::string(" _-('^{\t\n").find(name[2])!=std::string::npos;
+}
+void setEnergyStateLabel(EnergyState& state,const std::string& label){
+    if(state.label==label)return;const bool previousTS=isTransitionStateLabel(state.label),nextTS=isTransitionStateLabel(label);
+    if(previousTS||nextTS)state.transitionState=nextTS;
+    state.label=label;
+}
 std::string plotEnergySymbol(const EnergyPlot& p){return p.energySymbol.empty()?"ΔG":p.energySymbol;}
 EnergyPlot newEnergyPlot(int mode,bool freeEnergy){
     if(mode<0||mode>independentEnergyLevels)throw std::runtime_error("Invalid graph mode");
@@ -36,7 +49,7 @@ EnergyPlot newEnergyPlot(int mode,bool freeEnergy){
     p.mode=mode;p.title="";p.energySymbol=freeEnergy?"ΔG":"ΔE";p.yLabel=p.energySymbol;
     p.width=640;p.height=370;p.thinLines=true;p.showYTicks=mode>=2;
     if(mode!=independentEnergyLevels){
-        p.states={{"R",0},{"TS",20},{"P",-10}};EnergySeries path;path.values={0,20,-10};path.width=2.4;path.dash=0;path.markerSize=2.8;p.series={path};
+        p.states={{"R",0},{"TS",20},{"P",-10}};p.states[1].transitionState=true;EnergySeries path;path.values={0,20,-10};path.width=2.4;path.dash=0;path.markerSize=2.8;p.series={path};
         if(mode<2)for(auto& state:p.states){state.labelPlacement=2;state.labelOffset.y=8;}
     }
     return p;
@@ -210,7 +223,7 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
         for(size_t j=0;j<old.states.size();j++)if(!used.count(j)&&old.states[j].label==r.label){mapping[i]=int(j);used.insert(j);break;}
     }
     for(size_t i=0;i<rows.size();i++)if(mapping[i]<0&&i<old.states.size()&&!used.count(i)){mapping[i]=int(i);used.insert(i);}
-    std::vector<EnergyState> states;for(size_t i=0;i<rows.size();i++){EnergyState s;if(mapping[i]>=0)s=old.states[size_t(mapping[i])];s.label=rows[i].label;s.energy=rows[i].energy;if(!preserveMarkers)s.marker=rows[i].marker;states.push_back(s);}
+    std::vector<EnergyState> states;for(size_t i=0;i<rows.size();i++){EnergyState s;if(mapping[i]>=0)s=old.states[size_t(mapping[i])];setEnergyStateLabel(s,rows[i].label);s.energy=rows[i].energy;if(!preserveMarkers)s.marker=rows[i].marker;states.push_back(s);}
     auto series=old.series;if(series.empty())series.push_back({});
     for(size_t k=0;k<series.size();k++){std::vector<double> values;for(size_t i=0;i<rows.size();i++){int j=mapping[i];values.push_back(k==0?rows[i].energy:j>=0&&size_t(j)<old.series[k].values.size()?old.series[k].values[size_t(j)]:rows[i].energy);}std::vector<bool> present;for(size_t i=0;i<rows.size();i++){int j=mapping[i];present.push_back(k==0||j<0||old.series.empty()||old.series[k].hasValue(size_t(j)));}std::vector<std::string> levels(rows.size()),segments(rows.empty()?0:rows.size()-1);
         for(size_t i=0;i<rows.size();i++){

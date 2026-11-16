@@ -1,5 +1,8 @@
 #include "win_editor_plot.h"
 #include "win_editor_state.h"
+#include "win_editor_commands.h"
+#include "win_editor_reaction.h"
+#include "win_editor_text.h"
 #include "cdxml.h"
 #include "mechanism_data.h"
 #include "plot_data.h"
@@ -168,6 +171,44 @@ bool placeEnergyGap(Vec at){
     history.checkpoint(doc);state.gapFrom=pending.from;state.gapPath=pending.path;state.gapLabel=pending.label;
     state.gapOffset={dx,std::abs(dy)<1e-6?1e-6:dy};pendingEnergyGap.reset();changed();status=L"에너지 갭을 추가했습니다. 갭 문구를 드래그해 이동 · TS·위치에서 수정·제거 · Ctrl+Z: 되돌리기";return true;
 }
+std::optional<std::pair<int,size_t>> plotStateAt(Vec at){
+    const auto point=world(at);const auto sc=scene();
+    if(const auto text=textAt(point);text&&(text->role==6||text->role==8)){
+        if(const auto* p=plot(text->owner);p&&!doc.isLocked(p->id)&&text->index>=0&&size_t(text->index)<p->states.size())return std::pair{p->id,size_t(text->index)};
+    }
+    for(const auto& p:doc.plots)if(!doc.isLocked(p.id))for(size_t i=0;i<p.states.size();++i){
+        for(const auto* members:{&p.states[i].above,&p.states[i].below})for(int member:*members){
+            auto found=sc.objectBounds.find(member);if(found==sc.objectBounds.end())continue;const auto& b=found->second;const double pad=4/zoom;
+            if(point.x>=b.x-pad&&point.x<=b.x+b.w+pad&&point.y>=b.y-pad&&point.y<=b.y+b.h+pad)return std::pair{p.id,i};
+        }
+    }
+    std::optional<std::pair<int,size_t>> result;double distance=12;
+    for(const auto& [id,points]:sc.plotSnapPoints)if(!doc.isLocked(id))for(const auto& p:points){
+        const double d=(screen(p.p)-at).length();if(d<distance){distance=d;result=std::pair{id,size_t(p.state)};}
+    }
+    return result;
+}
+void setPlotTransitionState(int id,size_t index,bool enabled){
+    auto* p=plot(id);if(!p||doc.isLocked(id)||index>=p->states.size())return;
+    if(p->states[index].transitionState==enabled)return;
+    history.checkpoint(doc);p->states[index].transitionState=enabled;selection={id};changed();
+    status=enabled?L"TS로 지정했습니다. 삽입 구조에 [ ]‡가 표시됩니다. Ctrl+Z: 되돌리기":L"TS 지정을 해제했습니다. 구조는 유지하고 [ ]‡만 숨깁니다. Ctrl+Z: 되돌리기";
+}
+bool plotContextMenu(Vec at){
+    if(isolatedStructureEditing||stageCopyOwner)return false;
+    if(!finishInline(true))return true;
+    const auto target=plotStateAt(at);if(!target)return false;
+    const auto [id,index]=*target;selection={id};SetFocus(win);redraw();
+    const bool marked=plot(id)->states[index].transitionState;
+    auto menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING|(marked?MF_CHECKED:0),1,marked?L"TS 지정 해제 ([ ]‡ 숨김)":L"TS로 지정 ([ ]‡ 표시)");
+    AppendMenuW(menu,MF_STRING,2,L"상태 이름 편집…");AppendMenuW(menu,MF_STRING,3,L"TS·이름 위치 설정…");
+    POINT position{LONG(at.x),LONG(at.y)};ClientToScreen(win,&position);
+    const int choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,position.x,position.y,0,win,nullptr);DestroyMenu(menu);
+    if(choice==1)setPlotTransitionState(id,index,!marked);
+    if(choice==2){tool=Text;beginInline(InlineTarget{id,6,int(index),world(at),doc.style.fontSize},world(at));}
+    if(choice==3)editPlotAnnotations(id);
+    return true;
+}
 void editPlotAnnotations(int id){
     auto* p=plot(id);if(!p||doc.isLocked(id)||p->states.empty())throw std::runtime_error("편집할 에너지 그래프를 선택하세요.");
     std::vector<ui::SearchItem> entries;std::vector<std::wstring> states,paths;
@@ -182,7 +223,7 @@ void editPlotAnnotations(int id){
         {L"이름 기준 경로",std::to_string(state.labelPath),false,paths},
         {L"이름 X 이동 (pt, 오른쪽 +)",number(state.labelOffset.x)},
         {L"이름 Y 이동 (pt, 아래 +)",number(state.labelOffset.y)},
-        {L"TS 표기 [구조]‡",state.transitionState?"1":"0",false,{L"없음",L"사용 (위·아래 삽입 구조를 감쌈)"}},
+        {L"상태 유형",state.transitionState?"1":"0",false,{L"일반 상태",L"TS · [구조]‡ 표시"}},
         {L"다음 상태까지의 구간 //",state.breakAfter?"1":"0",false,{L"연결",L"구간 생략 표시"}},
         {L"// 위치 (5~95%, 구간 왼쪽 기준)",number(state.breakPosition*100)},
         {L"에너지 갭의 출발 상태",std::to_string(state.gapFrom+1),false,gapSources},

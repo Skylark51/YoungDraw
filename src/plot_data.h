@@ -7,6 +7,8 @@ inline constexpr int independentEnergyLevels = 4;
 EnergyPlot spinMultiplicityPlot();
 EnergyPlot reactionProfilePlot();
 EnergyPlot newEnergyPlot(int mode,bool freeEnergy);
+bool isTransitionStateLabel(const std::string& label);
+void setEnergyStateLabel(EnergyState& state,const std::string& label);
 std::string plotEnergySymbol(const EnergyPlot& plot);
 void validateEnergyAnnotations(const EnergyPlot& plot);
 EnergyPlot publicationPlot(const EnergyPlot& original);

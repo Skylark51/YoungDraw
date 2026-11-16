@@ -23,6 +23,15 @@ int main(){try{
         for(const auto& copy:{fromNative(toNative(fresh)),fromCdxml(toCdxml(fresh))})check(toNative(copy)==toNative(fresh),"shape and quantity selections survive native and CDXML saving");
 #endif
     }
+    for(const std::string label:{"TS"," TS1 ","ts2","TS_{3}","TS-alde","Transition State","전이상태"})check(isTransitionStateLabel(label),"TS state names are recognized");
+    for(const std::string label:{"R","Int1","TStart","TST","Products",""})check(!isTransitionStateLabel(label),"ordinary state names are not classified as TS");
+    {EnergyState state{"Int1",0};setEnergyStateLabel(state,"TS1");check(state.transitionState,"renaming to TS enables notation");
+        state.transitionState=false;setEnergyStateLabel(state,"TS1");check(!state.transitionState,"unchanged names preserve an explicit manual TS override");
+        state.transitionState=true;setEnergyStateLabel(state,"Int2");check(!state.transitionState,"renaming TS to an intermediate clears the annotation");
+        state.transitionState=true;setEnergyStateLabel(state,"Custom intermediate");check(state.transitionState,"custom TS designation survives ordinary label edits");}
+    {auto graph=newEnergyPlot(0,true);check(graph.states[1].transitionState,"default TS node is designated as TS");
+        auto edited=energyGridData(graph,{{"TS2","0"},{"Int1","20"},{"P","-10"}});
+        check(edited.states[0].transitionState&&!edited.states[1].transitionState,"table renaming updates the TS designation");}
     Document d;auto p=reactionProfilePlot();check(std::all_of(p.states.begin(),p.states.end(),[](const auto& state){return state.gapFrom==-1;}),"profile factory has no automatic gaps");
     for(size_t i=1;i<p.states.size();i+=2)p.states[i].gapFrom=int(i)-1;p.id=d.nextId++;d.plots={p};validateEnergyAnnotations(p);
     auto scene=makeScene(d);check(curves(scene)==7,"six smooth connectors, including two pieces around the break");
