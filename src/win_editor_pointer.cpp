@@ -95,8 +95,19 @@ static void updatePlotLevel(Vec delta){
     auto& energy=graph.series.empty()?graph.states[i].energy:graph.series.at(edit.path).values[i];
     const double axisStep=energyAxis(graph).step;
     const double step=GetKeyState(VK_SHIFT)&0x8000?axisStep:std::min(.1,axisStep/10);
-    const double next=std::round((energy-delta.y*edit.scale.unitsPerPoint)/step)*step;
     const double low=std::clamp(edit.scale.low,-1e6,1e6), high=std::clamp(edit.scale.high,-1e6,1e6);
+    const auto bands=energyDisplayBands(graph);double proposed=energy-delta.y*edit.scale.unitsPerPoint;
+    if(!bands.empty()){
+        const double base=displayEnergy(bands,low),span=displayEnergy(bands,high)-base;
+        const double target=std::clamp((displayEnergy(bands,energy)-base-delta.y*edit.scale.unitsPerPoint)/span,0.,1.);
+        double a=low,b=high;
+        for(int pass=0;pass<44;++pass){const double value=(a+b)/2;energy=value;
+            const auto candidate=energyDisplayBands(graph);const double start=displayEnergy(candidate,low),end=displayEnergy(candidate,high);
+            if((displayEnergy(candidate,value)-start)/(end-start)<target)a=value;else b=value;
+        }
+        proposed=(a+b)/2;
+    }
+    const double next=std::round(proposed/step)*step;
     energy=std::clamp(next,low,high);
     if(edit.path==0)graph.states[i].energy=energy;
     status=L"에너지 "+ui::wide(number(energy)+" "+graph.unit)+L" · Esc: 취소";

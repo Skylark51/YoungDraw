@@ -83,9 +83,10 @@ struct EnergyState {
     double breakPosition=.5; // Fraction of the following connector, marked with //.
     int gapFrom=-1,gapPath=0; // -1 hides the gap; otherwise a state on the selected path.
     Vec gapOffset{-24,0};
+    double breakScale=1;int breakPath=0; // Vertical display scale over the energy interval across //; data stays unchanged.
     std::string gapLabel; // Empty: automatically calculated signed delta G (double dagger for TS).
 };
-struct MechanismStage { std::string label; double start=0,end=100,fontSize=0; }; // Percent span; fontSize 0 matches state captions.
+struct MechanismStage { std::string label; double start=0,end=100,fontSize=0,arrowWidth=0,arrowHeadSize=0; }; // Percent span; fontSize 0 matches state captions.
 // Empty color entries inherit the pathway color. Segment i joins states i and i+1.
 struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
 // One shared point between two paths on the same segment. Position is the

@@ -253,11 +253,21 @@ void editPlotAnnotations(int id){
         {L"에너지 갭 경로",std::to_string(state.gapPath),false,paths},
         {L"갭 화살표 X (현재 상태 기준 pt)",number(state.gapOffset.x)},
         {L"갭 글자 Y 이동 (pt, 아래 +)",number(state.gapOffset.y)},
-        {L"갭 문구 (빈칸: "+ui::wide(plotEnergySymbol(original))+L" 자동 계산)",state.gapLabel,true,{},false,2,true}
+        {L"갭 문구 (빈칸: "+ui::wide(plotEnergySymbol(original))+L" 자동 계산)",state.gapLabel,true,{},false,2,true},
+        {L"// 생략 스케일 (%, 100: 원래 비율)",number(state.breakScale*100)},
+        {L"생략 에너지 구간의 기준 경로",std::to_string(state.breakPath),false,paths}
     };
     auto update=[&](const std::vector<std::string>& v)->std::wstring{try{
         auto candidate=original;auto& edit=candidate.states[index];edit.label=v[0];edit.labelPlacement=std::stoi(v[1]);edit.labelPath=std::stoi(v[2]);
         edit.labelOffset={numeric(v[3],-10000,10000),numeric(v[4],-10000,10000)};edit.transitionState=v[5]=="1";edit.breakAfter=v[6]=="1";
+        edit.breakScale=numeric(v[13],1,400)/100;edit.breakPath=std::stoi(v[14]);
+        if(edit.breakAfter&&std::abs(edit.breakScale-1)>1e-9){
+            if(index+1>=candidate.states.size())return L"생략할 다음 상태가 없습니다.";
+            double a=candidate.states[index].energy,b=candidate.states[index+1].energy;
+            if(!candidate.series.empty()){const auto& reference=candidate.series[size_t(edit.breakPath)];
+                if(!reference.hasValue(index)||!reference.hasValue(index+1))return L"생략 스케일의 기준 경로에는 두 상태의 에너지가 모두 필요합니다.";a=reference.values[index];b=reference.values[index+1];}
+            if(std::abs(a-b)<1e-9)return L"같은 에너지 사이에는 생략 스케일을 적용할 구간이 없습니다.";
+        }
         edit.breakPosition=numeric(v[7],5,95)/100;edit.gapFrom=std::stoi(v[8])-1;edit.gapPath=std::stoi(v[9]);
         if(edit.gapFrom==int(index))return L"갭의 출발 상태는 현재 상태와 달라야 합니다.";
         if(edit.breakAfter&&(index+1>=candidate.states.size()||candidate.mode==independentEnergyLevels))return L"구간 생략은 다음 상태로 이어지는 그래프에서 사용하세요.";
@@ -266,7 +276,7 @@ void editPlotAnnotations(int id){
         validateEnergyAnnotations(candidate);doc=before;*plot(id)=std::move(candidate);redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
     auto result=ui::form(win,L"곡선·TS·에너지 갭 — "+states[index],fields,update,
-        {{L"이름·위치",{0,1,2,3,4}},{L"TS·구간 생략",{5,6,7}},{L"에너지 갭",{8,9,10,11,12}}});
+        {{L"이름·위치",{0,1,2,3,4}},{L"TS·구간 생략",{5,6,7,13,14}},{L"에너지 갭",{8,9,10,11,12}}});
     if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }
@@ -403,12 +413,12 @@ void editPlotCrossings(int id){
 void editPlotStages(int id){
     auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");Document before=doc;
     auto stages=p->stages.empty()?defaultMechanismStages():p->stages;ui::Table rows;
-    for(auto& stage:stages)rows.push_back({stage.label,number(stage.start),number(stage.end),number(stage.fontSize)});
+    for(auto& stage:stages)rows.push_back({stage.label,number(stage.start),number(stage.end),number(stage.fontSize),number(stage.arrowWidth),number(stage.arrowHeadSize)});
     auto update=[&](const ui::Table& cells)->std::wstring{try{
         auto candidate=mechanismStageData(cells);doc=before;plot(id)->stages=std::move(candidate);redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
-    auto result=ui::table(win,L"반응 이름·화살표 범위",{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 크기 (pt, 0: 자동)"},rows,update,true,
-        L"x축 위에 ← 반응 이름 → 표시 · 범위: x축 전체 폭의 0~100% (최소 1%) · 겹치는 범위는 다른 줄에 표시 · 글자: 0(상태 이름과 같은 크기) 또는 4~72 pt · 긴 설명은 줄바꿈 · 모두 삭제하면 숨김");
+    auto result=ui::table(win,L"반응 이름·화살표 범위",{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 크기 (pt, 0: 자동)",L"화살표 굵기 (pt, 0: 자동)",L"화살촉 길이 (pt, 0: 자동)"},rows,update,true,
+        L"x축 위에 ← 반응 이름 → 표시 · 범위: x축 전체 폭의 0~100% (최소 1%) · 겹치는 범위는 다른 줄에 표시 · 글자: 0(상태 이름과 같은 크기) 또는 4~72 pt · 화살표: 굵기 0(자동) / 0.1~8 pt, 화살촉 0(구간 길이에 맞춤) / 0.1~40 pt · 긴 설명은 줄바꿈 · 모두 삭제하면 숨김");
     if(result){update(*result);if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }
@@ -420,8 +430,8 @@ void snapPlotStages(int id){
     int index=std::stoi((*choice)[0])-1;
     if(index<0&&p->stages.size()>=100)throw std::runtime_error("반응 이름은 최대 100개입니다.");
     MechanismStage label=index<0?MechanismStage{"Mechanism",0,100}:p->stages[size_t(index)];
-    auto text=ui::form(win,L"반응 이름",{{L"반응 이름",label.label,false,{},false,4,true},{L"글자 크기 (pt, 0: 자동)",number(label.fontSize)}});if(!text)return;
-    auto checked=mechanismStageData({{(*text)[0],"0","100",(*text)[1]}});if(checked.empty())return;
+    auto text=ui::form(win,L"반응 이름",{{L"반응 이름",label.label,false,{},false,4,true},{L"글자 크기 (pt, 0: 자동)",number(label.fontSize)},{L"화살표 굵기 (pt, 0: 자동)",number(label.arrowWidth)},{L"화살촉 길이 (pt, 0: 자동)",number(label.arrowHeadSize)}});if(!text)return;
+    auto checked=mechanismStageData({{(*text)[0],"0","100",(*text)[1],(*text)[2],(*text)[3]}});if(checked.empty())return;
     snapLabel=checked.front();snapPlot=id;snapStage=index;snapStart.reset();selection={id};tool=Select;
     status=L"자석 배치: 준위의 왼쪽 끝·중앙·오른쪽 끝 중 첫 점을 클릭하세요. Esc: 취소";redraw();
 }

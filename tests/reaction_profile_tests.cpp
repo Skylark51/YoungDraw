@@ -98,6 +98,51 @@ int main(){try{
     auto bilateral=bilateralPlot(p);validateEnergyAnnotations(bilateral);check(bilateral.states[1].labelPath==1&&bilateral.states[1].gapFrom==2,"mirrored state names and gaps follow the new left path");
     {Document multi;multi.plots={p};multi.plots[0].series.push_back(p.series[0]);auto& g=multi.plots[0];g.states[1].labelPath=g.states[1].gapPath=1;g.series[1].present.assign(7,true);g.series[1].present[1]=false;auto absent=makeScene(multi);check(std::none_of(absent.items.begin(),absent.items.end(),[](const auto& item){return item.type==Primitive::Text&&item.textRole==6&&item.textIndex==1;}),"missing path data hides its attached caption");}
     auto invalid=p;invalid.states[0].labelOffset.x=std::numeric_limits<double>::infinity();bool badOffset=false;try{validateEnergyAnnotations(invalid);}catch(...){badOffset=true;}check(badOffset,"nonfinite offsets rejected");
+    {
+        Document scaled;auto graph=reactionProfilePlot();graph.id=scaled.nextId++;graph.showYTicks=true;graph.states[3].gapFrom=2;scaled.plots={graph};
+        auto point=[&](const Scene& scene,int state,int path=0){for(auto snap:scene.plotSnapPoints.at(graph.id))if(snap.state==state&&snap.path==path&&snap.edge==0)return snap.p;throw std::runtime_error("missing energy point");};
+        const auto base=makeScene(scaled);const double originalHeight=point(base,2).y-point(base,3).y;
+        auto& g=scaled.plots[0];g.states[2].breakScale=.5;validateEnergyAnnotations(g);
+        auto compressed=makeScene(scaled);check(point(compressed,2).y-point(compressed,3).y<originalHeight,"50 percent compresses the displayed energy interval");
+        check(g.series[0].values==graph.series[0].values&&g.states[3].energy==graph.states[3].energy,"display compression preserves actual energies");
+        check(textContains(compressed,"50%")&&textContains(compressed,"5.6"),"compression is disclosed while the gap retains its actual energy");
+        g.series.push_back(g.series[0]);auto multi=makeScene(scaled);check(std::abs(point(multi,3).y-point(multi,3,1).y)<1e-8,"all pathways share the transformed energy axis");
+        g.states[2].breakScale=2;auto expanded=makeScene(scaled);check(point(expanded,2).y-point(expanded,3).y>originalHeight,"200 percent expands the displayed energy interval");
+        g.states[1].breakAfter=true;g.states[1].breakScale=.25;
+        auto bands=energyDisplayBands(g);double previous=-1e20;
+        for(double value=-30;value<=50;value+=.25){double mapped=displayEnergy(bands,value);check(mapped>previous,"overlapping display bands remain monotonic");check(std::abs(energyFromDisplay(bands,mapped)-value)<1e-8,"display mapping inverts across overlapping intervals");previous=mapped;}
+        check(std::abs(displayEnergy(bands,14)-displayEnergy(bands,10)-1)<1e-8,"overlaps use the smaller scale once without multiplying");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(scaled)),fromCdxml(toCdxml(scaled))})check(toNative(restored)==toNative(scaled),"display scales and reference paths survive native and CDXML saving");
+#endif
+        g.mode=4;check(energyDisplayBands(g).empty(),"independent levels do not apply a hidden connection scale");g.mode=0;
+        for(auto& state:g.states)state.breakAfter=false;check(energyDisplayBands(g).empty(),"removing breaks restores the original scale");
+        for(double bad:{0.,4.1,std::numeric_limits<double>::quiet_NaN()}){g.states[2].breakScale=bad;bool rejected=false;try{validateEnergyAnnotations(g);}catch(...){rejected=true;}check(rejected,"invalid display scales are rejected");}
+        g.states[2].breakScale=.5;g.states[2].breakPath=2;bool rejected=false;try{validateEnergyAnnotations(g);}catch(...){rejected=true;}check(rejected,"invalid scale reference paths are rejected");
+        g.states[2].breakPath=1;g.states[2].breakAfter=true;g.series[1].present.assign(g.states.size(),true);g.series[1].present[3]=false;check(energyDisplayBands(g).empty(),"missing reference energy cannot create a spurious band");
+        g.states[2].breakPath=0;std::ofstream("reaction-profile-scaled-preview.svg")<<toSvg(makeScene(scaled));
+    }
+    {
+        Document arrows;auto graph=newEnergyPlot(0,true);graph.id=arrows.nextId++;graph.thinLines=false;graph.xColor="#a12345";
+        graph.stages=mechanismStageData({{"Reaction","0","100","14","2.5","8"}});arrows.plots={graph};
+        auto arrowItems=[&](){std::vector<Primitive> out;for(auto item:makeScene(arrows).items)if(item.color==graph.xColor&&(item.type==Primitive::Polygon||item.type==Primitive::Line))out.push_back(item);return out;};
+        auto headLength=[&](){double length=0;for(auto item:arrowItems())if(item.type==Primitive::Polygon&&item.points.size()==3)length=std::max(length,(item.points[0]-(item.points[1]+item.points[2])*.5).length());return length;};
+        check(std::abs(headLength()-8)<1e-8,"explicit arrowhead length is respected");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(arrows)),fromCdxml(toCdxml(arrows))})check(toNative(restored)==toNative(arrows),"explicit reaction arrowhead and thickness survive saving");
+#endif
+
+        bool shaft=false;for(auto item:arrowItems())if(item.type==Primitive::Line){shaft=true;check(std::abs(item.width-2.5)<1e-8,"reaction arrow thickness has its own setting");}check(shaft,"reaction shafts are rendered");
+        arrows.plots[0].stages[0].arrowWidth=1;check(std::abs(headLength()-8)<1e-8,"shaft thickness changes independently of explicit head length");
+        arrows.plots[0].stages[0].arrowHeadSize=0;const double wideHead=headLength();arrows.plots[0].stages[0].start=35;arrows.plots[0].stages[0].end=65;
+        check(headLength()>0&&headLength()<wideHead,"automatic arrowheads follow the available reaction span");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(arrows)),fromCdxml(toCdxml(arrows))})check(toNative(restored)==toNative(arrows),"reaction arrow styles survive native and CDXML saving");
+#endif
+        auto old=mechanismStageData({{"Legacy","0","100","14"}});check(old[0].arrowWidth==0&&old[0].arrowHeadSize==0,"older stage rows retain automatic arrow sizing");
+        for(auto row:std::vector<std::vector<std::string>>{{"Bad","0","100","14","nan","0"},{"Bad","0","100","14","1","41"}}){bool rejected=false;try{mechanismStageData({row});}catch(...){rejected=true;}check(rejected,"invalid reaction arrow dimensions are rejected");}
+        std::ofstream("reaction-arrow-style-preview.svg")<<toSvg(makeScene(arrows));
+    }
     std::ofstream("reaction-profile-preview.svg")<<toSvg(makeScene(d));
 #ifdef TEST_CDXML
     std::ofstream("reaction-profile-preview.youngdraw")<<toNative(d);

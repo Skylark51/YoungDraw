@@ -87,6 +87,39 @@ Document resizedPlotAxes(const Document& original,int id,double xLength,double y
     }
     return result;
 }
+std::vector<EnergyDisplayBand> energyDisplayBands(const EnergyPlot& p){
+    std::vector<EnergyDisplayBand> requested;std::vector<double> stops;
+    if(p.mode==independentEnergyLevels)return {};
+    for(size_t i=0;i+1<p.states.size();++i){const auto& state=p.states[i];
+        if(!state.breakAfter||std::abs(state.breakScale-1)<1e-10)continue;
+        double a=p.states[i].energy,b=p.states[i+1].energy;
+        if(!p.series.empty()){
+            if(state.breakPath<0||size_t(state.breakPath)>=p.series.size())continue;
+            const auto& path=p.series[size_t(state.breakPath)];if(!path.hasValue(i)||!path.hasValue(i+1))continue;a=path.values[i];b=path.values[i+1];
+        }
+        if(a>b)std::swap(a,b);if(b-a<1e-9)continue;
+        requested.push_back({a,b,state.breakScale});stops.push_back(a);stops.push_back(b);
+    }
+    std::sort(stops.begin(),stops.end());stops.erase(std::unique(stops.begin(),stops.end()),stops.end());
+    std::vector<EnergyDisplayBand> result;
+    for(size_t i=1;i<stops.size();++i){double scale=0,middle=(stops[i-1]+stops[i])/2;
+        for(auto band:requested)if(middle>=band.low&&middle<=band.high)scale=scale?std::min(scale,band.scale):band.scale;
+        if(scale&&std::abs(scale-1)>1e-10)result.push_back({stops[i-1],stops[i],scale});
+    }
+    return result;
+}
+double displayEnergy(const std::vector<EnergyDisplayBand>& bands,double value){
+    double result=value;for(const auto& band:bands)result+=(band.scale-1)*std::clamp(value-band.low,0.,band.high-band.low);return result;
+}
+double energyFromDisplay(const std::vector<EnergyDisplayBand>& bands,double value){
+    double correction=0;
+    for(const auto& band:bands){const double start=band.low+correction,end=start+(band.high-band.low)*band.scale;
+        if(value<start)return value-correction;
+        if(value<=end)return band.low+(value-start)/band.scale;
+        correction+=(band.scale-1)*(band.high-band.low);
+    }
+    return value-correction;
+}
 void validateEnergyAnnotations(const EnergyPlot& p){
     if(!std::isfinite(p.inkScale)||p.inkScale<.25||p.inkScale>4)throw std::runtime_error("Invalid graph ink scale");
     if(!p.energySymbol.empty()&&p.energySymbol!="ΔE"&&p.energySymbol!="ΔG")throw std::runtime_error("Invalid energy symbol");
@@ -95,6 +128,7 @@ void validateEnergyAnnotations(const EnergyPlot& p){
     for(size_t i=0;i<p.states.size();++i){const auto& s=p.states[i];
         if(s.labelPlacement<0||s.labelPlacement>3||s.labelPath<0||size_t(s.labelPath)>=paths||!offset(s.labelOffset)||
            !std::isfinite(s.breakPosition)||s.breakPosition<.05||s.breakPosition>.95||
+           !std::isfinite(s.breakScale)||s.breakScale<.01||s.breakScale>4||s.breakPath<0||size_t(s.breakPath)>=paths||
            s.gapFrom< -1||(s.gapFrom>=0&&(size_t(s.gapFrom)>=p.states.size()||size_t(s.gapFrom)==i))||
            s.gapPath<0||size_t(s.gapPath)>=paths||!offset(s.gapOffset))throw std::runtime_error("Invalid energy profile annotation");
     }
@@ -142,7 +176,7 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     for(size_t i=0;i+1<n;i++)if(i<source.segmentColors.size())left.segmentColors[n-2-i]=source.segmentColors[i];
     result.series.push_back(std::move(left));
     for(size_t i=0;i<result.states.size();++i){auto& state=result.states[i];
-        if(i<n-1){state.labelPath=int(result.series.size())-1;state.gapPath=state.labelPath;if(state.gapFrom>=0)state.gapFrom=int(n)-1-state.gapFrom;state.breakAfter=original.states[n-2-i].breakAfter;state.breakPosition=1-original.states[n-2-i].breakPosition;}
+        if(i<n-1){state.labelPath=int(result.series.size())-1;state.gapPath=state.labelPath;if(state.gapFrom>=0)state.gapFrom=int(n)-1-state.gapFrom;state.breakAfter=original.states[n-2-i].breakAfter;state.breakPosition=1-original.states[n-2-i].breakPosition;state.breakScale=original.states[n-2-i].breakScale;state.breakPath=int(result.series.size())-1;}
         else if(state.gapFrom>=0)state.gapFrom+=int(n)-1;
     }
     for(auto& crossing:result.crossings)crossing.segment+=int(n)-1;
@@ -169,7 +203,14 @@ std::vector<MechanismStage> mechanismStageData(const std::vector<std::vector<std
             auto percent=[](const std::string& value){size_t pos=0;double n=std::stod(value,&pos);if(value.find_first_not_of(" \t\r\n",pos)!=std::string::npos||!std::isfinite(n)||n<0||n>100)throw std::runtime_error("범위는 0~100%의 숫자로 입력하세요.");return n;};
             double start=percent(row[1]),end=percent(row[2]);if(end-start<1)throw std::runtime_error("끝은 시작보다 최소 1% 커야 합니다.");
             double font=0;if(row.size()>3&&row[3].find_first_not_of(" \t\r\n")!=std::string::npos){size_t pos=0;font=std::stod(row[3],&pos);if(row[3].find_first_not_of(" \t\r\n",pos)!=std::string::npos||!std::isfinite(font)||(font!=0&&(font<4||font>72)))throw std::runtime_error("글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.");}
-            result.push_back({row[0],start,end,font});if(result.size()>100)throw std::runtime_error("단계는 최대 100개입니다.");
+            double width=0,head=0;
+            auto optionalSize=[&](size_t column,double maximum){
+                if(row.size()<=column||row[column].find_first_not_of(" \t\r\n")==std::string::npos)return 0.;
+                size_t end=0;const double value=std::stod(row[column],&end);
+                if(row[column].find_first_not_of(" \t\r\n",end)!=std::string::npos||!std::isfinite(value)||value<0||value>maximum||(value>0&&value<.1))throw std::runtime_error("화살표 굵기/화살촉은 0(자동) 또는 허용 범위의 숫자로 입력하세요.");return value;
+            };
+            width=optionalSize(4,8);head=optionalSize(5,40);
+            result.push_back({row[0],start,end,font,width,head});if(result.size()>100)throw std::runtime_error("단계는 최대 100개입니다.");
         }catch(const std::exception& e){throw std::runtime_error(std::to_string(i+1)+"행: "+e.what());}
     }return result;
 }

@@ -495,6 +495,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             }return width;
         };
         owner=plot.id;auto axis=energyAxis(plot);double low=axis.low,high=axis.high;
+        const auto displayBands=energyDisplayBands(plot);const double displayLow=displayEnergy(displayBands,low),displayHigh=displayEnergy(displayBands,high);
         const bool independent=plot.mode==independentEnergyLevels;
         double scale=std::clamp(std::sqrt(plot.width*plot.height/(460.*240.)),.8,2.);
         double tickFont=plot.tickFontSize>0?plot.tickFontSize:11.5*scale*std::pow(plot.axisScale,.2);
@@ -568,7 +569,8 @@ Scene makeScene(const Document& d,const Measure& measure){
         }
         double stageBand=0;for(double height:laneHeights){laneOffsets.push_back(stageBand);stageBand+=height;}
         if(!plot.stages.empty())y0-=stageBand+8;
-        double topY=plot.p.y+std::max(25.,valueFont*1.3+12),h=std::max(25.,y0-topY);topY=y0-h;s.plotDragScales.emplace(owner,PlotDragScale{(high-low)/h,low,high});
+        double topY=plot.p.y+std::max(25.,valueFont*1.3+12),h=std::max(25.,y0-topY);topY=y0-h;s.plotDragScales.emplace(owner,PlotDragScale{(displayHigh-displayLow)/h,low,high});
+        auto yAt=[&](double value){return y0-h*(displayEnergy(displayBands,value)-displayLow)/(displayHigh-displayLow);};
         energyFont=std::min(energyFont,std::max(4.,(plot.energyAtTop?w*.95:h*.95)/std::max(1.,scriptWidth(plot.energyAtTop?(plot.energySymbol.empty()?"E":plot.energySymbol)+" ("+plot.unit+")":yCaption,1))));
         auto plotText=[&](const std::string& text,Vec at,double size,const std::string& color="#000000",bool centered=false,int role=0,int index=-1){
             Primitive item;item.type=Primitive::Text;item.owner=owner;item.textRole=role;item.textIndex=index;item.text=text;item.fontSize=size;item.face=faceFor(text);item.color=color;
@@ -591,7 +593,11 @@ Scene makeScene(const Document& d,const Measure& measure){
             const auto& layout=stageLayouts[i];double font=layout.font;
             double y=y0+8+laneOffsets[layout.lane]+laneHeights[layout.lane]/2;
             double gap=widthOf(layout.text,font)/2+std::min(font*.35,(b-a)*.04),shaft=std::max(.01,(b-a)/2-gap);
-            double weight=std::max(.6,font*.085),headScale=std::min(font*.10,shaft*.65/5);
+            const auto& stage=plot.stages[i];
+            const double automaticHead=std::min(font*.5,std::max(font*.16,shaft*.14));
+            const double headLength=std::min(stage.arrowHeadSize>0?stage.arrowHeadSize:automaticHead,shaft*.65);
+            double weight=stage.arrowWidth>0?stage.arrowWidth:std::max(.6,std::min(font*.085,shaft*.08));
+            double headScale=headLength/5;
             arrow({c-gap,y},{a,y},plot.xColor,weight,1,headScale);
             arrow({c+gap,y},{b,y},plot.xColor,weight,1,headScale);
             plotText(layout.text,{c,y-layout.height/2},font,plot.xColor,true,12,int(i));
@@ -615,11 +621,15 @@ Scene makeScene(const Document& d,const Measure& measure){
         // Label regular ticks only; range boundaries never create an extra irregular tick.
         double tickHeight=tickFont*1.3,lastLabel=y0+tickHeight+10;
         for(size_t tick=0;tick<ticks.size();tick++){
-            double v=ticks[tick],y=y0-h*(v-low)/(high-low);bool endpoint=tick==0||tick+1==ticks.size();
+            double v=ticks[tick],y=yAt(v);bool endpoint=tick==0||tick+1==ticks.size();
             if(endpoint||(lastLabel-y>=tickHeight+4&&y-topY>=tickHeight+4)){
                 plotText(energyTickLabel(v,axis.step),{x0-10-widthOf(energyTickLabel(v,axis.step),tickFont),y-tickHeight/2},tickFont,plot.yColor);lastLabel=y;
             }
             Primitive mark;mark.owner=owner;mark.points={{x0-3*plot.axisScale,y},{x0,y}};mark.width=.5*plot.axisScale;s.items.push_back(mark);
+        }
+        if(plot.showYAxis)for(const auto& band:displayBands)if(band.high>=low&&band.low<=high){
+            const double y=(yAt(std::max(low,band.low))+yAt(std::min(high,band.high)))/2;
+            for(double shift:{-3.,3.}){Primitive slash;slash.owner=owner;slash.width=.9;slash.points={{x0-5,y+shift+3},{x0+5,y+shift-3}};s.items.push_back(slash);}
         }
         std::vector<EnergySeries> paths=plot.series;if(paths.empty()){EnergySeries path;for(auto& st:plot.states)path.values.push_back(st.energy);paths.push_back(path);}
         titleFont=std::min(titleFont,std::max(4.,w/std::max(1.,widthOf(plot.title,1))));
@@ -658,9 +668,9 @@ Scene makeScene(const Document& d,const Measure& measure){
                 cursor+=sampleWidth+swatchGap+widthOf(path.name,legendFont)+itemGap;
             }
         }
-        auto pointAt=[&](size_t i,double value){return Vec{stateX(i),y0-h*(value-low)/(high-low)};};
+        auto pointAt=[&](size_t i,double value){return Vec{stateX(i),yAt(value)};};
         if(independent&&low<0&&high>0){
-            const double zeroY=y0+h*low/(high-low);
+            const double zeroY=yAt(0);
             Primitive reference;
             reference.owner=owner;
             reference.color="#b6bac0";
@@ -696,7 +706,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             const auto left=a+Vec{inset,0},right=b-Vec{inset,0};
             crossings.emplace(i,std::make_pair(&crossing,left+(right-left)*crossing.position));
         }
-        auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX){
+        auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX,double breakScale){
             if(std::isfinite(breakX)&&breakX>a.x&&breakX<b.x&&b.x-a.x>20){
                 breakX=std::clamp(breakX,a.x+9.01,b.x-9.01);
                 // Split the real path instead of painting a white rectangle over other objects.
@@ -716,6 +726,10 @@ Scene makeScene(const Document& d,const Measure& measure){
                 part(0,t0);part(t1,1);
                 Vec middle=at(parameter(breakX));
                 if(middle.y>=topY&&middle.y<=y0)for(double shift:{-4.,4.}){Primitive slash;slash.owner=owner;slash.color=path.color;slash.width=path.width;slash.points={middle+Vec{shift-3,9},middle+Vec{shift+3,-9}};s.items.push_back(slash);}
+                if(std::abs(breakScale-1)>1e-9&&middle.y>=topY&&middle.y<=y0){
+                    std::ostringstream label;label.imbue(std::locale::classic());label<<"× "<<std::setprecision(4)<<breakScale*100<<"%";
+                    plotText(label.str(),middle+Vec{0,13},std::max(6.,tickFont*.7),path.color,true);
+                }
                 return;
             }
             if(plot.mode!=0){segment(a,b,path,plot.mode==2?1:path.dash);return;}
@@ -759,7 +773,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                     double start=stateX(left.index)+inset,end=stateX(left.index+1)-inset;
                     breakX=start+(end-start)*plot.states[left.index].breakPosition;
                 }
-                connect(left.right,right.left,path,breakX);
+                connect(left.right,right.left,path,breakX,left.index<plot.states.size()?plot.states[left.index].breakScale:1.);
                 if(plot.mode==0||(plot.mode!=2&&!path.dash))continue;
                 auto solidEnd=[&](Vec point,Vec other){
                     const auto toward=other-point;

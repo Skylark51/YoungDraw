@@ -2,6 +2,10 @@
 #include "model.h"
 namespace yd {
 struct EnergyRow { std::string label; double energy=0; int marker=-1; };
+struct EnergyDisplayBand {double low,high,scale;};
+std::vector<EnergyDisplayBand> energyDisplayBands(const EnergyPlot& plot);
+double displayEnergy(const std::vector<EnergyDisplayBand>& bands,double value);
+double energyFromDisplay(const std::vector<EnergyDisplayBand>& bands,double value);
 struct EnergyAxis { double low=0,high=1,step=1; int intervals=1; double firstTick=0; };
 inline constexpr int independentEnergyLevels = 4;
 EnergyPlot spinMultiplicityPlot();
