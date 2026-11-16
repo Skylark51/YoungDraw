@@ -31,7 +31,7 @@ ChemDraw/Origin 전체 기능과 동등한 상용 품질을 입증한 결과로 
 
 - Windows / MSVC 19.44 / Release / `build.ps1` 사용.
 - 전체 CTest 21/21 통과. 기본 백그라운드 빌드에는 새 검사 2개를 추가해 12/12 통과.
-- `quality_regression`: 부분 결합 이동, 화살표 고정점, 80회 Undo/Redo,
+- `quality_regression`: 총 233개 검사. 부분 결합 이동, 화살표 고정점, 80회 Undo/Redo,
   곡선·채움 선택, 일반 CDXML 속성, 잘못된 문서 형상, SVG 서식,
   3,000원자 연결 탐색과 대형 문서의 24회 Undo/Redo,
   Unicode 경로·여러 탭·잠금·손상 복구를 검사한다.
@@ -119,3 +119,27 @@ Undo 이력은 복원하지 않는다. 읽을 수 없는 복구 파일은 수동
 - 회귀/빌드: `tests/quality_tests.cpp`, `tests/pointer_quality_tests.cpp`,
   `CMakeLists.txt`, `build.ps1`.
 - 검증 도구: `tools/test-powerpoint-background.ps1`, `tools/verify-powerpoint-package.py`.
+
+## GitHub 반영
+
+[PR #14](https://github.com/Skylark51/YoungDraw/pull/14)로 소스를 main에 병합했다.
+[PR Windows CI](https://github.com/Skylark51/YoungDraw/actions/runs/43784591992)에서도
+전체 CTest 21/21이 통과했다. 로컬 보고서와 별도로 GitHub Windows 환경에서 검증한 결과다.
+
+
+[main Windows CI](https://github.com/Skylark51/YoungDraw/actions/runs/43785119346)도
+전체 CTest 21/21을 통과했다. GitHub가 테스트한 실행 파일을 `6ce7bc8`에 자동 반영한 뒤
+동일 실행 파일을 `C:/YoungDraw/YoungDraw.exe`에 배치했다.
+바탕화면 `YoungDraw - 바로 가기.lnk`의 대상과 작업 폴더도 확인했다.
+
+저장소 루트 / `build/quality-main-ci/YoungDraw.exe` / C드라이브 포터블의 SHA-256은 모두 같다.
+
+```text
+E5410959DA6A271719CF955EAADFD120868D6F8D71C74DEA70ADD308D0933A2A
+```
+
+최종 CI 실행 파일 자체의 그래프 변환 smoke 검사도 통과했고 기준 SVG와 동일했다.
+로컬에서 별도로 컴파일한 `build/comprehensive-quality`는 컴파일 환경/경로가 달라
+실행 파일 해시가 다르며, 배포 해시 비교의 기준은 GitHub의 검증된 CI 산출물이다.
+상세 배포 기록은 `build/quality-deployment.json`, main CI 로그는
+`build/quality-main-ci.log`에 보관한다.
