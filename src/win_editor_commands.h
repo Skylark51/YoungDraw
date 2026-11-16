@@ -18,6 +18,7 @@ inline constexpr int reactionProfilePlotCommand = 235;
 inline constexpr int plotAnnotationsCommand = 236;
 inline constexpr int addEnergyGapCommand = 237;
 inline constexpr int changePlotStyleCommand = 238;
+inline constexpr int plotAxisLengthsCommand = 239;
 
 void command(int id);
 

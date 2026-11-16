@@ -583,6 +583,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(item.type==Primitive::Text){r=l+textWidth(measure,item.text,item.fontSize,item.font,item.face);b=t+item.fontSize*1.3;}
             external.push_back({l,t,std::max(1.,r-l),std::max(1.,b-t)});
         }
+        s.plotAxes[owner]={{x0,axisY},{x0+w+12*plot.axisScale,axisY},{x0,topY-14*plot.axisScale},axisFont,tickFont,valueFont,energyFont,h};
         if(plot.showXAxis)arrow({x0,axisY},{x0+w+12*plot.axisScale,axisY},"#000000",std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,plot.axisScale*(3.5/3.0));
         if(plot.showYAxis)arrow({x0,axisY},{x0,topY-14*plot.axisScale},"#000000",std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,plot.axisScale*(3.5/3.0));
         for(size_t i=0;i<plot.stages.size();i++){
@@ -1037,14 +1038,31 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(caption.backing){Primitive backing;backing.type=Primitive::Box;backing.owner=owner;backing.color="#ffffff";backing.filled=true;backing.width=0;backing.points={{caption.box.x-1,caption.box.y-1},{caption.box.x+caption.box.w+1,caption.box.y+caption.box.h+1}};s.items.push_back(backing);}
             plotText(caption.text,{caption.box.x,caption.box.y},valueFont,caption.color,false,caption.path==0?8:0,int(caption.index));
         }
+        s.plotAxes[owner].valueFont=valueFont;
         if(plot.thinLines)for(size_t i=firstPlotItem;i<s.items.size();i++)if(s.items[i].type!=Primitive::Text)s.items[i].width*=.5;
     }
     for(auto& reaction:d.reactions)for(auto& item:s.items)if(item.owner==reaction.id&&item.type==Primitive::Text){
         if(!reaction.textColor.empty())item.color=reaction.textColor;
         for(auto& caption:reaction.captionColors)if(caption.role==item.textRole&&caption.index==item.textIndex)item.color=caption.color;
     }
+    std::map<int,double> graphWeights;
+    for(const auto& graph:d.plots)if(std::abs(graph.inkScale-1)>1e-9){
+        graphWeights[graph.id]=graph.inkScale;
+        for(const auto& state:graph.states)for(const auto* ids:{&state.above,&state.below})for(int id:*ids)graphWeights.emplace(id,graph.inkScale);
+    }
+    for(auto& item:s.items)if(const auto found=graphWeights.find(item.owner);found!=graphWeights.end()){
+        if(item.type==Primitive::Text)item.textStrokeWidth=item.fontSize*.05*(found->second-1);
+        else if(item.type!=Primitive::Image){
+            item.width*=found->second;
+            if(item.type==Primitive::Polygon)if(const auto* bond=d.bond(item.owner)){
+                const auto v=d.atom(bond->b)->p-d.atom(bond->a)->p;const double length=v.length();
+                if(length>1e-9){Vec center{};for(auto q:item.points)center=center+q;center=center*(1./item.points.size());const Vec normal{-v.y/length,v.x/length};
+                    for(auto& q:item.points){const auto offset=q-center;q=q+normal*((offset.x*normal.x+offset.y*normal.y)*(found->second-1));}}
+            }
+        }
+    }
     double l=1e20,t=1e20,r=-1e20,b=-1e20;
-    for(auto& p:s.items){double pl=1e20,pt=1e20,pr=-1e20,pb=-1e20;for(auto q:p.points){double pad=p.type==Primitive::Text?0:p.width/2;pl=std::min(pl,q.x-pad);pt=std::min(pt,q.y-pad);pr=std::max(pr,q.x+pad);pb=std::max(pb,q.y+pad);if(p.type==Primitive::Text){pr=std::max(pr,q.x+textWidth(measure,p.text,p.fontSize,p.font,p.face));pb=std::max(pb,q.y+p.fontSize*1.3*(1+std::count(p.text.begin(),p.text.end(),'\n')));if(p.rotation==-90){pr=q.x+p.fontSize*1.3;pt=q.y-textWidth(measure,p.text,p.fontSize,p.font,p.face);pb=q.y;}}}
+    for(auto& p:s.items){double pl=1e20,pt=1e20,pr=-1e20,pb=-1e20;for(auto q:p.points){double pad=p.type==Primitive::Text?std::max(0.,p.textStrokeWidth/2):p.width/2;pl=std::min(pl,q.x-pad);pt=std::min(pt,q.y-pad);pr=std::max(pr,q.x+pad);pb=std::max(pb,q.y+pad);if(p.type==Primitive::Text){pr=std::max(pr,q.x+textWidth(measure,p.text,p.fontSize,p.font,p.face));pb=std::max(pb,q.y+p.fontSize*1.3*(1+std::count(p.text.begin(),p.text.end(),'\n')));if(p.rotation==-90){pr=q.x+p.fontSize*1.3;pt=q.y-textWidth(measure,p.text,p.fontSize,p.font,p.face);pb=q.y;}}}
         if(p.points.empty())continue;l=std::min(l,pl);t=std::min(t,pt);r=std::max(r,pr);b=std::max(b,pb);auto it=s.objectBounds.find(p.owner);if(it==s.objectBounds.end())s.objectBounds[p.owner]={pl,pt,pr-pl,pb-pt};else{auto& v=it->second;double x=std::min(v.x,pl),y=std::min(v.y,pt);v={x,y,std::max(v.x+v.w,pr)-x,std::max(v.y+v.h,pb)-y};}}
     s.bounds=s.items.empty()?Rect{0,0,100,100}:Rect{l-6,t-6,r-l+12,b-t+12};return s;
 }
@@ -1079,12 +1097,17 @@ std::string toSvg(const Scene& s,double widthPt){std::ostringstream o;o.imbue(st
     const double printedWidth=widthPt>0?publicationCheck(s,widthPt).widthPt:r.w;
     const double printedHeight=widthPt>0?r.h*printedWidth/r.w:r.h;
     o<<"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\""<<printedWidth<<"pt\" height=\""<<printedHeight<<"pt\" viewBox=\""<<r.x<<' '<<r.y<<' '<<r.w<<' '<<r.h<<"\">\n<g stroke-linecap=\"round\" stroke-linejoin=\"round\">\n";
+    int inkFilter=0;
     for(auto& p:s.items){if(p.points.empty())continue;auto a=p.points[0];if(p.opacity!=255)o<<"<g opacity=\""<<double(p.opacity)/255<<"\">";std::string dash=p.dash==1?" stroke-dasharray=\"4 3\"":p.dash==2?" stroke-dasharray=\"1 2\"":"";
         if(p.type==Primitive::Line||p.type==Primitive::Bezier){o<<"<path fill=\""<<(p.filled?p.color:"none")<<"\" stroke=\""<<p.color<<"\" stroke-width=\""<<p.width<<"\""<<((p.flatEnd||p.flatStart)?" stroke-linecap=\"butt\"":"")<<dash<<" d=\"M "<<a.x<<' '<<a.y;
             if(p.type==Primitive::Bezier){for(size_t i=1;i+2<p.points.size();i+=3)o<<" C "<<p.points[i].x<<' '<<p.points[i].y<<' '<<p.points[i+1].x<<' '<<p.points[i+1].y<<' '<<p.points[i+2].x<<' '<<p.points[i+2].y;}
             else for(size_t i=1;i<p.points.size();i++)o<<" L "<<p.points[i].x<<' '<<p.points[i].y;if(p.closed)o<<" Z";o<<"\"/>\n";}
         else if(p.type==Primitive::Polygon){o<<"<polygon fill=\""<<p.color<<"\" points=\"";for(auto v:p.points)o<<v.x<<','<<v.y<<' ';o<<"\"/>\n";}
-        else if(p.type==Primitive::Text){o<<"<text transform=\"rotate("<<p.rotation<<" "<<a.x<<" "<<a.y<<")\" fill=\""<<p.color<<"\" x=\""<<a.x<<"\" y=\""<<a.y+p.fontSize*.91<<"\" font-family=\""<<escape(p.font)<<"\" font-size=\""<<p.fontSize<<"\""<<(p.face&1?" font-weight=\"bold\"":"")<<(p.face&2?" font-style=\"italic\"":"")<<(p.face&4?" text-decoration=\"underline\"":"")<<">";std::istringstream lines(p.text);std::string line;int row=0;while(std::getline(lines,line)){o<<"<tspan x=\""<<a.x<<"\" dy=\""<<(row++?p.fontSize*1.3:0)<<"\">"<<escape(line)<<"</tspan>";}o<<"</text>\n";}
+        else if(p.type==Primitive::Text){
+            std::string ink;
+            if(p.textStrokeWidth>0){std::ostringstream attr;attr.imbue(std::locale::classic());attr<<" stroke=\""<<p.color<<"\" stroke-width=\""<<p.textStrokeWidth<<"\" paint-order=\"stroke fill\"";ink=attr.str();}
+            else if(p.textStrokeWidth<0){const auto name="ink"+std::to_string(++inkFilter);o<<"<defs><filter id=\""<<name<<"\" x=\"-20%\" y=\"-20%\" width=\"140%\" height=\"140%\"><feMorphology operator=\"erode\" radius=\""<<-p.textStrokeWidth/2<<"\"/></filter></defs>";ink=" filter=\"url(#"+name+")\"";}
+            o<<"<text"<<ink<<" transform=\"rotate("<<p.rotation<<" "<<a.x<<" "<<a.y<<")\" fill=\""<<p.color<<"\" x=\""<<a.x<<"\" y=\""<<a.y+p.fontSize*.91<<"\" font-family=\""<<escape(p.font)<<"\" font-size=\""<<p.fontSize<<"\""<<(p.face&1?" font-weight=\"bold\"":"")<<(p.face&2?" font-style=\"italic\"":"")<<(p.face&4?" text-decoration=\"underline\"":"")<<">";std::istringstream lines(p.text);std::string line;int row=0;while(std::getline(lines,line)){o<<"<tspan x=\""<<a.x<<"\" dy=\""<<(row++?p.fontSize*1.3:0)<<"\">"<<escape(line)<<"</tspan>";}o<<"</text>\n";}
         else if(p.points.size()>=2){Vec z=p.points[1];double x=std::min(a.x,z.x),y=std::min(a.y,z.y),w=std::abs(z.x-a.x),h=std::abs(z.y-a.y);
             if(p.type==Primitive::Image)o<<"<image x=\""<<x<<"\" y=\""<<y<<"\" width=\""<<w<<"\" height=\""<<h<<"\" href=\"data:"<<p.mime<<";base64,"<<hexToBase64(p.imageHex)<<"\"/>\n";
             else if(p.type==Primitive::Ellipse)o<<"<ellipse fill=\""<<(p.filled?p.color:"none")<<"\" stroke=\""<<p.color<<"\" stroke-width=\""<<p.width<<"\""<<dash<<" cx=\""<<x+w/2<<"\" cy=\""<<y+h/2<<"\" rx=\""<<w/2<<"\" ry=\""<<h/2<<"\"/>\n";

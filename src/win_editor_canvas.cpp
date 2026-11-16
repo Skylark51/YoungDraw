@@ -226,6 +226,11 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
  if(mechanismConnectionDrag){Vec start=world(down);if(auto* r=reaction(connectionOwner);r&&connectionFrom>=0)start=reactionSlot(*r,size_t(connectionFrom));Object preview;preview.head=1;preview.color="#008778";preview.width=2;preview.points={start,world(mouse)};auto saved=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));Scene outline;outline.items=arrowPrimitives(preview);render(g,outline);g.Restore(saved);}
  if(selectedCycleArrow>=0&&selection==std::vector<int>{selectedCycleOwner}){auto path=mechanismConnectionPath(selectedCycleOwner,selectedCycleArrow);if(!path.empty()){Pen outline(accent,2);SolidBrush body(white);for(auto at:{path.front(),path.back()}){auto p=screen(at);g.FillEllipse(&body,float(p.x-6),float(p.y-6),12.f,12.f);g.DrawEllipse(&outline,float(p.x-6),float(p.y-6),12.f,12.f);}}}
  if(tool==Select&&selection.size()==1&&!snapPlot&&!inlineEdit){
+    const auto axes=sc.plotAxes.find(selection.front());
+    if(axes!=sc.plotAxes.end()&&!doc.isLocked(axes->first)){
+        Pen border(accent,1.5f);SolidBrush body(white);
+        for(auto point:{axes->second.xEnd,axes->second.yEnd}){auto at=screen(point);g.FillRectangle(&body,float(at.x-5),float(at.y-5),10.f,10.f);g.DrawRectangle(&border,float(at.x-5),float(at.y-5),10.f,10.f);}
+    }
     auto levels=sc.plotSnapPoints.find(selection.front());
     if(levels!=sc.plotSnapPoints.end()&&!doc.isLocked(levels->first)){
         Pen outline(accent,1.4f);
@@ -299,8 +304,8 @@ void paint(HDC dc,bool reuseScene){const auto& palette=appearance::palette();ink
         row(429,{{142,L"구간 색"},{139,L"이름·범위"},{136,L"화살표 배치",snapPlot!=0}});
         row(482,{{137,L"제목·축"},{151,L"스핀 교차점"},{plotAnnotationsCommand,L"TS·위치"}});
     }
-    if(sidebarPage==1)row(535,{{addEnergyGapCommand,L"갭 추가"}});
-    text(g,sidebarPage==0?L"Alt+드래그: 단계 자유 배치":L"준위 드래그: 에너지 · Alt: 가로",rx+16,584,11,muted);
+    if(sidebarPage==1)row(535,{{addEnergyGapCommand,L"갭 추가"},{plotAxisLengthsCommand,L"축 길이·굵기"}});
+    text(g,sidebarPage==0?L"Alt+드래그: 단계 자유 배치":L"+/−: 굵기 · 축 끝 □ 드래그: 길이",rx+16,584,11,muted);
     heading(L"구조 넣기 · 선택한 그림 영역",603);
     row(620,{{134,L"그림 영역",guides},{123,L"붙여넣기"},{124,L"파일로 채움"}});
     if(sidebarPage==0)row(673,{{186,L"구조 편집"},{113,L"파일 삽입"}});

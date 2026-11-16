@@ -8,7 +8,7 @@ inline constexpr int mullikenSpinTextRole=14;
 struct Primitive {
     enum Type { Line, Polygon, Text, Bezier, Ellipse, Box, Image } type=Line;
     std::vector<Vec> points;
-    double width=.6, fontSize=10,rotation=0;
+    double width=.6, fontSize=10,rotation=0,textStrokeWidth=0;
     std::string text;
     std::string color="#000000",font="Arial",imageHex,mime="image/png";
     int dash=0,face=0,owner=0;
@@ -25,11 +25,13 @@ std::vector<ScriptRun> scriptRuns(const std::string& input);
 struct PlotSnapPoint { Vec p; double percent=0; int state=0,path=0,edge=0; }; // edge: -1 left, 0 center, 1 right
 struct PlotDragScale { double unitsPerPoint, low, high; };
 struct CrossingCaption { int owner; size_t index; Rect bounds; Vec offset; };
-struct Scene { std::vector<CrossingCaption> crossingCaptions,gapCaptions; std::map<int,double> plotBaselines; std::map<int,PlotDragScale> plotDragScales; std::map<int,std::vector<PlotSnapPoint>> plotSnapPoints; std::vector<Primitive> items; Rect bounds; std::map<int,Rect> objectBounds; std::map<int,std::vector<Vec>> arrowPaths; };
+struct PlotAxes {Vec origin,xEnd,yEnd;double axisFont,tickFont,valueFont,energyFont,plotHeight;};
+struct Scene { std::map<int,PlotAxes> plotAxes; std::vector<CrossingCaption> crossingCaptions,gapCaptions; std::map<int,double> plotBaselines; std::map<int,PlotDragScale> plotDragScales; std::map<int,std::vector<PlotSnapPoint>> plotSnapPoints; std::vector<Primitive> items; Rect bounds; std::map<int,Rect> objectBounds; std::map<int,std::vector<Vec>> arrowPaths; };
 std::vector<Vec> routeArrow(const Document& d,const Object& arrow,const std::map<int,Rect>& atomBoxes={});
 std::vector<Primitive> arrowPrimitives(const Object& arrow);
 void appendArrowCross(std::vector<Primitive>& items,const std::vector<Primitive>& shaft,const ArrowCross& mark,int owner);
 Scene makeScene(const Document& d, const Measure& measure={});
+Document resizedPlotAxes(const Document& original,int id,double xLength,double yLength,const Measure& measure={});
 // Tests visible strokes and filled areas instead of a curve's bounding rectangle.
 bool hitObject(const Scene& scene,int owner,Vec point,double tolerance);
 struct PublicationReport {

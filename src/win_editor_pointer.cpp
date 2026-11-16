@@ -20,6 +20,14 @@ static std::optional<InlineTarget> energyDrag;
 static std::optional<CrossingCaption> crossingDrag,gapDrag;
 struct PlotLevelDrag { int owner,state,path; PlotDragScale scale; bool horizontal; };
 static std::optional<PlotLevelDrag> plotLevelDrag;
+struct PlotAxisDrag {int owner;bool horizontal;double xLength,yLength,width,height;};
+static std::optional<PlotAxisDrag> plotAxisDrag;
+static bool beginPlotAxisDrag(const Scene& sc,Vec at){
+    if(selection.size()!=1||doc.isLocked(selection[0]))return false;
+    const auto found=sc.plotAxes.find(selection[0]);if(found==sc.plotAxes.end())return false;const auto& a=found->second;
+    const double x=(screen(a.xEnd)-at).length(),y=(screen(a.yEnd)-at).length();if(std::min(x,y)>10)return false;
+    const auto* p=plot(selection[0]);plotAxisDrag=PlotAxisDrag{p->id,x<=y,(a.xEnd-a.origin).length(),(a.yEnd-a.origin).length(),p->width,p->height};return true;
+}
 struct StagePositionDrag { int owner; size_t slot; };
 static std::optional<StagePositionDrag> stagePositionDrag;
 
@@ -187,6 +195,13 @@ bool beginCurveHandle(Vec p){
 void updateDrag(){
     if(!dragging)return;Vec delta=(mouse-down)*(1/zoom);if(GetKeyState(VK_SHIFT)&0x8000)delta=std::abs(delta.x)>std::abs(delta.y)?Vec{delta.x,0}:Vec{0,delta.y};
     if((mouse-down).length()<=2&&!moved)return;moved=true;if(energyDrag)return;doc=dragBase;
+    if(plotAxisDrag){
+        const auto& a=*plotAxisDrag;
+        const double x=a.horizontal?std::clamp(a.xLength+delta.x,std::max(100.,a.xLength+180-a.width),std::min(4000.,a.xLength+4000-a.width)):a.xLength;
+        const double y=a.horizontal?a.yLength:std::clamp(a.yLength-delta.y,std::max(70.,a.yLength+140-a.height),std::min(4000.,a.yLength+4000-a.height));
+        try{doc=resizedPlotAxes(dragBase,a.owner,x,y,measure);}catch(const std::exception&){doc=dragBase;}
+        return;
+    }
     if(plotLevelDrag){updatePlotLevel((mouse-down)*(1/zoom));return;}
     if(stagePositionDrag){updateStagePosition(delta);return;}
     if(gapDrag){
@@ -204,8 +219,8 @@ void updateDrag(){
     if(curveHandle>=0){for(auto& o:doc.objects)if(o.id==curveOwner){o.points[size_t(curveHandle)]=o.points[size_t(curveHandle)]+delta;}return;}
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
-void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(!dragSelection.empty())selection=dragSelection;}dragSelection.clear();energyDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
-void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contains(float(p.x),float(p.y))){command(156);return;}if(!finishInline(true))return;SetFocus(win);for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();stagePositionDrag.reset();
+void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(!dragSelection.empty())selection=dragSelection;}dragSelection.clear();energyDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
+void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contains(float(p.x),float(p.y))){command(156);return;}if(!finishInline(true))return;SetFocus(win);for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();
  if(placeEnergyGap(p))return;
  if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000)&&!mechanismConnecting&&!mechanismConnectionDrag&&!isolatedStructureEditing){
     int owner=0;size_t edge=0;double nearest=10;
@@ -231,6 +246,9 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
     auto sc=scene();
     const auto w=world(p);
     const bool alt=(GetKeyState(VK_MENU)&0x8000)!=0;
+    if(beginPlotAxisDrag(sc,p)){
+        dragBefore=dragBase=doc;curveHandle=-1;dragging=true;moved=copyDrag=false;SetCapture(win);redraw();return;
+    }
     for(auto i=sc.gapCaptions.rbegin();i!=sc.gapCaptions.rend();++i){
         if(doc.isLocked(i->owner))continue;const auto& b=i->bounds;double pad=4/zoom;
         if(w.x<b.x-pad||w.x>b.x+b.w+pad||w.y<b.y-pad||w.y>b.y+b.h+pad)continue;
@@ -281,8 +299,9 @@ void mouseUp(Vec p){if(mechanismConnectionDrag){finishMechanismConnection(p);ret
     status=L"에너지 값을 변경했습니다. Ctrl+Z: 되돌리기";
  }
  if(plotLevelDrag&&plotLevelDrag->horizontal&&moved)status=L"준위의 가로 위치를 변경했습니다. Ctrl+Z: 되돌리기";
+ if(plotAxisDrag&&moved)status=L"축 길이와 연결된 위치를 변경했습니다. Ctrl+Z: 되돌리기";
  if(stagePositionDrag&&moved)status=L"메커니즘 단계의 위치를 변경했습니다. Ctrl+Z: 되돌리기";
- plotLevelDrag.reset();stagePositionDrag.reset();dragging=false;if(moved){history.checkpoint(dragBefore);changed();}else doc=dragBefore;curveHandle=-1;annotationDrag=0;ReleaseCapture();}if(boxing){boxing=false;ReleaseCapture();Vec a=world(down),b=world(p);double l=std::min(a.x,b.x),t=std::min(a.y,b.y),r=std::max(a.x,b.x),z=std::max(a.y,b.y);for(auto& atom:doc.atoms)if(atom.p.x>=l&&atom.p.x<=r&&atom.p.y>=t&&atom.p.y<=z&&!contains(selection,atom.id))selection.push_back(atom.id);auto sc=scene();for(auto& box:sc.objectBounds)if(!doc.atom(box.first)&&!doc.bond(box.first)&&!doc.isLocked(box.first)){auto q=box.second;if(q.x>=l&&q.y>=t&&q.x+q.w<=r&&q.y+q.h<=z&&!contains(selection,box.first))selection.push_back(box.first);}selection=groupedSelection(selection);redraw();}
+ plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();dragging=false;if(moved){history.checkpoint(dragBefore);changed();}else doc=dragBefore;curveHandle=-1;annotationDrag=0;ReleaseCapture();}if(boxing){boxing=false;ReleaseCapture();Vec a=world(down),b=world(p);double l=std::min(a.x,b.x),t=std::min(a.y,b.y),r=std::max(a.x,b.x),z=std::max(a.y,b.y);for(auto& atom:doc.atoms)if(atom.p.x>=l&&atom.p.x<=r&&atom.p.y>=t&&atom.p.y<=z&&!contains(selection,atom.id))selection.push_back(atom.id);auto sc=scene();for(auto& box:sc.objectBounds)if(!doc.atom(box.first)&&!doc.bond(box.first)&&!doc.isLocked(box.first)){auto q=box.second;if(q.x>=l&&q.y>=t&&q.x+q.w<=r&&q.y+q.h<=z&&!contains(selection,box.first))selection.push_back(box.first);}selection=groupedSelection(selection);redraw();}
  if(drawing){if(tool==Orbital){auto fragment=draftOrbital(p);drawing=false;ReleaseCapture();history.checkpoint(doc);int first=doc.nextId;doc.append(fragment);selection.clear();for(auto& o:doc.objects)if(o.id>=first)selection.push_back(o.id);changed();return;}if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance||tool==Interaction){drawing=false;ReleaseCapture();if((p-down).length()<5)return;Object o=draftArrow(p);history.checkpoint(doc);o.id=doc.nextId++;doc.objects.push_back(o);selection={o.id};changed();return;}
  Vec end=endpoint(p),begin=startAtom?doc.atom(startAtom)->p:world(down);int target=doc.atomAt(end,8/zoom);drawing=false;ReleaseCapture();if(target==startAtom&&startAtom)return;if((end-begin).length()<1)return;history.checkpoint(doc);int a=startAtom?startAtom:doc.addAtom(begin),b=target?target:doc.addAtom(end,element);if(!target)doc.atom(b)->drawingScale=doc.atom(a)->drawingScale;doc.addBond(a,b,kind());selection={b};changed();}redraw();}
 

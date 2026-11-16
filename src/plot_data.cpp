@@ -1,4 +1,5 @@
 #include "plot_data.h"
+#include "scene.h"
 #include <sstream>
 #include <iomanip>
 #include <stdexcept>
@@ -54,7 +55,40 @@ EnergyPlot newEnergyPlot(int mode,bool freeEnergy){
     }
     return p;
 }
+Document resizedPlotAxes(const Document& original,int id,double xLength,double yLength,const Measure& measure){
+    if(!std::isfinite(xLength)||!std::isfinite(yLength)||xLength<100||yLength<70||xLength>4000||yLength>4000)throw std::runtime_error("축 길이는 가로 100~4000 pt, 세로 70~4000 pt로 입력하세요.");
+    if(original.isLocked(id))throw std::runtime_error("잠긴 그래프는 크기를 바꿀 수 없습니다.");
+    auto source=std::find_if(original.plots.begin(),original.plots.end(),[&](const auto& p){return p.id==id;});if(source==original.plots.end())throw std::runtime_error("그래프를 선택하세요.");
+    const auto oldAxes=makeScene(original,measure).plotAxes.at(id);
+    const double oldX=(oldAxes.xEnd-oldAxes.origin).length(),oldY=(oldAxes.yEnd-oldAxes.origin).length();
+    if(std::abs(xLength-oldX)<1e-7&&std::abs(yLength-oldY)<1e-7)return original;
+    Document result=original;auto& p=result.plots[size_t(source-original.plots.begin())];
+    if(!p.axisFontSize)p.axisFontSize=oldAxes.axisFont;if(!p.tickFontSize)p.tickFontSize=oldAxes.tickFont;
+    if(!p.valueFontSize)p.valueFontSize=oldAxes.valueFont;if(!p.energyLabelFontSize)p.energyLabelFontSize=oldAxes.energyFont;
+    for(int pass=0;pass<6;++pass){
+        const auto geometry=makeScene(result,measure).plotAxes.at(id);
+        p.p=p.p+oldAxes.origin-geometry.origin;
+        const double dx=xLength-(geometry.xEnd-geometry.origin).length(),dy=yLength-(geometry.yEnd-geometry.origin).length();
+        if(std::abs(dx)+std::abs(dy)<1e-6)break;
+        p.width+=dx;p.height+=dy;
+        if(p.width<180||p.width>4000||p.height<140||p.height>4000)throw std::runtime_error("지정한 축 길이가 현재 글자·여백에 맞지 않습니다. 축 길이를 조정하세요.");
+    }
+    auto geometry=makeScene(result,measure).plotAxes.at(id);p.p=p.p+oldAxes.origin-geometry.origin;
+    geometry=makeScene(result,measure).plotAxes.at(id);
+    const double sx=(p.width-154)/std::max(1.,source->width-154),sy=geometry.plotHeight/std::max(1.,oldAxes.plotHeight);
+    for(auto& state:p.states){state.labelOffset.x*=sx;state.labelOffset.y*=sy;state.gapOffset.x*=sx;state.gapOffset.y*=sy;}
+    p.legendOffset.x*=sx;p.legendOffset.y*=sy;
+    for(auto& c:p.crossings)if(c.labelOffset){c.labelOffset->x*=sx;c.labelOffset->y*=sy;}
+    std::set<int> moved;
+    for(size_t i=0;i<p.states.size();++i)for(bool above:{false,true}){
+        const auto delta=plotAnchor(p,i,above)-plotAnchor(*source,i,above);std::vector<int> ids;
+        for(int member:above?p.states[i].above:p.states[i].below)if(moved.insert(member).second)ids.push_back(member);
+        result.translate(ids,delta);
+    }
+    return result;
+}
 void validateEnergyAnnotations(const EnergyPlot& p){
+    if(!std::isfinite(p.inkScale)||p.inkScale<.25||p.inkScale>4)throw std::runtime_error("Invalid graph ink scale");
     if(!p.energySymbol.empty()&&p.energySymbol!="ΔE"&&p.energySymbol!="ΔG")throw std::runtime_error("Invalid energy symbol");
     const size_t paths=std::max(size_t(1),p.series.size());
     auto offset=[](Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::abs(v.x)<=10000&&std::abs(v.y)<=10000;};

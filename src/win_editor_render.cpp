@@ -12,10 +12,20 @@ namespace yd::editor {
 void render(Graphics& g,const Scene& s,bool animate,bool screenTheme){StringFormat fmt(StringFormat::GenericTypographic());for(auto& p:s.items){if(p.points.empty())continue;if(animate&&screenTheme&&inlineEdit&&p.type==Primitive::Text&&p.owner==inlineTarget.owner&&p.textRole==inlineTarget.role&&p.textIndex==inlineTarget.index)continue;Color color=rgb(p.color);if(screenTheme)color=appearance::documentColor(color,p.type==Primitive::Box&&p.filled&&p.width==0);if(p.opacity!=255)color=Color(p.opacity,color.GetR(),color.GetG(),color.GetB());Pen pen(color,float(p.width));pen.SetStartCap(p.flatStart?LineCapFlat:LineCapRound);pen.SetEndCap(p.flatEnd?LineCapFlat:LineCapRound);if(p.dash){REAL w=std::max(.1f,float(p.width));REAL pattern[]={p.dash==1?4.f/w:1.f/w,p.dash==1?3.f/w:2.f/w};pen.SetDashPattern(pattern,2);}SolidBrush brush(color);std::vector<PointF> ps;for(auto v:p.points)ps.push_back({float(v.x),float(v.y)});
  if(p.type==Primitive::Line&&ps.size()>=2)g.DrawLines(&pen,ps.data(),INT(ps.size()));else if(p.type==Primitive::Bezier&&ps.size()>=4){GraphicsPath path;path.AddBeziers(ps.data(),INT(ps.size()));if(p.closed)path.CloseFigure();if(p.filled)g.FillPath(&brush,&path);if(p.width>0)g.DrawPath(&pen,&path);}else if(p.type==Primitive::Polygon&&ps.size()>=3)g.FillPolygon(&brush,ps.data(),INT(ps.size()));else if(p.type==Primitive::Text){FontFamily ff(ui::wide(p.font).c_str());Font f(&ff,float(p.fontSize),(p.face&1?FontStyleBold:0)|(p.face&2?FontStyleItalic:0)|(p.face&4?FontStyleUnderline:0),UnitPixel);auto w=ui::wide(p.text);auto saved=g.Save();g.TranslateTransform(ps[0].X,ps[0].Y);g.RotateTransform(float(p.rotation));// Regular graph type must scale from outlines rather than hinted glyph bitmaps.
  // This also keeps rotated energy-axis captions smooth and EMF output vector-based.
- if(!(p.face&1)){
+ if(!(p.face&1)||p.textStrokeWidth!=0){
      GraphicsPath glyphs;
      if(glyphs.AddString(w.c_str(),-1,&ff,f.GetStyle(),float(p.fontSize),PointF(0,0),&fmt)==Ok){
-         g.SetSmoothingMode(SmoothingModeHighQuality);g.SetPixelOffsetMode(PixelOffsetModeHighQuality);g.FillPath(&brush,&glyphs);
+         g.SetSmoothingMode(SmoothingModeHighQuality);g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
+         if(p.textStrokeWidth<0){
+             GraphicsPath* rim=glyphs.Clone();Pen erosion(color,float(-p.textStrokeWidth));erosion.SetLineJoin(LineJoinRound);
+             if(rim&&rim->Widen(&erosion)==Ok){
+                 // XOR the outline band inside the original glyph. FillPath keeps
+                 // antialiased vector edges; Region filling would quantize thin type.
+                 GraphicsPath interior(FillModeAlternate);interior.AddPath(&glyphs,FALSE);interior.AddPath(rim,FALSE);
+                 g.SetClip(&glyphs,CombineModeIntersect);g.FillPath(&brush,&interior);
+             }else g.FillPath(&brush,&glyphs);
+             delete rim;
+         }else{g.FillPath(&brush,&glyphs);if(p.textStrokeWidth>0){Pen ink(color,float(p.textStrokeWidth));ink.SetLineJoin(LineJoinRound);g.DrawPath(&ink,&glyphs);}}
      }else g.DrawString(w.c_str(),-1,&f,PointF(0,0),&fmt,&brush);
  }else g.DrawString(w.c_str(),-1,&f,PointF(0,0),&fmt,&brush);
  g.Restore(saved);}else if(ps.size()>=2){RectF box(std::min(ps[0].X,ps[1].X),std::min(ps[0].Y,ps[1].Y),std::abs(ps[1].X-ps[0].X),std::abs(ps[1].Y-ps[0].Y));if(p.type==Primitive::Ellipse){if(p.filled)g.FillEllipse(&brush,box);else g.DrawEllipse(&pen,box);}else if(p.type==Primitive::Box){if(p.filled)g.FillRectangle(&brush,box);else g.DrawRectangle(&pen,box);}else if(p.type==Primitive::Image){if(auto img=decode(p.imageHex,animate))g.DrawImage(img,box);}}}}

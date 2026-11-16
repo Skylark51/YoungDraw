@@ -23,6 +23,33 @@ int main(){try{
         for(const auto& copy:{fromNative(toNative(fresh)),fromCdxml(toCdxml(fresh))})check(toNative(copy)==toNative(fresh),"shape and quantity selections survive native and CDXML saving");
 #endif
     }
+    {
+        Document original;auto graph=reactionProfilePlot();graph.id=original.nextId++;graph.p={10,60};graph.states[1].labelOffset={12,-9};original.plots={graph};
+        int a=original.addAtom({150,-40},8),b=original.addAtom({180,-40},7),bond=original.addBond(a,b);original.plots[0].states[1].above={a,b,bond};
+        int below=original.addAtom({200,730},8);original.plots[0].states[0].below={below};int outside=original.addAtom({1600,80},8);
+        const auto axes=makeScene(original).plotAxes.at(graph.id);const auto old=toSvg(makeScene(original));
+        const double x=(axes.xEnd-axes.origin).length(),y=(axes.yEnd-axes.origin).length();
+        auto resized=resizedPlotAxes(original,graph.id,x*1.35,y*1.2);auto geometry=makeScene(resized).plotAxes.at(graph.id);
+        check(std::abs((geometry.xEnd-geometry.origin).length()-x*1.35)<1e-4&&std::abs((geometry.yEnd-geometry.origin).length()-y*1.2)<1e-4,"numeric axis lengths match physical axis arrow lengths");
+        check((geometry.origin-axes.origin).length()<1e-5,"axis intersection remains fixed while resizing");
+        const auto delta=plotAnchor(resized.plots[0],1,true)-plotAnchor(original.plots[0],1,true);
+        check((resized.atom(a)->p-original.atom(a)->p-delta).length()<1e-5,"above structures follow resized state anchors");
+        const auto belowDelta=plotAnchor(resized.plots[0],0,false)-plotAnchor(original.plots[0],0,false);
+        check((resized.atom(below)->p-original.atom(below)->p-belowDelta).length()<1e-5,"below structures follow resized state anchors");
+        check(std::abs((resized.atom(a)->p-resized.atom(b)->p).length()-30)<1e-6&&resized.atom(outside)->p.x==1600,"resizing preserves structure dimensions and unrelated objects");
+        check(resized.plots[0].series[0].values==graph.series[0].values&&old==toSvg(makeScene(original)),"resizing preserves energy data and the input document");
+        auto base=makeScene(resized);resized.plots[0].inkScale=2;auto heavy=makeScene(resized);bool structureInk=false,graphInk=false;
+        for(size_t i=0;i<base.items.size();++i){const auto& item=heavy.items[i];const auto& previous=base.items[i];
+            if(item.type==Primitive::Text&&(item.owner==a||item.owner==graph.id)){check(item.fontSize==previous.fontSize&&item.textStrokeWidth>0,"weight changes text strokes without changing text size");if(item.owner==a)structureInk=true;else graphInk=true;}
+            if(item.owner==bond)check(std::abs(item.width-previous.width*2)<1e-6,"inserted structure bonds thicken with the graph");
+            if(item.owner==outside)check(item.textStrokeWidth==0,"unrelated structure text weight stays unchanged");
+        }
+        check(structureInk&&graphInk&&toSvg(heavy).find("paint-order")!=std::string::npos,"graph and inserted structure text both gain stroke weight");
+        resized.plots[0].inkScale=.5;check(toSvg(makeScene(resized)).find("feMorphology")!=std::string::npos,"SVG preserves thinning of text strokes");
+#ifdef TEST_CDXML
+        for(const auto& copy:{fromNative(toNative(resized)),fromCdxml(toCdxml(resized))})check(toNative(copy)==toNative(resized),"axis sizes, relocated structures and ink weight survive saving");
+#endif
+    }
     for(const std::string label:{"TS"," TS1 ","ts2","TS_{3}","TS-alde","Transition State","전이상태"})check(isTransitionStateLabel(label),"TS state names are recognized");
     for(const std::string label:{"R","Int1","TStart","TST","Products",""})check(!isTransitionStateLabel(label),"ordinary state names are not classified as TS");
     {EnergyState state{"Int1",0};setEnergyStateLabel(state,"TS1");check(state.transitionState,"renaming to TS enables notation");

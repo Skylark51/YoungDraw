@@ -55,6 +55,7 @@ bool adjustSelectedStrokeWidths(bool increase){
 void hotkey(char c){
     if(stageCopyOwner)return;
  if(snapPlot)return;
+ if(!mechanismConnectionDrag&&(c=='+'||c=='='||c=='-'||c=='_')&&adjustSelectedPlotWeight(c=='+'||c=='='))return;
  // The main minus key produces '_' with Shift, while the keypad produces '-'.
  if((c=='+'||c=='-'||c=='_')&&(GetKeyState(VK_SHIFT)&0x8000)&&
     !mechanismConnectionDrag&&adjustSelectedStrokeWidths(c=='+'))return;

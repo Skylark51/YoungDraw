@@ -10,6 +10,8 @@
 #include "win_editor_plot.h"
 #include "win_editor_text.h"
 #include "win_dialogs.h"
+#include "win_editor_shortcuts.h"
+#include "win_editor_render.h"
 #include <iostream>
 #include <stdexcept>
 using namespace yd;
@@ -95,6 +97,34 @@ int main(){
             if(mode!=0){check(history.undo(doc)&&toNative(doc)==originalStyle&&!history.undo(doc),"style change is exactly one undoable edit");}
             else check(!history.undo(doc),"applying the original style adds no undo entry");
             dirty=false;
+        }
+        {
+            doc={};auto graph=newEnergyPlot(0,false);graph.id=doc.nextId++;graph.p={100,100};doc.plots={graph};
+            int atom=doc.addAtom({180,0},8);doc.plots[0].states[1].above={atom};int unrelated=doc.addAtom({1000,20},7);
+            selection={graph.id};tool=Select;zoom=1;origin={200,150};history.clear();dirty=false;hoverAtom=unrelated;
+            hotkey('+');check(std::abs(doc.plots[0].inkScale-1.15)<1e-9&&doc.atom(unrelated)->charge==0,"plus adjusts a selected graph before atom charge shortcuts");
+            hotkey('-');check(std::abs(doc.plots[0].inkScale-1)<1e-9,"minus reverses graph weight without requiring Shift");
+            check(history.undo(doc)&&std::abs(doc.plots[0].inkScale-1.15)<1e-9&&history.undo(doc)&&doc.plots[0].inkScale==1,"each graph weight step is independently undoable");
+            hoverAtom=0;history.clear();const auto beforeResize=toNative(doc);auto axes=scene().plotAxes.at(graph.id);
+            Vec handle=screen(axes.xEnd);mouseDown(handle);mouseUp(handle+Vec{80,0});auto grown=scene().plotAxes.at(graph.id);
+            check(std::abs((grown.xEnd-grown.origin).length()-(axes.xEnd-axes.origin).length()-80)<1e-5,"horizontal axis handle resizes only the horizontal axis");
+            check((grown.origin-axes.origin).length()<1e-5&&std::abs((grown.yEnd-grown.origin).length()-(axes.yEnd-axes.origin).length())<1e-5,"axis drag preserves origin and the other axis");
+            check(history.undo(doc)&&toNative(doc)==beforeResize,"axis drag including structure movement undoes as one edit");
+            axes=scene().plotAxes.at(graph.id);handle=screen(axes.yEnd);mouseDown(handle);mouse=handle+Vec{0,-65};updateDrag();cancel();
+            check(toNative(doc)==beforeResize&&!history.undo(doc),"canceling an axis drag restores the graph and inserted structures");
+            mouseDown(handle);mouseUp(handle+Vec{0,-65});grown=scene().plotAxes.at(graph.id);
+            check(std::abs((grown.yEnd-grown.origin).length()-(axes.yEnd-axes.origin).length()-65)<1e-5,"vertical axis handle independently changes vertical axis length");
+        }
+        {
+            auto darkness=[&](double scale){
+                doc.plots[0].inkScale=scale;const auto s=scene();auto text=std::find_if(s.items.begin(),s.items.end(),[](const auto& item){return item.type==Primitive::Text&&item.textRole==6;});check(text!=s.items.end(),"graph has a text primitive for weight rendering");
+                auto glyph=*text;glyph.fontSize=32;glyph.textStrokeWidth=32*.05*(scale-1);glyph.text="Axis";glyph.points={{10,10}};glyph.color="#000000";Scene isolated;isolated.items={glyph};
+                Bitmap bitmap(140,70,PixelFormat32bppARGB);{Graphics graphics(&bitmap);graphics.Clear(Color::White);render(graphics,isolated);}
+                long ink=0;for(int y=0;y<70;++y)for(int x=0;x<140;++x){Color pixel;bitmap.GetPixel(x,y,&pixel);ink+=255-pixel.GetR();}return ink;
+            };
+            const auto thin=darkness(.5),normal=darkness(1),thick=darkness(2);
+            check(thin>0&&thin<normal&&normal<thick,"actual glyph ink decreases and increases independently of font size");
+            doc.plots[0].inkScale=.5;writePreview(L"graph-weight-thin.png",doc);doc.plots[0].inkScale=1;writePreview(L"graph-weight-normal.png",doc);doc.plots[0].inkScale=2;writePreview(L"graph-weight-thick.png",doc);
         }
         DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();
         std::cout<<"PASS: hidden editor pointer, tab, save and zoom checks\n";return 0;

@@ -59,6 +59,29 @@ void editPlot(int id){auto* ptr=plot(id);if(!ptr)return;Document before=doc;Ener
     }else{doc=before;redraw();}
 
 }
+bool adjustSelectedPlotWeight(bool increase){
+    std::vector<int> ids;for(int id:selection)if(plot(id)&&!doc.isLocked(id))ids.push_back(id);
+    if(ids.empty())return false;Document before=doc;
+    for(int id:ids){auto* p=plot(id);p->inkScale=std::clamp(p->inkScale*(increase?1.15:1/1.15),.25,4.);}
+    if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();status=L"그래프 획 굵기를 조정했습니다. + / -: 축·글씨·삽입 구조 함께 조정 · Ctrl+Z: 되돌리기";}
+    return true;
+}
+void editPlotAxisLengths(int id){
+    if(!plot(id)||doc.isLocked(id))throw std::runtime_error("축 길이를 바꿀 그래프를 선택하세요.");
+    const Document before=doc;const auto axes=scene().plotAxes.at(id);
+    auto preview=[&](const std::vector<std::string>& values)->std::wstring{try{
+        auto candidate=resizedPlotAxes(before,id,numeric(values[0],100,4000),numeric(values[1],70,4000),measure);
+        auto& p=*std::find_if(candidate.plots.begin(),candidate.plots.end(),[&](const auto& p){return p.id==id;});p.inkScale=numeric(values[2],25,400)/100;
+        doc=std::move(candidate);redraw();UpdateWindow(win);return {};
+    }catch(const std::exception& e){return ui::wide(e.what());}};
+    const auto result=ui::form(win,L"그래프 축 길이·굵기",{
+        {L"가로축 길이 (pt)",number((axes.xEnd-axes.origin).length())},
+        {L"세로축 길이 (pt)",number((axes.yEnd-axes.origin).length())},
+        {L"전체 획 굵기 (%, 100: 기본)",number(plot(id)->inkScale*100)},
+        {L"배치","축 교차점은 고정하고 이름·주석·삽입 구조가 따라갑니다."}},preview);
+    if(result){if(preview(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+    else{doc=before;redraw();}
+}
 void changePlotStyle(int id){
     const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("스타일을 바꿀 에너지 그래프를 선택하세요.");
     const Document before=doc;const int originalMode=p->mode;
