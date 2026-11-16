@@ -30,6 +30,8 @@ std::vector<Vec> routeArrow(const Document& d,const Object& arrow,const std::map
 std::vector<Primitive> arrowPrimitives(const Object& arrow);
 void appendArrowCross(std::vector<Primitive>& items,const std::vector<Primitive>& shaft,const ArrowCross& mark,int owner);
 Scene makeScene(const Document& d, const Measure& measure={});
+// Tests visible strokes and filled areas instead of a curve's bounding rectangle.
+bool hitObject(const Scene& scene,int owner,Vec point,double tolerance);
 struct PublicationReport {
     double widthPt=0,heightPt=0,scale=1;
     std::vector<std::string> warnings;

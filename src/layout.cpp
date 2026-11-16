@@ -15,7 +15,13 @@ static void readableRings(Document& d,const std::vector<int>& comp,const std::ve
 static bool planarLayout(Document& d,const std::vector<int>& comp,const std::vector<std::vector<int>>& rings);
 static bool has(const std::vector<int>& ids,int id){return std::find(ids.begin(),ids.end(),id)!=ids.end();}
 std::vector<int> Document::component(int id) const {
-    if(!atom(id))return {};std::vector<int> result{id};for(size_t i=0;i<result.size();++i)for(const auto& b:bonds){int n=b.a==result[i]?b.b:b.b==result[i]?b.a:0;if(n&&!has(result,n))result.push_back(n);}return result;
+    if(!atom(id))return {};
+    std::map<int,std::vector<int>> adjacent;
+    for(const auto& b:bonds){adjacent[b.a].push_back(b.b);adjacent[b.b].push_back(b.a);}
+    std::vector<int> result{id};std::set<int> visited{id};
+    for(size_t i=0;i<result.size();++i)for(int next:adjacent[result[i]])
+        if(visited.insert(next).second)result.push_back(next);
+    return result;
 }
 std::vector<int> Document::allIds() const {std::vector<int> ids;for(auto& a:atoms)ids.push_back(a.id);for(auto& b:bonds)ids.push_back(b.id);for(auto& o:objects)ids.push_back(o.id);for(auto& r:reactions)ids.push_back(r.id);for(auto& p:plots)ids.push_back(p.id);return ids;}
 static void expand(const Document& d,std::set<int>& ids){bool more=true;while(more){size_t n=ids.size();for(auto& g:d.groups)if(ids.count(g.id)||std::any_of(g.members.begin(),g.members.end(),[&](int id){return ids.count(id)>0;})){ids.insert(g.id);ids.insert(g.members.begin(),g.members.end());}
@@ -30,7 +36,7 @@ static bool missingAnchor(const Document& d,const Object& o,const std::set<int>&
     auto missingBond=[&](int id){auto* b=d.bond(id);return id&&(!b||!ids.count(b->a)||!ids.count(b->b));};
     return (o.sourceAtom&&!ids.count(o.sourceAtom))||(o.targetAtom&&!ids.count(o.targetAtom))||missingBond(o.sourceBond)||missingBond(o.targetBond);
 }
-void Document::translate(const std::vector<int>& selection,Vec v,bool includeGroups){std::set<int> ids;if(includeGroups)ids=editableExpansion(*this,selection);else for(int id:selection)if(!isLocked(id))ids.insert(id);for(auto& o:objects)if(ids.count(o.id)&&o.autoRoute&&o.kind!=ObjectKind::Line&&missingAnchor(*this,o,ids)){o.points=routeArrow(*this,o);o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;o.autoRoute=false;}for(auto& a:atoms)if(ids.count(a.id))a.p=a.p+v;for(auto& o:objects)if(ids.count(o.id))for(auto& p:o.points)p=p+v;for(auto& r:reactions)if(ids.count(r.id))r.p=r.p+v;for(auto& p:plots)if(ids.count(p.id))p.p=p.p+v;}
+void Document::translate(const std::vector<int>& selection,Vec v,bool includeGroups){std::set<int> ids;if(includeGroups)ids=editableExpansion(*this,selection);else for(int id:selection)if(!isLocked(id))ids.insert(id);for(const auto& b:bonds)if(ids.count(b.id)){ids.insert(b.a);ids.insert(b.b);}for(auto& o:objects)if(ids.count(o.id)&&o.autoRoute&&(o.kind!=ObjectKind::Line||o.head)&&missingAnchor(*this,o,ids)){o.points=routeArrow(*this,o);o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;o.autoRoute=false;}for(auto& a:atoms)if(ids.count(a.id))a.p=a.p+v;for(auto& o:objects)if(ids.count(o.id))for(auto& p:o.points)p=p+v;for(auto& r:reactions)if(ids.count(r.id))r.p=r.p+v;for(auto& p:plots)if(ids.count(p.id))p.p=p.p+v;}
 std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,double factor,std::optional<Vec> center){
     if(selection.empty())throw std::runtime_error("크기를 조정할 구조·이미지를 먼저 선택하세요.");
     if(!std::isfinite(factor)||factor<.01||factor>10)throw std::runtime_error("배율은 1~1000%로 입력하세요.");

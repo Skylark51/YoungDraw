@@ -3,6 +3,7 @@
 #include "win_editor_files.h"
 #include "win_editor_images.h"
 #include "win_editor_plot.h"
+#include "win_editor_pointer.h"
 #include "win_editor_reaction.h"
 #include "win_editor_render.h"
 #include "win_editor_state.h"
@@ -12,6 +13,8 @@
 #include "office.h"
 #include "win_projects.h"
 #include "win_storage.h"
+#include "win_recovery.h"
+#include <memory>
 #include "win_theme.h"
 #include "win_ui.h"
 #include <commctrl.h>
@@ -46,6 +49,46 @@ void rememberDocument(const std::wstring& path){
         RegSetKeyValueW(HKEY_CURRENT_USER,recentKey,name.c_str(),REG_SZ,files[i].c_str(),DWORD((files[i].size()+1)*sizeof(wchar_t)));
     }
 }
+}
+namespace {
+std::unique_ptr<recovery::Session> recoverySession;
+}
+void snapshotRecovery(){
+    if(!recoverySession||drawing||dragging||boxing||panning||inlineEdit||mechanismConnectionDrag)return;
+    try{
+        std::vector<recovery::Snapshot> snapshots;
+        for(size_t i=0;i<documents.size();++i){
+            if(i==activeDocument){if(dirty)snapshots.push_back({filePath,doc});}
+            else if(documents[i].dirty)snapshots.push_back({documents[i].path,documents[i].document});
+        }
+        recoverySession->save(snapshots);
+    }catch(const std::exception&){status=L"자동 복구 저장 실패 · Ctrl+S로 문서를 저장하세요.";repaintOnly();}
+}
+void startRecovery(){
+    if(isolatedStructureEditing)return;
+    try{
+        const auto root=projects::root().parent_path()/L"Recovery";
+        recoverySession=std::make_unique<recovery::Session>(root);
+        for(const auto& entry:recovery::abandoned(root)){
+            if(MessageBoxW(win,L"이전 실행에서 저장하지 못한 문서가 있습니다. 원본을 유지하고 새 탭으로 복구하시겠습니까?",L"문서 복구",MB_YESNO|MB_ICONQUESTION)!=IDYES)continue;
+            for(const auto& snapshot:entry.documents){
+                newDocumentTab(snapshot.document);doc=snapshot.document;history.clear();dirty=true;
+                status=L"복구한 문서 · "+(snapshot.path.empty()?L"제목 없음":fs::path(snapshot.path).filename().wstring())+L" · 다른 이름으로 저장하세요.";
+                storeDocumentTab();title();
+            }
+            // Publish the recovered copies before retiring the previous snapshot.
+            std::vector<recovery::Snapshot> snapshots;
+            for(size_t i=0;i<documents.size();++i)if(i==activeDocument?dirty:documents[i].dirty)
+                snapshots.push_back({i==activeDocument?filePath:documents[i].path,i==activeDocument?doc:documents[i].document});
+            recoverySession->save(snapshots);
+            fs::remove(entry.file);
+        }
+        SetTimer(win,914,60000,nullptr);
+    }catch(const std::exception&){status=L"자동 복구를 시작하지 못했습니다. Ctrl+S로 문서를 저장하세요.";repaintOnly();}
+}
+void finishRecovery(){
+    KillTimer(win,914);
+    if(recoverySession){recoverySession->clear();recoverySession.reset();}
 }
 void showRecent(){
     struct Entry {fs::path path;bool project;fs::file_time_type time;std::wstring title;};
@@ -89,12 +132,12 @@ void showRecent(){
     }
 }
 bool save(bool as){if(officeDocument&&office::editing()&&!as){if(FAILED(office::update()))throw std::runtime_error("Office 문서에 변경 내용을 반영하지 못했습니다.");dirty=false;title();status=L"Office 문서에 변경 내용을 반영했습니다.";redraw();return true;}auto path=filePath;
-    if(path.empty()||as||_wcsicmp(fs::path(path).extension().c_str(),L".cdxml")!=0){
+    if(path.empty()||as||(_wcsicmp(fs::path(path).extension().c_str(),L".cdxml")!=0&&_wcsicmp(fs::path(path).extension().c_str(),L".ydraw")!=0)){
         auto p=fileDialog(true);if(!p)return false;path=*p;
         if(_wcsicmp(fs::path(path).extension().c_str(),L".cdxml")!=0)
             throw std::runtime_error("CDXML 확장자로 저장하세요.");
     }
-    writeFile(path,toCdxml(doc));filePath=path;rememberDocument(filePath);dirty=false;title();status=L"CDXML을 저장했습니다. ChemDraw와 YoungDraw에서 열 수 있습니다.";redraw();return true;}
+    writeFile(path,_wcsicmp(fs::path(path).extension().c_str(),L".ydraw")==0?toNative(doc):toCdxml(doc));filePath=path;rememberDocument(filePath);dirty=false;snapshotRecovery();title();status=_wcsicmp(fs::path(path).extension().c_str(),L".ydraw")==0?L"YoungDraw 문서를 저장했습니다.":L"CDXML을 저장했습니다. ChemDraw와 YoungDraw에서 열 수 있습니다.";redraw();return true;}
 bool discard(){if(!dirty)return true;int answer=MessageBoxW(win,L"변경 내용을 저장하시겠습니까?",L"YoungDraw",MB_YESNOCANCEL|MB_ICONQUESTION);return answer==IDNO||(answer==IDYES&&save());}
 void storeDocumentTab(){
     if(documents.empty())documents.emplace_back();
@@ -118,6 +161,7 @@ bool switchDocumentTab(size_t index){
     if(index>=documents.size())return false;
     if(!finishInline(true)){TabCtrl_SetCurSel(documentTabs,int(activeDocument));return false;}
     if(index==activeDocument)return true;
+    cancel();
     selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();storeDocumentTab();activeDocument=index;const auto& next=documents[index];
     doc=next.document;history=next.history;filePath=next.path;status=next.status;selection=next.selection;
     targetContainer=next.target;targetSlot=next.slot;targetAbove=next.above;dirty=next.dirty;officeDocument=next.office;
@@ -129,6 +173,7 @@ void newDocumentTab(Document document,std::wstring path,bool fromOffice){
     selectedCycleOwner=0;selectedCycleArrow=-1;
     snapPlot=0;snapStart.reset();
     if(!finishInline(true))return;
+    cancel();
     storeDocumentTab();activeDocument=documents.size();documents.emplace_back();
     doc=std::move(document);history.clear();filePath=std::move(path);rememberDocument(filePath);selection.clear();targetContainer=0;targetSlot=0;targetAbove=false;
     Document beforeUpgrade=doc;normalizeChemicalLabels(doc);bool upgraded=upgradeBondGeometry(doc);upgraded=upgraded||toNative(doc)!=toNative(beforeUpgrade);if(upgraded)history.checkpoint(beforeUpgrade);dirty=upgraded;officeDocument=fromOffice;tool=Select;hoverAtom=hoverBond=0;status=upgraded?L"벤젠 75%·벤질 연결 길이 기준을 적용했습니다. 저장하면 새 기준이 유지됩니다.":L"새 문서 탭 · Ctrl+Tab: 다음 탭 · Ctrl+W: 현재 탭 닫기";
@@ -143,6 +188,7 @@ bool closeDocumentTab(size_t index){
     else {activeDocument=std::min(index,documents.size()-1);auto next=documents[activeDocument];
         // The active globals still describe the removed tab; restore without saving them.
         doc=next.document;history=next.history;filePath=next.path;status=next.status;selection=next.selection;targetContainer=next.target;targetSlot=next.slot;targetAbove=next.above;dirty=next.dirty;officeDocument=next.office;zoom=next.zoom;origin=next.origin;tool=next.tool;hoverAtom=hoverBond=0;title();redraw();}
+    snapshotRecovery();
     if(closingOffice)ShowWindow(win,SW_SHOW);
     return true;
 }
