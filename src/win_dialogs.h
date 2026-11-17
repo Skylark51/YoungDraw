@@ -18,6 +18,8 @@ using TablePreview = std::function<std::wstring(const Table&)>;
 using TableCellError = std::function<std::wstring(size_t column,const std::string& value)>;
 using TableColumnEdit = std::function<std::optional<std::wstring>(HWND,size_t column)>;
 std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview={},bool scripts=false,const std::wstring& hint=L"",bool stages=false,int scriptColumn=-1,const TableCellError& cellError={},const TableColumnEdit& columnEdit={});
+HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,const TableCellError& cellError={},const TableColumnEdit& columnEdit={});
+bool commitEmbeddedTable(HWND grid);
 using Preview = std::function<std::wstring(const std::vector<std::string>&)>;
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& preview={},
     const std::vector<std::pair<std::wstring,std::vector<size_t>>>& tabs={},

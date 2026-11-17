@@ -10,6 +10,7 @@ extern std::optional<PlotSnapPoint> snapStart;
 std::optional<PlotSnapPoint> nearestPlotSnap(const Scene& sc,Vec cursor);
 
 void editPlot(int id);
+void relocatePlot(const EnergyPlot& before,const EnergyPlot& after);
 void addBilateralBranch(int id);
 void publicationLayout(int id);
 void plotSettings(int id);

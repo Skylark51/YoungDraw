@@ -22,6 +22,7 @@ struct Grid {
     HWND win=nullptr,list=nullptr,edit=nullptr,error=nullptr,apply=nullptr; HFONT font=nullptr;
     int row=0,col=0,anchorRow=0,anchorCol=0,scriptColumn=-1;
     HIMAGELIST rowHeight=nullptr;
+    bool embedded=false;
     bool done=false,ok=false,loading=false,composing=false,scripts=false,stages=false;
 };
 void finish(Grid& g,bool accepted){
@@ -334,6 +335,17 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         refresh(*g);validate(*g);return 0;
     }
     if(!g)return DefWindowProcW(hwnd,msg,wp,lp);
+    if(msg==WM_SIZE&&g->embedded){
+        RECT r{};GetClientRect(hwnd,&r);int w=r.right,h=r.bottom;
+        MoveWindow(g->list,0,0,w,std::max(60,h-100),TRUE);
+        MoveWindow(g->error,0,std::max(60,h-96),w,44,TRUE);
+        const int ids[]={20,24,21,27,28};int bw=std::max(70,(w-24)/5);
+        for(int i=0;i<5;i++)MoveWindow(GetDlgItem(hwnd,ids[i]),i*(bw+6),h-38,bw,30,TRUE);
+        ShowWindow(GetDlgItem(hwnd,22),SW_HIDE);ShowWindow(GetDlgItem(hwnd,23),SW_HIDE);
+        for(int i=25;i<=26;i++)ShowWindow(GetDlgItem(hwnd,i),SW_HIDE);
+        sizeEditor(*g);return 0;
+    }
+    if(msg==WM_NCDESTROY&&g->embedded){SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);DeleteObject(g->font);delete g;return DefWindowProcW(hwnd,msg,wp,lp);}
     if(msg==WM_ERASEBKGND){RECT r;GetClientRect(hwnd,&r);FillRect((HDC)wp,&r,g->colors.panel);return 1;}
     if(msg==WM_CTLCOLORSTATIC)return g->colors.control(msg,(HDC)wp);
     if(msg==WM_DRAWITEM){const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);g->colors.draw(item,item.CtlID==22);return TRUE;}
@@ -382,6 +394,16 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_CLOSE){requestClose(*g);return 0;}return DefWindowProcW(hwnd,msg,wp,lp);
 }
 }
+HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,const TableCellError& cellError,const TableColumnEdit& columnEdit){
+    INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&controls);
+    WNDCLASSW wc{};wc.lpfnWndProc=gridProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawEmbeddedGrid";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
+    auto* g=new Grid;g->embedded=true;g->columns=columns;g->rows=g->original=rows;g->preview=preview;g->cellError=cellError;g->columnEdit=columnEdit;g->originalColumns=columns;
+    g->hint=L"셀 더블클릭 / F2: 입력 · Ctrl+V: 여러 셀 붙여넣기 · 입력 즉시 반영";
+    if(g->rows.empty())g->rows.push_back(std::vector<std::string>(columns.size()));
+    auto h=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"데이터 표",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,0,0,700,250,parent,nullptr,wc.hInstance,g);
+    if(!h){delete g;return nullptr;}selectCell(*g,0,0);return h;
+}
+bool commitEmbeddedTable(HWND grid){auto* g=reinterpret_cast<Grid*>(GetWindowLongPtrW(grid,GWLP_USERDATA));if(!g)return true;commit(*g);return validate(*g);}
 std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,bool scripts,const std::wstring& hint,bool stages,int scriptColumn,const TableCellError& cellError,const TableColumnEdit& columnEdit){
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&controls);static bool registered=false;
     if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=gridProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawGrid";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);registered=true;}

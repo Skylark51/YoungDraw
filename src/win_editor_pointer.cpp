@@ -44,7 +44,8 @@ static bool beginPlotLevelDrag(const Scene& sc,Vec cursor,bool horizontal){
     }
     if(!plotLevelDrag)return false;
     selection={plotLevelDrag->owner};
-    targetContainer=0;
+    targetContainer=plotLevelDrag->owner;targetSlot=size_t(plotLevelDrag->state);
+    const auto& state=plot(targetContainer)->states[targetSlot];targetAbove=!state.above.empty()||state.below.empty();
     sidebarPage=1;
     status=horizontal?L"준위 가로 간격 조정 · Esc: 취소":
         L"에너지 높이 조정 · Shift: 축 눈금에 맞춤 · Alt+드래그: 가로 이동";

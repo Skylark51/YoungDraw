@@ -280,6 +280,7 @@ void editTargetStructure(){
     if(!finishInline(true))return;
     const int container=targetContainer;const size_t slot=targetSlot;const bool above=targetAbove;
     const Document before=doc;const auto fragment=structureInSlot(before,container,slot,above);
+    if(plot(container)&&fragment.allIds().empty())throw std::runtime_error("선택한 단계의 이 영역에는 구조가 없습니다. 위·아래 영역을 확인하거나 구조를 먼저 삽입하세요.");
     auto result=structureEditor(fragment);if(!result||toNative(*result)==toNative(fragment))return;
     Document candidate=before;replaceSlotStructure(candidate,*result,container,slot,above);
     history.checkpoint(before);doc=std::move(candidate);selection={container};targetContainer=container;targetSlot=slot;targetAbove=above;

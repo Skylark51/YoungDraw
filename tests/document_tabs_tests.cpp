@@ -63,8 +63,8 @@ static bool paletteDriven=false;
 static int pathNameStep=0,pathNameTicks=0;
 static bool pathNameHeaderUpdated=false;
 static void CALLBACK drivePathName(HWND parent,UINT,UINT_PTR timer,DWORD){
-    const auto grid=FindWindowW(L"YoungDrawGrid",L"에너지 그래프 — 데이터 표");
-    if(!grid||GetWindow(grid,GW_OWNER)!=parent)return;
+    const auto grid=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
+    if(!grid)return;
     const auto header=ListView_GetHeader(GetDlgItem(grid,10));
     if(pathNameStep==0){
         RECT rect{};Header_GetItemRect(header,2,&rect);
@@ -78,7 +78,7 @@ static void CALLBACK drivePathName(HWND parent,UINT,UINT_PTR timer,DWORD){
     }
     if(pathNameStep==1){
         const auto dialog=FindWindowW(L"YoungDrawForm",L"경로 이름 변경");
-        if(dialog&&GetWindow(dialog,GW_OWNER)==grid){
+        if(dialog&&GetWindow(dialog,GW_OWNER)==plotManagerWindow){
             SetDlgItemTextW(dialog,100,L"S = 1");
             PostMessageW(dialog,WM_COMMAND,IDOK,0);
             pathNameStep=2;
@@ -91,7 +91,7 @@ static void CALLBACK drivePathName(HWND parent,UINT,UINT_PTR timer,DWORD){
     Header_GetItem(header,2,&item);
     pathNameHeaderUpdated=pathNameStep==2&&std::wstring(title)==L"S = 1";
     KillTimer(parent,timer);
-    PostMessageW(grid,WM_COMMAND,22,0);
+    PostMessageW(plotManagerWindow,WM_CLOSE,0,0);
 }
 static bool chemistryMenuOpened=false;
 enum class CrossingAction { AddLeft,AddRight,CancelEdit,DeleteLeft };
@@ -258,6 +258,8 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==35||formAction==36){
         SetDlgItemTextW(dialog,100,formAction==35?L"Times New Roman":L"Arial");SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(100,CBN_EDITCHANGE),(LPARAM)GetDlgItem(dialog,100));SendDlgItemMessageW(dialog,101,CB_SETCURSEL,formAction==35?3:2,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,101));previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction>=37&&formAction<=39){
+        SetDlgItemTextW(dialog,100,formAction==37?L"0":formAction==38?L"-1":L"2.5");
     }else if(formAction>=31&&formAction<=34){
         SetDlgItemTextW(dialog,100,formAction==31?L"3.2":formAction==32?L"4":formAction==33?L"5":L"12");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==29||formAction==30){
@@ -366,7 +368,18 @@ static void pngExportChecks(HWND hwnd){
 static void graphManagerChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
     const auto before=toNative(doc);managePlot(owner,false);auto manager=plotManagerWindow;check(manager&&IsWindow(manager)&&toNative(doc)==before,"graph manager opens without modifying the selected graph");
+    auto originalButton=GetDlgItem(manager,131);
+    SendMessageW(manager,WM_COMMAND,131,0);auto inlineGrid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
+    check(inlineGrid&&GetParent(inlineGrid)==manager&&toNative(doc)==before,"data opens as a nonmutating child panel");
+    auto list=GetDlgItem(inlineGrid,10);RECT cell{};ListView_GetSubItemRect(list,0,2,LVIR_BOUNDS,&cell);
+    SendMessageW(list,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(cell.left+6,cell.top+6));auto input=FindWindowExW(list,nullptr,L"EDIT",nullptr);check(input!=nullptr,"inline cells use the shared keyboard editor");
+    SetWindowTextW(input,L"invalid");SendMessageW(manager,WM_COMMAND,4001,0);
+    check(toNative(doc)==before&&(GetWindowLongPtrW(inlineGrid,GWL_STYLE)&WS_VISIBLE),"invalid data cannot modify the document or disappear on tab switch");
+    SendMessageW(list,WM_KEYDOWN,VK_F2,0);input=FindWindowExW(list,nullptr,L"EDIT",nullptr);SetWindowTextW(input,L"-12.5");SendMessageW(list,WM_KEYDOWN,VK_RETURN,0);
+    check(doc.plots[0].series[0].values[0]==-12.5,"inline energy edits update the graph without a separate window");
+    SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"inline data change undoes in one action");
     for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
+    check(GetDlgItem(manager,131)==originalButton,"tab changes reuse controls instead of recreating them");
     SendMessageW(manager,WM_COMMAND,4001,0);formBefore=before;formAction=36;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotFontCommand,0);
     check(formDriven&&previewObserved&&toNative(doc)==before,"manager font cancellation restores the previewed graph");
     formAction=35;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotFontCommand,0);
@@ -380,13 +393,22 @@ static void graphManagerChecks(HWND hwnd){
     check(structureInSlot(doc,owner,0,true).atoms[0].element==8&&toNative(structureInSlot(doc,owner,1,true))==otherSlot&&doc.plots[0].series[0].values==energies,"manager edits a chosen structure independently of other states and graph data");
     SendMessageW(manager,WM_COMMAND,104,0);check(toNative(structureInSlot(doc,owner,0,true))==originalSlot,"independent structure edit undoes through the manager");
     SendMessageW(manager,WM_COMMAND,4004,0);formBefore=toNative(doc);formAction=31;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotWaveWidthCommand,0);check(formDriven&&doc.plots[0].waveWidth==3.2,"manager retains custom wave controls");
+    auto weightBefore=doc.plots[0].structureInkScale;SendMessageW(manager,WM_KEYDOWN,VK_ADD,0);
+    check(std::abs(doc.plots[0].waveWidth-3.3)<1e-8&&doc.plots[0].structureInkScale==weightBefore,"plus adjusts only the selected wave thickness");
+    SendMessageW(manager,WM_KEYDOWN,VK_SUBTRACT,0);check(std::abs(doc.plots[0].waveWidth-3.2)<1e-8,"minus reverses a wave thickness step");
+    for(int action:{37,38,39}){formAction=action;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,242,0);check(formDriven,"unified axis editor opens");if(action==37)check(!doc.plots[0].showXAxis,"zero hides the axis");else check(doc.plots[0].showXAxis&&doc.plots[0].xAxisWidth==(action==38?0:2.5),"automatic and explicit thickness restore the axis");}
+    // A graph point keeps the exact stage as the independent editor target.
+    SendMessageW(manager,WM_COMMAND,4003,0);tool=Select;fit();auto point=scene().plotSnapPoints.at(owner).front();mouseDown(screen(point.p));mouseUp(screen(point.p));
+    check(targetContainer==owner&&targetSlot==size_t(point.state),"clicking a graph point retains its structure stage");
+    SendMessageW(manager,WM_COMMAND,4004,0);
     RECT bounds{};GetClientRect(manager,&bounds);Bitmap snapshot(bounds.right,bounds.bottom,PixelFormat32bppARGB);
     auto capture=[&](){Graphics graphics(&snapshot);auto dc=graphics.GetHDC();SendMessageW(manager,WM_PRINTCLIENT,(WPARAM)dc,PRF_CLIENT);struct Context{HWND manager;HDC dc;};Context context{manager,dc};
-        EnumChildWindows(manager,[](HWND child,LPARAM data)->BOOL{auto& context=*reinterpret_cast<Context*>(data);if(GetParent(child)!=context.manager||!(GetWindowLongPtrW(child,GWL_STYLE)&WS_VISIBLE))return TRUE;RECT rect{};GetWindowRect(child,&rect);MapWindowPoints(HWND_DESKTOP,context.manager,reinterpret_cast<POINT*>(&rect),2);int saved=SaveDC(context.dc);SetViewportOrgEx(context.dc,rect.left,rect.top,nullptr);wchar_t type[32]{};GetClassNameW(child,type,32);
-            if(std::wstring(type)==L"Button"){DRAWITEMSTRUCT item{};item.CtlType=ODT_BUTTON;item.CtlID=GetDlgCtrlID(child);item.hwndItem=child;item.hDC=context.dc;item.rcItem={0,0,rect.right-rect.left,rect.bottom-rect.top};SendMessageW(context.manager,WM_DRAWITEM,item.CtlID,(LPARAM)&item);}else SendMessageW(child,WM_PRINTCLIENT,(WPARAM)context.dc,PRF_CLIENT);RestoreDC(context.dc,saved);return TRUE;},(LPARAM)&context);graphics.ReleaseHDC(dc);
+        EnumChildWindows(manager,[](HWND child,LPARAM data)->BOOL{auto& context=*reinterpret_cast<Context*>(data);for(auto ancestor=child;ancestor&&ancestor!=context.manager;ancestor=GetParent(ancestor))if(!(GetWindowLongPtrW(ancestor,GWL_STYLE)&WS_VISIBLE))return TRUE;RECT rect{};GetWindowRect(child,&rect);MapWindowPoints(HWND_DESKTOP,context.manager,reinterpret_cast<POINT*>(&rect),2);int saved=SaveDC(context.dc);SetViewportOrgEx(context.dc,rect.left,rect.top,nullptr);wchar_t type[32]{};GetClassNameW(child,type,32);
+            if(std::wstring(type)==L"Button"){DRAWITEMSTRUCT item{};item.CtlType=ODT_BUTTON;item.CtlID=GetDlgCtrlID(child);item.hwndItem=child;item.hDC=context.dc;item.rcItem={0,0,rect.right-rect.left,rect.bottom-rect.top};SendMessageW(GetParent(child),WM_DRAWITEM,item.CtlID,(LPARAM)&item);}else SendMessageW(child,WM_PRINTCLIENT,(WPARAM)context.dc,PRF_CLIENT);RestoreDC(context.dc,saved);return TRUE;},(LPARAM)&context);graphics.ReleaseHDC(dc);
     };
     CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};capture();check(snapshot.Save(L"graph-manager-preview.png",&png,nullptr)==Ok,"capture the graph manager and live preview");
     SendMessageW(manager,WM_COMMAND,4001,0);capture();check(snapshot.Save(L"graph-manager-font-preview.png",&png,nullptr)==Ok,"capture graph font and axis tools");
+    SendMessageW(manager,WM_COMMAND,4000,0);SendMessageW(manager,WM_COMMAND,131,0);capture();check(snapshot.Save(L"graph-manager-data-preview.png",&png,nullptr)==Ok,"capture the inline data panel below the graph");
     newDocumentTab();check(!plotManagerWindow,"document changes close the manager before graph IDs can be reused");std::cout<<"Graph manager categories, font, structures, undo and document lifetime checks passed\n";
 }
 int main(int argc,char** argv){
@@ -706,7 +728,8 @@ int main(int argc,char** argv){
             pathNameStep=pathNameTicks=0;pathNameHeaderUpdated=false;
             SetTimer(hwnd,901,10,drivePathName);
             command(131);
-            KillTimer(hwnd,901);
+            MSG message{};const auto deadline=GetTickCount64()+5000;while(plotManagerWindow&&GetTickCount64()<deadline&&GetMessageW(&message,nullptr,0,0)>0){if(!handlePlotManagerMessage(message)){TranslateMessage(&message);DispatchMessageW(&message);}}
+            closePlotManager();KillTimer(hwnd,901);
             auto expected=before;expected.plots[0].series[0].name="S = 1";
             check(pathNameHeaderUpdated&&dirty&&toNative(doc)==toNative(expected)&&
                   doc.plots[0].series[0].values==expected.plots[0].series[0].values,
