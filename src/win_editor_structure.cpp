@@ -217,7 +217,9 @@ void editObject(int id){if(editOrbital(id))return;if(doc.isLocked(id)){status=L"
     auto update=[&](const std::vector<std::string>& v)->std::wstring{
         int e=atomicNumber(v[0]);if(!e)throw std::runtime_error("알 수 없는 원소 기호입니다.");
         int q=int(numeric(v[2],-8,8)),isotope=int(numeric(v[3],0,300));
-        std::optional<double> alignment;if(!v[5].empty())alignment=numeric(v[5],0,100)/100.;
+        std::optional<double> alignment;
+        if(v[8]=="1")alignment=0.;else if(v[8]=="2")alignment=.5;else if(v[8]=="3")alignment=1.;
+        else if(v[8]=="4"&&!v[5].empty())alignment=numeric(v[5],0,100)/100.;
         Vec adjustment{numeric(v[6],-1000,1000),numeric(v[7],-1000,1000)};
         Document candidate=before;auto* atom=candidate.atom(id);setAtomElement(candidate,id,e);
         const auto label=chemicalScripts(v[1]);if(label!=atom->label){atom->label=label;atom->labelRuns.clear();}
@@ -232,10 +234,11 @@ void editObject(int id){if(editOrbital(id))return;if(doc.isLocked(id)){status=L"
         {L"형식 전하",std::to_string(a->charge)},
         {L"동위원소 (0: 자연 조성)",std::to_string(a->isotope)},
         {L"현재 구조 형태 보호",a->protect?"1":"0",false,{L"아니요",L"예"}},
-        {L"결합 기준 (%) · 빈칸: 자동\n왼쪽 0 / 가운데 50 / 오른쪽 100\nOO: 첫 O는 25, 둘째 O는 75",a->labelAlignment?number(*a->labelAlignment*100):""},
+        {L"직접 입력 기준 (%) · 직접 입력 선택 시\nOO: 첫 O는 25, 둘째 O는 75",a->labelAlignment?number(*a->labelAlignment*100):""},
         {L"텍스트 X 미세 이동 (pt, 오른쪽 +)",number(a->labelAdjustment.x)},
-        {L"텍스트 Y 미세 이동 (pt, 아래 +)\n초기화: 기준은 빈칸, X·Y는 0",number(a->labelAdjustment.y)}
-    },update,{{L"원자·라벨",{0,1,2,3,4}},{L"결합 위치 미세조정",{5,6,7}}});
+        {L"텍스트 Y 미세 이동 (pt, 아래 +)\n초기화: 자동 선택, X·Y는 0",number(a->labelAdjustment.y)},
+        {L"결합 기준 위치",!a->labelAlignment?"0":*a->labelAlignment==0?"1":*a->labelAlignment==.5?"2":*a->labelAlignment==1?"3":"4",false,{L"자동",L"좌 · 왼쪽",L"중 · 가운데",L"우 · 오른쪽",L"직접 입력 · 미세조정"}}
+    },update,{{L"원자·라벨",{0,1,2,3,4}},{L"결합 위치 미세조정",{8,5,6,7}}});
     doc=before;if(!r){redraw();return;}
     update(*r);if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}
     status=L"라벨의 결합 기준 위치를 적용했습니다. · Ctrl+Z: 되돌리기";redraw();return;

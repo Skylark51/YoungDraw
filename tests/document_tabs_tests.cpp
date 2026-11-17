@@ -444,10 +444,12 @@ static void carbonRadicalChecks(HWND hwnd){
             selection.clear();hoverAtom=hoverBond=0;
 }
 static bool alignmentCancel=false,alignmentPreview=false;
+static int alignmentPreset=4;
 static void CALLBACK driveLabelAlignment(HWND parent,UINT,UINT_PTR timer,DWORD){
     auto form=FindWindowW(L"YoungDrawForm",L"원자·라벨 · 결합 위치 미세조정");if(!form)return;KillTimer(parent,timer);
+    SendDlgItemMessageW(form,108,CB_SETCURSEL,alignmentPreset,0);
     SetDlgItemTextW(form,105,L"25");SetDlgItemTextW(form,106,L"1.5");SetDlgItemTextW(form,107,L"-2");
-    alignmentPreview=doc.atoms.back().labelAlignment==.25&&(doc.atoms.back().labelAdjustment-Vec{1.5,-2}).length()<1e-8;
+    alignmentPreview=doc.atoms.back().labelAlignment==(alignmentPreset==0?std::optional<double>{}:std::optional<double>{alignmentPreset==4?.25:(alignmentPreset-1)*.5})&&(doc.atoms.back().labelAdjustment-Vec{1.5,-2}).length()<1e-8;
     PostMessageW(form,WM_COMMAND,alignmentCancel?IDCANCEL:IDOK,0);
 }
 static void labelAlignmentChecks(HWND hwnd){
@@ -462,6 +464,15 @@ static void labelAlignmentChecks(HWND hwnd){
     check((doc.atom(metal)->p-Vec{0,60}).length()<1e-8&&doc.atom(oxygen)->p.length()<1e-8,"fine adjustment dialog preserves bond geometry");
     const auto after=toNative(doc);check(history.undo(doc)&&toNative(doc)==before,"fine adjustment undoes in one step");
     check(history.redo(doc)&&toNative(doc)==after,"fine adjustment redoes in one step");
+    for(int preset=0;preset<=3;++preset){
+        alignmentPreset=preset;alignmentPreview=false;SetTimer(hwnd,988,10,driveLabelAlignment);editObject(oxygen);KillTimer(hwnd,988);
+        check(alignmentPreview,"left center right and automatic choices preview and commit independently of custom percentage");
+        auto value=doc.atom(oxygen)->labelAlignment;
+        SetTimer(hwnd,988,10,driveLabelAlignment);editObject(oxygen);KillTimer(hwnd,988);
+        check(doc.atom(oxygen)->labelAlignment==value,"preset survives reopening label properties");
+    }
+    alignmentPreset=4;
+
 }
 int main(int argc,char** argv){
     BYTE initialKeys[256]{};SetKeyboardState(initialKeys);
