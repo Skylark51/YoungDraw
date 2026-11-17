@@ -87,7 +87,7 @@ struct Manager{
         selectPage(0);ui::attachWindowHelp(window);
     }
     void stepWeight(bool increase){
-        if(!graph()||doc.isLocked(owner)||(weightAction!=245&&weightAction!=plotWaveWidthCommand))return;
+        if(page!=4||!graph()||doc.isLocked(owner)||(weightAction!=245&&weightAction!=plotWaveWidthCommand))return;
         Document before=doc;auto* p=graph();if(weightAction==245)p->structureInkScale=std::clamp(p->structureInkScale+(increase?.1:-.1),.25,4.);
         else p->waveWidth=std::clamp((p->waveWidth>0?p->waveWidth:1.)+(increase?.1:-.1),.1,20.);
         if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}for(auto h:cards)InvalidateRect(h,nullptr,FALSE);
@@ -155,7 +155,7 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:return self->colors.control(message,reinterpret_cast<HDC>(wp));
     case WM_COMMAND:{int action=LOWORD(wp);if(action==IDCANCEL){if(!self->flushGrid())return 0;DestroyWindow(h);return 0;}if(action>=tabFirst&&action<tabFirst+5){self->selectPage(action-tabFirst);return 0;}if(action==slotControl||action==sideControl){targetContainer=self->owner;targetSlot=size_t(SendDlgItemMessageW(h,slotControl,CB_GETCURSEL,0,0));targetAbove=SendDlgItemMessageW(h,sideControl,CB_GETCURSEL,0,0)==0;return 0;}if(self->busy)return 0;
         const bool modal=action!=131&&action!=4400&&action!=104&&action!=105;self->busy=true;if(modal)EnableWindow(h,FALSE);try{self->act(action);}catch(const std::exception& error){MessageBoxW(h,ui::wide(error.what()).c_str(),L"그래프 관리",MB_OK|MB_ICONINFORMATION);}self->busy=false;if(modal)EnableWindow(h,TRUE);
-        if(action==136||action==addEnergyGapCommand){DestroyWindow(h);SetForegroundWindow(win);SetFocus(win);}else if(IsWindowVisible(h)){SetForegroundWindow(h);SetFocus(h);}return 0;}
+        if(action==136||action==addEnergyGapCommand){DestroyWindow(h);SetForegroundWindow(win);SetFocus(win);}else if(IsWindowVisible(h)){SetForegroundWindow(h);if(action!=131)SetFocus(h);}return 0;}
     case WM_KEYDOWN:if(wp==VK_ADD||wp==VK_OEM_PLUS||wp==VK_SUBTRACT||wp==VK_OEM_MINUS){self->stepWeight(wp==VK_ADD||wp==VK_OEM_PLUS);return 0;}break;
     case WM_CLOSE:if(!self->flushGrid())return 0;DestroyWindow(h);return 0;
     case WM_NCDESTROY:if(plotManagerWindow==h)plotManagerWindow=nullptr;SetWindowLongPtrW(h,GWLP_USERDATA,0);delete self;return DefWindowProcW(h,message,wp,lp);
@@ -173,5 +173,5 @@ void managePlot(int id,bool visible){
 }
 void closePlotManager(){if(plotManagerWindow)DestroyWindow(plotManagerWindow);}
 void refreshPlotManager(){if(plotManagerWindow){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m)m->cachedScene.reset();InvalidateRect(plotManagerWindow,nullptr,FALSE);}}
-bool handlePlotManagerMessage(MSG& message){if(!plotManagerWindow||!IsWindowEnabled(plotManagerWindow)||(message.hwnd!=plotManagerWindow&&!IsChild(plotManagerWindow,message.hwnd)))return false;if(message.message==WM_KEYDOWN&&(message.wParam==VK_ADD||message.wParam==VK_OEM_PLUS||message.wParam==VK_SUBTRACT||message.wParam==VK_OEM_MINUS)){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(!m->dataOpen&&m->page==4){m->stepWeight(message.wParam==VK_ADD||message.wParam==VK_OEM_PLUS);return true;}}if(message.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&message.wParam=='Z'){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m->grid&&IsChild(m->grid,message.hwnd))return false;SendMessageW(plotManagerWindow,WM_COMMAND,(GetKeyState(VK_SHIFT)&0x8000)?105:104,0);return true;}return IsDialogMessageW(plotManagerWindow,&message)!=FALSE;}
+bool handlePlotManagerMessage(MSG& message){if(!plotManagerWindow||!IsWindowEnabled(plotManagerWindow)||(message.hwnd!=plotManagerWindow&&!IsChild(plotManagerWindow,message.hwnd)))return false;if(message.message==WM_KEYDOWN&&(message.wParam==VK_ADD||message.wParam==VK_OEM_PLUS||message.wParam==VK_SUBTRACT||message.wParam==VK_OEM_MINUS)){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m->page==4){m->stepWeight(message.wParam==VK_ADD||message.wParam==VK_OEM_PLUS);return true;}}if(message.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&message.wParam=='Z'){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m->grid&&IsChild(m->grid,message.hwnd))return false;SendMessageW(plotManagerWindow,WM_COMMAND,(GetKeyState(VK_SHIFT)&0x8000)?105:104,0);return true;}return IsDialogMessageW(plotManagerWindow,&message)!=FALSE;}
 }
