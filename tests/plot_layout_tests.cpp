@@ -16,6 +16,23 @@ static bool overlaps(Rect a,Rect b){return a.x<b.x+b.w-0.01&&a.x+a.w>b.x+0.01&&a
 static EnergyPlot sample(){EnergyPlot p;p.id=1;p.p={30,90};p.width=760;p.height=400;p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#167d9a",{0,37.2,17.7,27.3,-9.9},0,2},{"Path 2","#b44758",{0,37.2,17.7,27.3,-9.9},1,2}};return p;}
 int main(){try{
     {
+        for(const std::string unit:{"kcal mol^{-1}","kJ mol^{−1}","kcal mol⁻¹","kcal mol-1","kcal mol–1","kcal mol^{–1}"})for(bool top:{false,true}){
+            Document d;auto p=sample();p.unit=unit;p.energyAtTop=top;d.plots={p};
+            const auto drawing=makeScene(d,measure);bool exponent=false;double unitFont=0;
+            for(const auto& item:drawing.items)if(item.type==Primitive::Text&&item.text.find("mol")!=std::string::npos)unitFont=item.fontSize;
+            for(const auto& item:drawing.items)if(item.type==Primitive::Text&&item.text=="–1"){
+                exponent=true;check(std::abs(item.fontSize-unitFont*.7)<1e-6,"inverse mole exponent stays superscripted");
+            }
+            check(exponent,"inverse mole exponent uses an en dash on either axis layout");
+            check(d.plots[0].unit==unit,"display normalization preserves the saved unit");
+            check(toSvg(drawing).find("–1")!=std::string::npos,"SVG retains the en dash exponent");
+#ifdef TEST_CDXML
+            check(toCdxml(d).find(">–1</s>")!=std::string::npos,"CDXML retains the en dash exponent");
+            check(fromNative(toNative(d)).plots[0].unit==unit,"legacy unit survives native roundtrip");
+#endif
+        }
+    }
+    {
         Document d;EnergyPlot p;p.id=1;p.width=760;p.height=420;p.yMin=-8;p.yMax=32;
         for(int state=0;state<7;++state)p.states.push_back({"I_{"+std::to_string(state)+"}",double(state)});
         for(int path=0;path<5;++path){EnergySeries series;series.name="Path "+std::to_string(path+1);for(int state=0;state<7;++state)series.values.push_back((state%2?25.:0.)+path*.3-state);p.series.push_back(series);}
@@ -66,7 +83,7 @@ int main(){try{
             p.yMin=-10;p.yMax=50;p.series[0].values[1]=50;d.plots={p};
             auto scene=makeScene(d,measure);std::vector<Rect> header;double baseline=0;
             for(const auto& item:scene.items)if(item.type==Primitive::Text&&item.textRole==0&&
-                (item.text=="E"||item.text=="(kcal mol"||item.text=="-1"||item.text==")")){
+                (item.text=="E"||item.text=="(kcal mol"||item.text=="–1"||item.text==")")){
                 header.push_back(bounds(item));if(item.text=="E")baseline=item.points[0].y;
                 if(item.text=="(kcal mol"||item.text==")")check(std::abs(item.points[0].y-baseline)<1e-6,"E and unit share a single baseline");
             }
