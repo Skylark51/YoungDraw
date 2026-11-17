@@ -212,7 +212,34 @@ bool editOrbital(int id){
     history.checkpoint(doc);doc=std::move(candidate);selection=std::move(ids);changed();return true;
 }
 
-void editObject(int id){if(editOrbital(id))return;if(doc.isLocked(id)){status=L"레이어의 잠금을 해제한 뒤 편집하세요.";redraw();return;}if(auto* a=doc.atom(id)){auto r=ui::form(win,L"원자·라벨",{{L"원소 기호",symbol(a->element)},{L"라벨 (빈칸: 자동)",a->label,false,{},false,4,true},{L"형식 전하",std::to_string(a->charge)},{L"동위원소 (0: 자연 조성)",std::to_string(a->isotope)},{L"현재 구조 형태 보호",a->protect?"1":"0",false,{L"아니요",L"예"}}});if(!r)return;int e=atomicNumber((*r)[0]);if(!e)throw std::runtime_error("알 수 없는 원소 기호입니다.");int q=int(numeric((*r)[2],-8,8)),isotope=int(numeric((*r)[3],0,300));history.checkpoint(doc);a=doc.atom(id);setAtomElement(doc,id,e);a->label=chemicalScripts((*r)[1]);a->labelRuns.clear();a->charge=q;a->isotope=isotope;a->explicitH=-1;a->protect=(*r)[4]=="1";changed();return;}
+void editObject(int id){if(editOrbital(id))return;if(doc.isLocked(id)){status=L"레이어의 잠금을 해제한 뒤 편집하세요.";redraw();return;}if(auto* a=doc.atom(id)){
+    const Document before=doc;
+    auto update=[&](const std::vector<std::string>& v)->std::wstring{
+        int e=atomicNumber(v[0]);if(!e)throw std::runtime_error("알 수 없는 원소 기호입니다.");
+        int q=int(numeric(v[2],-8,8)),isotope=int(numeric(v[3],0,300));
+        std::optional<double> alignment;if(!v[5].empty())alignment=numeric(v[5],0,100)/100.;
+        Vec adjustment{numeric(v[6],-1000,1000),numeric(v[7],-1000,1000)};
+        Document candidate=before;auto* atom=candidate.atom(id);setAtomElement(candidate,id,e);
+        const auto label=chemicalScripts(v[1]);if(label!=atom->label){atom->label=label;atom->labelRuns.clear();}
+        atom->charge=q;atom->isotope=isotope;atom->protect=v[4]=="1";
+        if(e!=before.atom(id)->element||label!=before.atom(id)->label)atom->explicitH=-1;
+        atom->labelAlignment=alignment;atom->labelAdjustment=adjustment;
+        doc=std::move(candidate);redraw();UpdateWindow(win);return {};
+    };
+    auto r=ui::form(win,L"원자·라벨 · 결합 위치 미세조정",{
+        {L"원소 기호",symbol(a->element)},
+        {L"라벨 (빈칸: 자동)",a->label,false,{},false,4,true},
+        {L"형식 전하",std::to_string(a->charge)},
+        {L"동위원소 (0: 자연 조성)",std::to_string(a->isotope)},
+        {L"현재 구조 형태 보호",a->protect?"1":"0",false,{L"아니요",L"예"}},
+        {L"결합 기준 (%) · 빈칸: 자동\n왼쪽 0 / 가운데 50 / 오른쪽 100\nOO: 첫 O는 25, 둘째 O는 75",a->labelAlignment?number(*a->labelAlignment*100):""},
+        {L"텍스트 X 미세 이동 (pt, 오른쪽 +)",number(a->labelAdjustment.x)},
+        {L"텍스트 Y 미세 이동 (pt, 아래 +)\n초기화: 기준은 빈칸, X·Y는 0",number(a->labelAdjustment.y)}
+    },update,{{L"원자·라벨",{0,1,2,3,4}},{L"결합 위치 미세조정",{5,6,7}}});
+    doc=before;if(!r){redraw();return;}
+    update(*r);if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}
+    status=L"라벨의 결합 기준 위치를 적용했습니다. · Ctrl+Z: 되돌리기";redraw();return;
+}
  for(auto& o:doc.objects)if(o.id==id){std::string transformValue=o.kind==ObjectKind::Image?"1":"12";if(o.kind==ObjectKind::Curve&&o.points.size()==4){if(o.autoRoute)transformValue="자동";else{Vec delta=o.points.back()-o.points.front();double len=delta.length();if(len>.001){Vec n{-delta.y/len,delta.x/len};Vec bend=o.points[1]-o.points.front()-delta*(1./3);transformValue=number(bend.x*n.x+bend.y*n.y);}}}auto r=ui::form(win,L"그리기 속성",{{L"텍스트 (Ctrl+= / Ctrl+Shift+=)",o.text,true,{},false,4,true},{L"색상 (#RRGGBB)",o.color},{L"선 굵기 (pt)",number(o.width)},{L"선 종류",std::to_string(o.dash),false,{L"실선",L"파선",L"점선"}},{L"글자 크기 (pt)",number(o.fontSize)},{L"화살촉",std::to_string(o.head),false,{L"없음",L"전체 화살촉",L"반쪽 화살촉",L"공명 (양쪽 화살촉)"}},{L"곡률 (자동 또는 숫자) / 이미지 배율",transformValue}});if(!r)return;Object update=o;update.text=chemicalScripts((*r)[0]);update.color=colorValue((*r)[1]);update.width=numeric((*r)[2],.1,10);update.dash=std::stoi((*r)[3]);update.fontSize=numeric((*r)[4],4,100);update.head=std::stoi((*r)[5]);update.runs.clear();if(update.kind==ObjectKind::Curve&&(*r)[6]=="자동")update.autoRoute=true;else if(update.kind==ObjectKind::Curve&&update.points.size()==4&&(*r)[6]!=transformValue){update.points=routeArrow(doc,update);update.sourceAtom=update.targetAtom=update.sourceBond=update.targetBond=0;update.autoRoute=false;double bend=numeric((*r)[6],-200,200);Vec a=update.points.front(),b=update.points.back(),v=b-a;double len=v.length();if(len>.001){Vec n{-v.y/len,v.x/len};update.points[1]=a+v*(1./3)+n*bend;update.points[2]=a+v*(2./3)+n*bend;}}if(update.kind==ObjectKind::Image){double scale=numeric((*r)[6],.05,20);update.points[1]=update.points[0]+(update.points[1]-update.points[0])*scale;}history.checkpoint(doc);o=update;changed();return;}}
 void edit(){if(activeStructureTarget()){editTargetStructure();return;}int id=primary();if(auto* o=textObject(id)){if(tool!=Text)return;beginInline(InlineTarget{id,0,-1,o->points[0],o->fontSize},o->points[0]);return;}if(reaction(id))editReaction(id);else if(plot(id))editPlot(id);else editObject(id);}
 void addImage(Vec p){auto path=fileDialog(false,3);if(!path)return;insert(imageDocument(readFile(*path)),p);tool=Select;}

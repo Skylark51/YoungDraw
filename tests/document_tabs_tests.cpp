@@ -443,6 +443,26 @@ static void carbonRadicalChecks(HWND hwnd){
             hotkey('C');check(doc.atom(a)->element==17&&doc.atom(a)->label.empty(),"uppercase C retains the chlorine shortcut");
             selection.clear();hoverAtom=hoverBond=0;
 }
+static bool alignmentCancel=false,alignmentPreview=false;
+static void CALLBACK driveLabelAlignment(HWND parent,UINT,UINT_PTR timer,DWORD){
+    auto form=FindWindowW(L"YoungDrawForm",L"원자·라벨 · 결합 위치 미세조정");if(!form)return;KillTimer(parent,timer);
+    SetDlgItemTextW(form,105,L"25");SetDlgItemTextW(form,106,L"1.5");SetDlgItemTextW(form,107,L"-2");
+    alignmentPreview=doc.atoms.back().labelAlignment==.25&&(doc.atoms.back().labelAdjustment-Vec{1.5,-2}).length()<1e-8;
+    PostMessageW(form,WM_COMMAND,alignmentCancel?IDCANCEL:IDOK,0);
+}
+static void labelAlignmentChecks(HWND hwnd){
+    doc=Document{};int metal=doc.addAtom({0,60},26),oxygen=doc.addAtom({0,0},8);doc.addBond(metal,oxygen,BondKind::Single);
+    auto* a=doc.atom(oxygen);a->label="OO";a->labelRuns={{"OO","#123456","Arial",14,1}};a->labelOffset={-7,-7};a->explicitH=0;
+    history=History{};const auto before=toNative(doc);
+    alignmentCancel=true;SetTimer(hwnd,988,10,driveLabelAlignment);editObject(oxygen);KillTimer(hwnd,988);
+    check(alignmentPreview&&toNative(doc)==before,"label alignment previews live and cancel restores exact document");
+    alignmentCancel=false;alignmentPreview=false;SetTimer(hwnd,988,10,driveLabelAlignment);editObject(oxygen);KillTimer(hwnd,988);
+    check(alignmentPreview&&doc.atom(oxygen)->labelAlignment==.25,"label alignment dialog commits chosen attachment reference");
+    check(doc.atom(oxygen)->labelRuns.size()==1&&doc.atom(oxygen)->labelRuns.front().color=="#123456"&&doc.atom(oxygen)->explicitH==0,"fine adjustment preserves imported runs and hydrogen setting");
+    check((doc.atom(metal)->p-Vec{0,60}).length()<1e-8&&doc.atom(oxygen)->p.length()<1e-8,"fine adjustment dialog preserves bond geometry");
+    const auto after=toNative(doc);check(history.undo(doc)&&toNative(doc)==before,"fine adjustment undoes in one step");
+    check(history.redo(doc)&&toNative(doc)==after,"fine adjustment redoes in one step");
+}
 int main(int argc,char** argv){
     BYTE initialKeys[256]{};SetKeyboardState(initialKeys);
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
@@ -510,6 +530,10 @@ int main(int argc,char** argv){
         if(argc>1&&std::string(argv[1])=="--png-export-only"){
             pngExportChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }
+        if(argc>1&&std::string(argv[1])=="--label-alignment-only"){
+            labelAlignmentChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
+        labelAlignmentChecks(hwnd);
         if(argc>1&&std::string(argv[1])=="--atom-radicals-only"){
             carbonRadicalChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }

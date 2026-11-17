@@ -124,6 +124,21 @@ Scene makeScene(const Document& d,const Measure& measure){
         }
         if(a.label.empty()&&a.isotope){Primitive isotope=t;isotope.fontSize=fs*.65;isotope.text=std::to_string(a.isotope);double iw=textWidth(measure,isotope.text,isotope.fontSize);isotope.points={{x-iw,y-fs*.3}};labels.push_back(isotope);boxes[a.id].x-=iw;boxes[a.id].w+=iw;}
     }
+    // Align the visible label to the fixed skeletal vertex before clipping bonds.
+    // Apply to both generated labels and imported rich text without changing their runs.
+    for(const auto& a:d.atoms){
+        if(!a.labelAlignment&&a.labelAdjustment.length()==0)continue;
+        double left=1e30,right=-1e30;
+        for(const auto& t:labels)if(t.owner==a.id){
+            left=std::min(left,t.points[0].x);
+            right=std::max(right,t.points[0].x+textWidth(measure,t.text,t.fontSize,t.font,t.face));
+        }
+        if(right<left)continue;
+        Vec shift=a.labelAdjustment;
+        if(a.labelAlignment)shift.x+=a.p.x-left-(right-left)*(*a.labelAlignment);
+        for(auto& t:labels)if(t.owner==a.id)t.points[0]=t.points[0]+shift;
+        boxes[a.id].x+=shift.x;boxes[a.id].y+=shift.y;
+    }
     // Place charges and radical dots independently of custom or imported atom labels.
     for(const auto& a:d.atoms)if((a.charge&&!atomLabelHasCharge(a))||a.radical){
         double fs=a.labelSize.value_or(d.style.fontSize)*a.drawingScale;

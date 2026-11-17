@@ -53,7 +53,7 @@ std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,d
     if(factor==1)return {ids.begin(),ids.end()};
     Vec anchor=center.value_or(Vec{(l+r)/2,(t+b)/2});
     for(auto& o:d.objects)if(ids.count(o.id)&&o.autoRoute&&missingAnchor(d,o,ids)){o.points=routeArrow(d,o);o.autoRoute=false;o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;}
-    for(auto& a:d.atoms)if(ids.count(a.id)){a.p=anchor+(a.p-anchor)*factor;a.labelOffset=a.labelOffset*factor;a.drawingScale*=factor;for(auto& run:a.labelRuns)run.size*=factor;if(a.annotationManual)a.annotationOffset=a.annotationOffset*factor;}
+    for(auto& a:d.atoms)if(ids.count(a.id)){a.p=anchor+(a.p-anchor)*factor;a.labelOffset=a.labelOffset*factor;a.labelAdjustment=a.labelAdjustment*factor;a.drawingScale*=factor;for(auto& run:a.labelRuns)run.size*=factor;if(a.annotationManual)a.annotationOffset=a.annotationOffset*factor;}
     for(auto& bond:d.bonds)if(ids.count(bond.id))bond.drawingScale*=factor;
     for(auto& o:d.objects)if(ids.count(o.id)){for(auto& p:o.points)p=anchor+(p-anchor)*factor;if(o.kind!=ObjectKind::Image){o.width*=factor;if(o.cross.enabled){o.cross.width*=factor;o.cross.size*=factor;}}if(o.kind==ObjectKind::Text){o.fontSize*=factor;for(auto& run:o.runs)run.size*=factor;}}
     return {ids.begin(),ids.end()};
@@ -290,9 +290,9 @@ void fillSlot(Document& d,const Document& source,int container,size_t index,bool
     double presentationScale=mechanism?1.4:1.;
     double scale=1;if(!lengths.empty()){std::sort(lengths.begin(),lengths.end());if(lengths[lengths.size()/2]>.001)scale=d.style.bondLength/lengths[lengths.size()/2];}
     else if(fragment.atoms.empty()&&fragment.reactions.empty()&&fragment.plots.empty()){auto b=makeScene(fragment).bounds;scale=std::min(1.,std::min(100./b.w,72./b.h));}
-    for(auto& a:fragment.atoms){a.p=a.p*scale;a.labelOffset=a.labelOffset*scale;}for(auto& o:fragment.objects){for(auto& p:o.points)p=p*scale;if(o.kind!=ObjectKind::Image){o.fontSize*=scale;o.width*=scale;for(auto& run:o.runs)run.size*=scale;}}
+    for(auto& a:fragment.atoms){a.p=a.p*scale;a.labelOffset=a.labelOffset*scale;a.labelAdjustment=a.labelAdjustment*scale;}for(auto& o:fragment.objects){for(auto& p:o.points)p=p*scale;if(o.kind!=ObjectKind::Image){o.fontSize*=scale;o.width*=scale;for(auto& run:o.runs)run.size*=scale;}}
     if(mechanism){
-        for(auto& atom:fragment.atoms){atom.p=atom.p*presentationScale;atom.labelOffset=atom.labelOffset*presentationScale;atom.drawingScale*=presentationScale;if(atom.annotationManual)atom.annotationOffset=atom.annotationOffset*presentationScale;for(auto& run:atom.labelRuns)run.size*=presentationScale;}
+        for(auto& atom:fragment.atoms){atom.p=atom.p*presentationScale;atom.labelOffset=atom.labelOffset*presentationScale;atom.labelAdjustment=atom.labelAdjustment*presentationScale;atom.drawingScale*=presentationScale;if(atom.annotationManual)atom.annotationOffset=atom.annotationOffset*presentationScale;for(auto& run:atom.labelRuns)run.size*=presentationScale;}
         for(auto& bond:fragment.bonds)bond.drawingScale*=presentationScale;
         for(auto& object:fragment.objects){for(auto& point:object.points)point=point*presentationScale;if(object.kind!=ObjectKind::Image){object.fontSize*=presentationScale;object.width*=presentationScale;for(auto& run:object.runs)run.size*=presentationScale;}}
     }
@@ -665,7 +665,7 @@ static CleanupReport cleanStructureCandidate(Document& d,const std::vector<int>&
         for(int id:comp){auto* a=d.atom(id);if(a->protect)explicitProtect=true;if(a->protect||(a->element>=21&&a->element<=30)||(a->element>=39&&a->element<=48)||(a->element>=57&&a->element<=80)||a->element>=89)protect=true;}for(auto& b:d.bonds)if(has(comp,b.a)&&(b.kind==BondKind::Dative||b.color!="#000000"))protect=true;
         if(draftedArylScaffold(d,comp,rings)){report.protectedComponents++;continue;}
         if(preserveProjection){
-            if(!lengths.empty()){std::sort(lengths.begin(),lengths.end());double median=lengths[lengths.size()/2];if(median>.001){double scale=d.style.bondLength/median;for(int id:comp){auto* atom=d.atom(id);atom->p=center+(atom->p-center)*scale;atom->labelOffset=atom->labelOffset*scale;}}}
+            if(!lengths.empty()){std::sort(lengths.begin(),lengths.end());double median=lengths[lengths.size()/2];if(median>.001){double scale=d.style.bondLength/median;for(int id:comp){auto* atom=d.atom(id);atom->p=center+(atom->p-center)*scale;atom->labelOffset=atom->labelOffset*scale;atom->labelAdjustment=atom->labelAdjustment*scale;}}}
             if(!explicitProtect)readableRings(d,comp,cycles(d,comp));
             continue;
         }
@@ -866,7 +866,7 @@ Document mechanismGuide(){
 Document coordinateDemo(){Document d;EnergyPlot p;p.id=d.nextId++;p.p={25,90};p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#000000",{0,37.2,17.7,27.3,-9.9},1,3.5}};d.plots.push_back(p);fillSlot(d,demo(),p.id,0,true);fillSlot(d,chairTemplate(),p.id,4,false);d.plots.front().stages=defaultMechanismStages();return d;}
 void applyHouseStyle(Document& d){
     Style target;double scale=target.bondLength/d.style.bondLength;
-    for(auto& a:d.atoms){a.p=a.p*scale;a.labelOffset=a.labelOffset*scale;for(auto& r:a.labelRuns){r.font="Arial";r.face|=1;r.size*=target.fontSize/d.style.fontSize;}}
+    for(auto& a:d.atoms){a.p=a.p*scale;a.labelOffset=a.labelOffset*scale;a.labelAdjustment=a.labelAdjustment*scale;for(auto& r:a.labelRuns){r.font="Arial";r.face|=1;r.size*=target.fontSize/d.style.fontSize;}}
     for(auto& o:d.objects){if(d.isLocked(o.id))continue;for(auto& p:o.points)p=p*scale;o.font="Arial";o.face|=1;o.fontSize*=target.fontSize/d.style.fontSize;if(o.kind!=ObjectKind::Image)o.width=target.lineWidth;for(auto& r:o.runs){r.font="Arial";r.face|=1;r.size*=target.fontSize/d.style.fontSize;}}
     for(auto& r:d.reactions){r.p=r.p*scale;r.spacing*=scale;r.slotWidth*=scale;r.slotHeight*=scale;r.rowGap*=scale;r.cycleRadius*=scale;r.captionFontSize*=target.fontSize/d.style.fontSize;}
     for(auto& p:d.plots){if(d.isLocked(p.id))continue;p.p=p.p*scale;p.width*=scale;p.height*=scale;for(auto& s:p.series)s.width=target.lineWidth;}

@@ -11,6 +11,34 @@
 using namespace yd;
 int checks=0;static void check(bool v,const char* name){checks++;if(!v)throw std::runtime_error(name);}
 int main(){try{
+ {Document d;int metal=d.addAtom({0,60},26),oxygen=d.addAtom({0,0},8);int bond=d.addBond(metal,oxygen,BondKind::Single);d.atom(oxygen)->label="OO";
+  auto label=[&](const Scene& sc){for(const auto& p:sc.items)if(p.owner==oxygen&&p.type==Primitive::Text&&p.text=="OO")return p;throw std::runtime_error("missing OO label");};
+  auto baseline=makeScene(d);auto original=label(baseline);
+  auto width=[](const std::string& text,double size,const std::string&,int){return text.size()*size*.6;};
+  for(double anchor:{0.,.25,.5,.75,1.}){
+   d.atom(oxygen)->labelAlignment=anchor;auto sc=makeScene(d,width);auto text=label(sc);
+   check(std::abs(text.points[0].x+width("OO",text.fontSize,"",0)*anchor)<1e-8,"OO alignment selects the intended horizontal reference");
+   check((d.atom(metal)->p-Vec{0,60}).length()==0&&d.atom(oxygen)->p.length()==0,"label alignment keeps atom geometry fixed");
+   bool line=false;for(const auto& p:sc.items)if(p.owner==bond){line=true;check(std::abs(p.points[0].x)<1e-8&&std::abs(p.points[1].x)<1e-8,"vertical bond stays at the chosen OO reference");check(p.points[1].y>=text.points[0].y+text.fontSize,"bond clips clear of shifted text");}check(line,"OO bond remains visible");
+  }
+  d.atom(oxygen)->labelAdjustment={2,-3};auto adjusted=label(makeScene(d,width));d.atom(oxygen)->labelAdjustment={};auto unshifted=label(makeScene(d,width));
+  check((adjusted.points[0]-unshifted.points[0]-Vec{2,-3}).length()<1e-8,"fine adjustment translates text exactly");
+  d.atom(oxygen)->labelAdjustment={2,-3};auto copy=d;scaleStructures(copy,{metal,oxygen,bond},2);
+  check((copy.atom(oxygen)->labelAdjustment-Vec{4,-6}).length()<1e-8&&copy.atom(oxygen)->labelAlignment==1.,"label fine adjustment scales with structure");
+#ifdef TEST_CDXML
+  for(const auto& restored:{fromNative(toNative(d)),fromCdxml(toCdxml(d))}){
+   check(restored.atom(oxygen)->labelAlignment==1.&&(restored.atom(oxygen)->labelAdjustment-Vec{2,-3}).length()<1e-8,"label alignment survives native and CDXML saving");
+   check((label(makeScene(restored,width)).points[0]-adjusted.points[0]).length()<1e-5,"saved label placement remains exact");
+  }
+  auto externalXml=toCdxml(d);auto metadata=externalXml.find("<annotation");check(metadata!=std::string::npos,"CDXML state exists");externalXml.erase(metadata,externalXml.find("/>",metadata)+2-metadata);
+  auto external=fromCdxml(externalXml);check((label(makeScene(external)).points[0]-label(makeScene(d)).points[0]).length()<1e-5,"ordinary CDXML text coordinates carry fine adjustment without embedded state");
+  History h;h.checkpoint(d);d.atom(oxygen)->labelAlignment=.25;check(h.undo(d)&&d.atom(oxygen)->labelAlignment==1.,"label alignment supports undo");
+#endif
+  d.atom(oxygen)->labelAlignment.reset();d.atom(oxygen)->labelAdjustment={};check((label(makeScene(d)).points[0]-original.points[0]).length()<1e-8,"reset restores automatic alignment");
+  d.atom(oxygen)->labelRuns={{"OO","#123456","Arial",14,1}};d.atom(oxygen)->labelOffset={-7,-7};d.atom(oxygen)->labelAlignment=.25;
+  auto rich=label(makeScene(d,width));check(std::abs(rich.points[0].x+width("OO",14,"",0)*.25)<1e-8&&rich.color=="#123456","alignment preserves imported rich text styling");
+ }
+
  {Document dotted;int a=dotted.addAtom({0,0}),b=dotted.addAtom({30,0});
   int id=dotted.addBond(a,b,BondKind::Dot);dotted.bond(id)->color="#123456";
   auto visual=makeScene(dotted);int strokes=0;
