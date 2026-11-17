@@ -103,7 +103,8 @@ Scene makeScene(const Document& d,const Measure& measure){
             for(auto& run:a.labelRuns){Primitive p;p.type=Primitive::Text;p.owner=a.id;p.text=run.text;p.font=run.font;p.fontSize=run.size;p.face=run.face;p.color=run.color;int script=run.face&96;double offset=script==32?run.size*.4:script==64?-run.size*.4:0;p.points={{cursor.x,cursor.y+base-run.size*.91+offset}};labels.push_back(p);r=std::max(r,cursor.x+textWidth(measure,run.text,run.size,run.font,run.face));t=std::min(t,p.points[0].y);b=std::max(b,p.points[0].y+run.size);cursor.x+=textWidth(measure,run.text,run.size,run.font,run.face);}
             boxes[a.id]={l-atomStyle.margin,t-atomStyle.margin,r-l+2*atomStyle.margin,b-t+2*atomStyle.margin};continue;
         }
-        if(a.element==6&&!isolated&&a.label.empty()&&!a.charge&&!a.isotope&&!a.radical)continue;
+        // A radical annotates the skeletal vertex; only an explicit label shows C.
+        if(a.element==6&&a.label.empty()&&!a.isotope&&(a.radical||(!isolated&&!a.charge)))continue;
         std::string el=a.label.empty()?symbol(a.element):a.label;double fs=atomStyle.fontSize,w=textWidth(measure,el,fs,"Arial",atomStyle.labelFace);
         double anchor=w/2;
         if(!a.label.empty()){
@@ -125,7 +126,8 @@ Scene makeScene(const Document& d,const Measure& measure){
     }
     // Place charges and radical dots independently of custom or imported atom labels.
     for(const auto& a:d.atoms)if((a.charge&&!atomLabelHasCharge(a))||a.radical){
-        double fs=a.labelSize.value_or(d.style.fontSize)*a.drawingScale;auto box=boxes.at(a.id);
+        double fs=a.labelSize.value_or(d.style.fontSize)*a.drawingScale;
+        auto box=boxes.count(a.id)?boxes.at(a.id):Rect{a.p.x,a.p.y,0,0};
         Primitive mark;mark.type=Primitive::Text;mark.owner=a.id;mark.textRole=13;mark.fontSize=fs*.7;mark.face=a.labelFace.value_or(d.style.labelFace);mark.color=a.color;
         int charge=atomLabelHasCharge(a)?0:a.charge;
         mark.text=(std::abs(charge)>1?std::to_string(std::abs(charge)):"")+(charge>0?"+":charge<0?"\xe2\x88\x92":"")+(a.radical==1?"\xe2\x80\xa2\xe2\x80\xa2":a.radical==3?"\xe2\x80\xa2\xe2\x80\xa2":a.radical?"\xe2\x80\xa2":"");

@@ -181,6 +181,33 @@ int main(){try{
 #endif
  }
 
+ // Skeletal radicals do not require a visible carbon label or a label clipping box.
+ for(int neighbors:{0,1,2})for(int charge:{0,1,-1}){
+  Document d;int a=d.addAtom({40,40});d.atom(a)->radical=2;d.atom(a)->charge=charge;
+  for(int i=0;i<neighbors;++i)d.addBond(a,d.addAtom({40+(i?30.:-30.),40}));
+  const auto verify=[&](const Document& drawing,bool visible){
+   auto sc=makeScene(drawing);bool carbon=false,radical=false;
+   for(const auto& p:sc.items)if(p.owner==a&&p.type==Primitive::Text){
+    if(p.text=="C")carbon=true;
+    if(p.textRole==13){radical=p.text.find("\xe2\x80\xa2")!=std::string::npos;check(std::isfinite(p.points[0].x)&&std::isfinite(p.points[0].y),"vertex radical has a finite position");}
+   }
+   check(carbon==visible&&radical,"isolated, terminal and internal radicals show C only when explicitly requested");
+   check(sc.objectBounds.count(a)&&!toSvg(sc).empty(),"vertex radical participates in bounds and SVG export");
+  };
+  verify(d,false);
+#ifdef TEST_CDXML
+  verify(fromNative(toNative(d)),false);verify(fromCdxml(toCdxml(d)),false);
+#endif
+  d.atom(a)->annotationManual=true;d.atom(a)->annotationOffset={-12,14};
+  for(const auto& p:makeScene(d).items)if(p.owner==a&&p.textRole==13)
+   check((p.points[0]-Vec{28,54}).length()<1e-8,"unlabeled radical honors manual placement");
+  d.atom(a)->label="C";verify(d,true);
+#ifdef TEST_CDXML
+  verify(fromNative(toNative(d)),true);verify(fromCdxml(toCdxml(d)),true);
+#endif
+  d.atom(a)->label.clear();d.atom(a)->isotope=13;verify(d,true);
+ }
+
  // Depth strokes use the same full-width convention across every molecule.
  {Document ink;int a=ink.addAtom({0,0}),b=ink.addAtom({30,0});int edge=ink.addBond(a,b,BondKind::Wedge);
   auto scene=makeScene(ink);auto wedge=scene.items.front();check(std::abs((wedge.points[1]-wedge.points[2]).length()-ink.style.boldWidth)<1e-8,"wedge broad end matches bold bond full width");

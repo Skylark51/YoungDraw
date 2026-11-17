@@ -411,6 +411,38 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(manager,WM_COMMAND,4000,0);SendMessageW(manager,WM_COMMAND,131,0);capture();check(snapshot.Save(L"graph-manager-data-preview.png",&png,nullptr)==Ok,"capture the inline data panel below the graph");
     newDocumentTab();check(!plotManagerWindow,"document changes close the manager before graph IDs can be reused");std::cout<<"Graph manager categories, font, structures, undo and document lifetime checks passed\n";
 }
+static void carbonRadicalChecks(HWND hwnd){
+            doc={};history.clear();selection.clear();hoverBond=0;tool=Select;
+            const int a=doc.addAtom({20,20}),b=doc.addAtom({70,20});doc.addBond(a,b);hoverAtom=a;
+            const auto carbonVisible=[&](const Document& drawing){
+                for(const auto& item:makeScene(drawing).items)
+                    if(item.owner==a&&item.type==Primitive::Text&&item.text=="C")return true;
+                return false;
+            };
+            check(!carbonVisible(doc),"ordinary bonded carbon starts with its symbol implicit");
+            SendMessageW(hwnd,WM_CHAR,'*',0);
+            check(doc.atom(a)->radical==2&&!carbonVisible(doc),"radical shortcut marks the skeletal vertex without forcing C");
+            SendMessageW(hwnd,WM_CHAR,'c',0);
+            check(doc.atom(a)->radical==2&&carbonVisible(doc),"carbon shortcut explicitly shows C while keeping the radical");
+            check(history.undo(doc)&&doc.atom(a)->radical==2&&!carbonVisible(doc),"undoing explicit C restores the vertex radical");
+            SendMessageW(hwnd,WM_CHAR,'*',0);
+            check(!doc.atom(a)->radical&&!carbonVisible(doc),"radical shortcut toggles off without adding a carbon label");
+            history.clear();
+            const auto before=toNative(doc);
+            SendMessageW(hwnd,WM_CHAR,'c',0);
+            check(doc.atom(a)->element==6&&doc.atom(a)->label=="C"&&carbonVisible(doc)&&doc.atoms.size()==2&&doc.bonds.size()==1,
+                  "lowercase c explicitly displays C on a bonded carbon without changing connectivity");
+            check(carbonVisible(fromNative(toNative(doc))),"explicit carbon symbol survives native save and reload");
+            check(carbonVisible(fromCdxml(toCdxml(doc))),"explicit carbon symbol survives CDXML save and reload");
+            check(history.undo(doc)&&toNative(doc)==before&&!carbonVisible(doc),"explicit carbon symbol is one undo operation");
+            doc.atom(a)->charge=1;doc.atom(a)->radical=2;hotkey('c');
+            check(carbonVisible(doc)&&doc.atom(a)->charge==1&&doc.atom(a)->radical==2,"carbon shortcut preserves charge and radical");
+            hotkey('0');check(carbonVisible(doc),"clearing annotations preserves the explicit carbon symbol");
+            hotkey('n');check(doc.atom(a)->element==7&&doc.atom(a)->label.empty(),"another element shortcut removes the explicit C label");
+            hotkey('c');check(doc.atom(a)->element==6&&carbonVisible(doc),"converting another element to carbon explicitly displays C");
+            hotkey('C');check(doc.atom(a)->element==17&&doc.atom(a)->label.empty(),"uppercase C retains the chlorine shortcut");
+            selection.clear();hoverAtom=hoverBond=0;
+}
 int main(int argc,char** argv){
     BYTE initialKeys[256]{};SetKeyboardState(initialKeys);
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
@@ -477,6 +509,9 @@ int main(int argc,char** argv){
         }
         if(argc>1&&std::string(argv[1])=="--png-export-only"){
             pngExportChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
+        if(argc>1&&std::string(argv[1])=="--atom-radicals-only"){
+            carbonRadicalChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }
         graphCaptionChecks(hwnd);
         if(argc>1&&std::string(argv[1])=="--plot-caption-only"){
@@ -840,30 +875,7 @@ int main(int argc,char** argv){
             selection.clear();
         }
 
-        {
-            doc={};history.clear();selection.clear();hoverBond=0;tool=Select;
-            const int a=doc.addAtom({20,20}),b=doc.addAtom({70,20});doc.addBond(a,b);hoverAtom=a;
-            const auto carbonVisible=[&](const Document& drawing){
-                for(const auto& item:makeScene(drawing).items)
-                    if(item.owner==a&&item.type==Primitive::Text&&item.text=="C")return true;
-                return false;
-            };
-            check(!carbonVisible(doc),"ordinary bonded carbon starts with its symbol implicit");
-            const auto before=toNative(doc);
-            SendMessageW(hwnd,WM_CHAR,'c',0);
-            check(doc.atom(a)->element==6&&doc.atom(a)->label=="C"&&carbonVisible(doc)&&doc.atoms.size()==2&&doc.bonds.size()==1,
-                  "lowercase c explicitly displays C on a bonded carbon without changing connectivity");
-            check(carbonVisible(fromNative(toNative(doc))),"explicit carbon symbol survives native save and reload");
-            check(carbonVisible(fromCdxml(toCdxml(doc))),"explicit carbon symbol survives CDXML save and reload");
-            check(history.undo(doc)&&toNative(doc)==before&&!carbonVisible(doc),"explicit carbon symbol is one undo operation");
-            doc.atom(a)->charge=1;doc.atom(a)->radical=2;hotkey('c');
-            check(carbonVisible(doc)&&doc.atom(a)->charge==1&&doc.atom(a)->radical==2,"carbon shortcut preserves charge and radical");
-            hotkey('0');check(carbonVisible(doc),"clearing annotations preserves the explicit carbon symbol");
-            hotkey('n');check(doc.atom(a)->element==7&&doc.atom(a)->label.empty(),"another element shortcut removes the explicit C label");
-            hotkey('c');check(doc.atom(a)->element==6&&carbonVisible(doc),"converting another element to carbon explicitly displays C");
-            hotkey('C');check(doc.atom(a)->element==17&&doc.atom(a)->label.empty(),"uppercase C retains the chlorine shortcut");
-            selection.clear();hoverAtom=hoverBond=0;
-        }
+        carbonRadicalChecks(hwnd);
 
         {
             doc={};history.clear();int a=doc.addAtom({20,20},27),b=doc.addAtom({70,20},8);doc.atom(a)->label="CoIII";selection={a};hoverAtom=hoverBond=0;tool=Select;

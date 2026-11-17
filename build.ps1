@@ -33,7 +33,7 @@ try {
     if ($LASTEXITCODE) { throw 'Build failed' }
     if ($HeadlessTests) {
         # Console tests plus the hidden pointer regression: omit interactive dialog/theme coverage.
-        ctest --test-dir $outputDir --output-on-failure -R '^(quality_regression|pointer_quality|core_tests|layout_refinement|atomic_file_save|mechanism_regression|mechanism_editing|mechanism_graph_editing|cdx_import|plot_layout|november_complex_graphs|reaction_profile_annotations|office_storage_roundtrip|png_export|graph_manager)$'
+        ctest --test-dir $outputDir --output-on-failure -R '^(quality_regression|pointer_quality|core_tests|layout_refinement|atomic_file_save|mechanism_regression|mechanism_editing|mechanism_graph_editing|cdx_import|plot_layout|november_complex_graphs|reaction_profile_annotations|office_storage_roundtrip|png_export|graph_manager|atom_radicals)$'
     } else {
         ctest --test-dir $outputDir --output-on-failure
     }
