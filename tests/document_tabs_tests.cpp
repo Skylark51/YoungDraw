@@ -326,8 +326,8 @@ static void graphUnitChecks(HWND hwnd){
     check(formDriven&&previewObserved&&toNative(doc)==before,"unit selection previews immediately and Cancel restores the graph");
     formAction=21;formDriven=false;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
     check(formDriven&&doc.plots[0].unit=="kcal mol^{-1}","inverse-mole choice stores superscript formatting");
-    bool raised=false;for(const auto& text:makeScene(doc,measure).items)if(text.rotation==-90&&text.text=="-1")raised=true;
-    check(raised,"energy axis renders minus one as a separate raised text run");
+    bool raised=false;for(const auto& text:makeScene(doc,measure).items)if(text.rotation==-90&&text.text=="–1")raised=true;
+    check(raised,"energy axis renders en dash one as a separate raised text run");
     for(auto copy:{fromNative(toNative(doc)),fromCdxml(toCdxml(doc))})check(copy.plots[0].unit=="kcal mol^{-1}","unit survives native and CDXML roundtrips");
     check(toSvg(makeScene(doc,measure)).find("kcal mol")!=std::string::npos,"SVG contains the selected unit");
     writePreview(L"graph-inverse-mole-unit.png",doc);
