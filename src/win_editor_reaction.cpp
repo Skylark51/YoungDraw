@@ -409,7 +409,7 @@ void mechanismContextMenu(Vec at){
             break;
         }
     SetFocus(hwnd);if(auto hit=cycleArrowAt(world(at))){selection={hit->first};selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;if(!copyOwner)copyOwner=hit->first;}
-    else if(!pickSlot(world(at))){int objectHit=doc.atomAt(world(at),10/zoom);if(!objectHit)objectHit=doc.bondAt(world(at),5/zoom);if(!objectHit)objectHit=objectAt(world(at));if(objectHit&&!contains(selection,objectHit))selection=groupedSelection({objectHit});else if(!objectHit){selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;}}
+    else if(!pickSlot(world(at))){int objectHit=atomHit(world(at));if(!objectHit)objectHit=doc.bondAt(world(at),5/zoom);if(!objectHit)objectHit=objectAt(world(at));if(objectHit&&!contains(selection,objectHit))selection=groupedSelection({objectHit});else if(!objectHit){selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;}}
     if(!copyOwner)copyOwner=objectAt(pointInDocument);
     const int contextOwner=activeStructureTarget()?targetContainer:primary();
     HMENU menu=canvasContextMenu(contextOwner,copyOwner);

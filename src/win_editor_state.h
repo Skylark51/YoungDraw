@@ -35,6 +35,8 @@ void repaintOnly(const RECT* region=nullptr);
 void title();
 void pruneLockedSelection();
 void changed();
+inline constexpr double atomPickRadius=14,benzenePickRadius=18;
+int atomHit(Vec position,double screenRadius=atomPickRadius);
 Vec world(Vec p);
 Vec screen(Vec p);
 Vec center();

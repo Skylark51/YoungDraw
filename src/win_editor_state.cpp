@@ -32,6 +32,26 @@ void title(){std::wstring s=(isolatedStructureEditing?L"단계 구조 편집 | "
 void pruneLockedSelection(){selection.erase(std::remove_if(selection.begin(),selection.end(),[](int id){return doc.isLocked(id);}),selection.end());if(doc.isLocked(targetContainer))targetContainer=0;}
 void changed(){if(!doc.atom(hoverAtom))hoverAtom=0;if(!doc.bond(hoverBond))hoverBond=0;pruneLockedSelection();dirty=true;title();redraw();}
 Vec world(Vec p){return (p-origin)*(1/zoom);}
+int atomHit(Vec position,double screenRadius){
+    // Keep the central part of an existing bond available for fused benzene,
+    // even when enlarged endpoint targets overlap at low zoom.
+    if(tool==Benzene&&screenRadius==benzenePickRadius){
+        if(auto* bond=doc.bond(doc.bondAt(position,5/zoom))){
+            const Vec from=doc.atom(bond->a)->p,v=doc.atom(bond->b)->p-from;
+            const double length=v.x*v.x+v.y*v.y;
+            const double t=length>1e-12?((position.x-from.x)*v.x+(position.y-from.y)*v.y)/length:0.;
+            if(t>=.35&&t<=.65)return 0;
+        }
+    }
+    const double radius=screenRadius/zoom;double nearest=1e30;int id=0;
+    for(const auto& atom:doc.atoms){
+        const Vec offset=atom.p-position;
+        if(doc.isLocked(atom.id)||std::abs(offset.x)>radius||std::abs(offset.y)>radius)continue;
+        const double distance=offset.x*offset.x+offset.y*offset.y;
+        if(distance<nearest){nearest=distance;id=atom.id;}
+    }
+    return id;
+}
 Vec screen(Vec p){return origin+p*zoom;}
 Vec center(){return world({left+(ww-left-right)/2.,top+(wh-top-bottom)/2.});}
 bool canvas(Vec p){return p.x>left&&p.x<ww-right&&p.y>top&&p.y<wh-bottom;}

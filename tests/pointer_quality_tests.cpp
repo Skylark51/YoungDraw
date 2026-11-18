@@ -36,6 +36,10 @@ static void CALLBACK driveRotation(HWND owner,UINT,UINT_PTR timer,DWORD){
 static void editingRegression(HWND hwnd){
     BYTE keys[256]{};SetKeyboardState(keys);showLayers=false;targetContainer=0;origin={400,300};zoom=2;
     Bitmap image(1440,940);Graphics graphics(&image);auto repaint=[&](){HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);};
+    doc={};int corner=doc.addAtom({0,0});
+    for(double scale:{.5,1.,2.,4.}){zoom=scale;check(atomHit(world(screen({0,0})+Vec{13,13}))==corner,"square atom target includes corners outside the old circular area");check(!atomHit(world(screen({0,0})+Vec{15,0})),"square atom hit stops at its visible boundary independent of zoom");}
+    zoom=1;int nearby=doc.addAtom({20,0});check(atomHit({11,0})==nearby&&atomHit({9,0})==corner,"overlapping square targets choose the nearest atom");
+    zoom=2;selection.clear();tool=Select;mouseDown(screen({0,0})+Vec{13,13});check(contains(selection,corner),"actual mouse selection accepts the expanded square corner");cancel();
     for(int pass=0;pass<50;++pass){
         doc={};int a=doc.addAtom({0,0}),b=doc.addAtom({30,0});doc.addBond(a,b);tool=Erase;selection.clear();history.clear();
         const auto original=toNative(doc);mouseDown(screen({0,0}));
@@ -53,7 +57,7 @@ static void editingRegression(HWND hwnd){
     doc={};hoverAtom=hoverBond=0;tool=Select;hotkey('a');check(tool==Benzene,"a in blank space selects benzene tool");
     root=doc.addAtom({0,0});mouseDown(screen({0,0})+Vec{14,0});check(doc.atoms.size()==7&&doc.bonds.size()==7,"benzene tool attaches a substituent within expanded atom hit area");
     check(doc.component(root).size()==7,"expanded hit creates one connected phenyl substituent");
-    doc={};root=doc.addAtom({0,0});end=doc.addAtom({30,0});doc.addBond(root,end);tool=Benzene;mouseDown(screen({15,0}));check(doc.atoms.size()==6&&doc.bonds.size()==6,"middle of bond still fuses benzene to existing edge");
+    for(double scale:{.5,1.,2.}){zoom=scale;doc={};root=doc.addAtom({0,0});end=doc.addAtom({30,0});doc.addBond(root,end);tool=Benzene;mouseDown(screen({15,0}));check(doc.atoms.size()==6&&doc.bonds.size()==6,"bond center keeps fused benzene accessible when enlarged atom targets overlap");}zoom=2;
     doc={};hoverAtom=hoverBond=0;tool=Benzene;mouseDown(screen({100,100}));check(doc.atoms.size()==6&&doc.bonds.size()==6,"blank canvas still draws standalone benzene");
     selection.clear();hoverAtom=hoverBond=0;tool=Select;
 }
