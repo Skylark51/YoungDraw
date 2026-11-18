@@ -162,6 +162,15 @@ static void CALLBACK driveNewMechanism(HWND parent,UINT,UINT_PTR timer,DWORD){
     GetClassNameW(dialog,name,64);
     if(std::wstring(name)==L"YoungDrawMechanismPicker"){
         for(int id=100;id<104;++id)check(ui::hasButtonHelp(GetDlgItem(dialog,id)),"mechanism previews have path descriptions");
+        if(!mechanismGridAction){
+            RECT bounds{};GetClientRect(dialog,&bounds);
+            Bitmap snapshot(bounds.right,bounds.bottom,PixelFormat32bppARGB);
+            Graphics g(&snapshot);auto dc=g.GetHDC();
+            const auto painted=PrintWindow(dialog,dc,PW_CLIENTONLY);
+            g.ReleaseHDC(dc);
+            CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
+            check(painted&&snapshot.Save(L"mechanism-path-picker.png",&png,nullptr)==Ok,"capture mechanism path cards");
+        }
         SendMessageW(dialog,WM_COMMAND,100+mechanismLayoutChoice,0);
         PostMessageW(dialog,WM_COMMAND,IDOK,0);
         return;

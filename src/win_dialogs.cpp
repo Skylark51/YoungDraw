@@ -4,42 +4,74 @@
 #include "win_dialog_style.h"
 #include "win_scripts.h"
 #include "mechanism_data.h"
-#include "win_editor_render.h"
 #include "win_editor_state.h"
 #include <commctrl.h>
 #include <commdlg.h>
 #include <windowsx.h>
+#include <uxtheme.h>
 namespace ui {
 namespace {
 struct GraphPicker {
-    std::vector<yd::Scene> mechanisms;
+    std::vector<yd::Reaction> mechanisms;
     int count() const {return mechanisms.empty()?5:int(mechanisms.size());}
     GraphChoice choice;DialogColors colors;HFONT font=nullptr;bool done=false,ok=false,editStyle=false;std::function<void(int)> preview;
 };
 const wchar_t* graphNames[]={L"부드러운 곡선",L"직선",L"준위 · 점선 연결",L"준위 · 실선 연결",L"독립 에너지 준위"};
 const wchar_t* graphDetails[]={L"봉우리와 중간체를 부드럽게 연결",L"상태 사이를 직선으로 연결",L"평평한 준위를 점선으로 연결",L"평평한 준위를 실선으로 연결",L"스핀 다중도 등 개별 상태 비교"};
 constexpr const wchar_t* mechanismNames[]={L"직선",L"가로 → 아래 → 순환",L"가로 → 아래 → 분기·합류",L"촉매 순환"};
+void drawMechanismPath(Gdiplus::Graphics& g,const Gdiplus::RectF& card,const yd::Reaction& reaction){
+    using namespace Gdiplus;
+    using yd::Vec;
+    constexpr double nodeRadius=5.5;
+    std::vector<Vec> nodes;
+    for(size_t i=0;i<reaction.slots.size();++i)nodes.push_back(reactionSlot(reaction,i));
+    Vec lo=nodes.front(),hi=lo;
+    for(auto p:nodes){
+        lo={std::min(lo.x,p.x),std::min(lo.y,p.y)};
+        hi={std::max(hi.x,p.x),std::max(hi.y,p.y)};
+    }
+    const Vec center{card.X+card.Width/2,card.Y+card.Height/2},mid=(lo+hi)*.5;
+    const double scale=std::min((card.Width-42)/std::max(1.,hi.x-lo.x),(card.Height-40)/std::max(1.,hi.y-lo.y));
+    for(auto& p:nodes)p=center+(p-mid)*scale;
+
+    const Color ink(255,35,32,49),surface(255,250,250,250);
+    Pen line(ink,2.6f);line.SetStartCap(LineCapRound);line.SetEndCap(LineCapRound);
+    SolidBrush fill(ink),empty(surface);
+    auto point=[](Vec p){return PointF(float(p.x),float(p.y));};
+    auto unit=[](Vec p){return p*(1/p.length());};
+    for(const auto& link:reaction.links){
+        const auto from=nodes[link.from],to=nodes[link.to],delta=to-from;
+        const double bend=reaction.cycleStages.empty()?link.bend:-.72;
+        const auto control=(from+to)*.5+Vec{-delta.y,delta.x}*bend;
+        const auto start=from+unit(control-from)*(nodeRadius+2);
+        const auto direction=unit(to-control);
+        const auto tip=to-direction*(nodeRadius+2);
+        const auto base=tip-direction*7;
+        const Vec normal{-direction.y,direction.x};
+        g.DrawBezier(&line,point(start),point(start+(control-start)*(2./3)),point(base+(control-base)*(2./3)),point(base));
+        const PointF head[]={point(tip),point(base+normal*3.7),point(base-normal*3.7)};
+        g.FillPolygon(&fill,head,3);
+    }
+    for(size_t i=0;i<nodes.size();++i){
+        const auto p=nodes[i];
+        const RectF dot(float(p.x-nodeRadius),float(p.y-nodeRadius),float(nodeRadius*2),float(nodeRadius*2));
+        g.FillEllipse(i==0?&fill:&empty,dot);
+        g.DrawEllipse(&line,dot);
+    }
+}
 void drawMechanismCard(const DRAWITEMSTRUCT& item,const GraphPicker& picker,int mode){
     using namespace Gdiplus;
     const auto& palette=picker.colors.palette;
     const bool selected=picker.choice.mode==mode;
+    RECT bounds{};GetClientRect(item.hwndItem,&bounds);
+    FillRect(item.hDC,&bounds,picker.colors.panel);
     Graphics g(item.hDC);g.SetSmoothingMode(SmoothingModeAntiAlias);
-    SolidBrush panel(palette.panel);
-    RectF box(float(item.rcItem.left),float(item.rcItem.top),float(item.rcItem.right-item.rcItem.left),float(item.rcItem.bottom-item.rcItem.top));
-    g.FillRectangle(&panel,box);
+    RectF box(0.f,0.f,float(bounds.right),float(bounds.bottom));
     RectF square(box.X+8,box.Y+2,144,144);
     appearance::rounded(g,square,13,selected?palette.accent:palette.raised);
     square.Inflate(-4,-4);
     appearance::rounded(g,square,10,Color(255,250,250,250));
-    const auto& scene=picker.mechanisms[mode];
-    const auto& b=scene.bounds;
-    const float scale=std::min((square.Width-22)/float(std::max(1.,b.w)),(square.Height-28)/float(std::max(1.,b.h)));
-    const auto transform=g.Save();
-    g.TranslateTransform(square.X+(square.Width-float(b.w)*scale)/2-float(b.x)*scale,
-        square.Y+(square.Height-float(b.h)*scale)/2-float(b.y)*scale);
-    g.ScaleTransform(scale,scale);
-    yd::editor::render(g,scene);
-    g.Restore(transform);
+    drawMechanismPath(g,square,picker.mechanisms[mode]);
     if(selected){
         SolidBrush dot(palette.accent);g.FillEllipse(&dot,square.GetRight()-14,square.Y+6,8.f,8.f);
     }
@@ -80,7 +112,10 @@ LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
         auto control=[&](const wchar_t* kind,const wchar_t* label,DWORD style,int id,int x,int y,int w,int h){auto c=CreateWindowW(kind,label,WS_CHILD|WS_VISIBLE|style,x,y,w,h,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);SendMessageW(c,WM_SETFONT,WPARAM(picker->font),TRUE);return c;};
         if(!picker->mechanisms.empty()){
             control(L"STATIC",L"경로 예시를 보고 양식을 선택하세요.",0,0,22,16,640,28);
-            for(int i=0;i<picker->count();++i)control(L"BUTTON",mechanismNames[i],WS_TABSTOP|BS_OWNERDRAW,100+i,16+i*164,50,160,182);
+            for(int i=0;i<picker->count();++i){
+                auto card=control(L"BUTTON",mechanismNames[i],WS_TABSTOP|BS_OWNERDRAW,100+i,16+i*164,50,160,182);
+                SetWindowTheme(card,L"",L"");
+            }
             control(L"BUTTON",L"만들기",WS_TABSTOP|BS_OWNERDRAW,IDOK,450,248,100,34);
             control(L"BUTTON",L"취소",WS_TABSTOP|BS_OWNERDRAW,IDCANCEL,562,248,100,34);
             return 0;
@@ -147,16 +182,9 @@ std::optional<yd::MechanismTemplate> mechanismChoice(HWND owner){
     GraphPicker picker;
     for(auto layout:{yd::MechanismTemplate::Linear,yd::MechanismTemplate::FeedIntoCycle,
         yd::MechanismTemplate::SplitAndMerge,yd::MechanismTemplate::CatalyticCycle}){
-        yd::Document sample;
         auto path=yd::mechanismTemplate(layout);
-        path.id=sample.nextId++;
-        for(size_t i=0;i<path.slots.size();++i)path.slots[i].label=std::to_string(i+1);
-        for(auto& caption:path.above)caption.clear();
-        path.centerLabel.clear();
-        sample.style.lineWidth=4;
-        sample.style.fontSize=24;
-        sample.reactions.push_back(std::move(path));
-        picker.mechanisms.push_back(makeScene(sample,yd::editor::measure));
+        yd::makeMechanismGraph(path);
+        picker.mechanisms.push_back(std::move(path));
     }
     auto chosen=showPathPicker(owner,picker,L"반응 메커니즘 만들기",688,298,L"YoungDrawMechanismPicker");
     if(chosen)return static_cast<yd::MechanismTemplate>(chosen->mode);
