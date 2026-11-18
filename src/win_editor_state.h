@@ -21,7 +21,8 @@ extern int sidebarPage, orbitalPhase;
 extern OrbitalKind orbitalKind;
 // Canvas viewport and active pointer gesture
 extern int ww, wh;
-inline constexpr int left=180, right=260, top=122, bottom=34;
+inline constexpr int left=180, top=122, bottom=34;
+extern int right;
 extern double zoom;
 extern Vec origin, mouse, down, panOrigin, annotationStart;
 extern Tool tool;

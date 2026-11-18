@@ -9,6 +9,7 @@
 #include <sstream>
 
 namespace yd::editor {
+int right=260;
 
 HWND win;Document doc,dragBefore,dragBase;History history;std::wstring filePath,status=L"선택: Space · 결합: x · 화살표: e · 화면 이동: Ctrl+우클릭 드래그";
 std::vector<int> selection;int hoverAtom=0,hoverBond=0,element=6,startAtom=0,startBond=0,targetContainer=0;size_t targetSlot=0;bool targetAbove=false,dirty=false;
@@ -29,7 +30,7 @@ void redraw(){canvasSceneCache.reset();InvalidateRect(win,nullptr,FALSE);refresh
 void repaintOnly(const RECT* region){InvalidateRect(win,region,FALSE);}
 void title(){std::wstring s=(isolatedStructureEditing?L"단계 구조 편집 | ":L"YoungDraw 0.4 | ")+(filePath.empty()?L"제목 없음":fs::path(filePath).filename().wstring())+(officeDocument&&office::editing()?L" [Office 개체 편집]":L"")+(dirty?L" *":L"");SetWindowTextW(win,s.c_str());refreshDocumentTabs();}
 void pruneLockedSelection(){selection.erase(std::remove_if(selection.begin(),selection.end(),[](int id){return doc.isLocked(id);}),selection.end());if(doc.isLocked(targetContainer))targetContainer=0;}
-void changed(){pruneLockedSelection();dirty=true;title();redraw();}
+void changed(){if(!doc.atom(hoverAtom))hoverAtom=0;if(!doc.bond(hoverBond))hoverBond=0;pruneLockedSelection();dirty=true;title();redraw();}
 Vec world(Vec p){return (p-origin)*(1/zoom);}
 Vec screen(Vec p){return origin+p*zoom;}
 Vec center(){return world({left+(ww-left-right)/2.,top+(wh-top-bottom)/2.});}

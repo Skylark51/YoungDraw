@@ -18,6 +18,17 @@
 
 namespace yd::editor {
 
+void applyAtomElement(int id,int element){
+    auto* atom=doc.atom(id);if(!atom)return;
+    const bool suppress=element==8&&atom->element==8&&atom->label.empty()&&doc.hydrogens(id)==1;
+    setAtomElement(doc,id,element);atom=doc.atom(id);atom->label.clear();atom->labelRuns.clear();atom->explicitH=suppress?0:-1;
+}
+void attachPhenyl(int id){
+    auto* atom=doc.atom(id);if(!atom)return;const Vec from=atom->p;const int element=atom->element;
+    Vec at=bondEndpoint(doc,id,from,BondKind::Single,6);if(element==6){auto v=at-from;at=from+v*(doc.style.bondLength*benzeneConnectorScale/v.length());}
+    int attached=doc.addAtom(at);doc.addBond(id,attached);doc.attachRing(attached,0,6,true);
+}
+
 void editMullikenSpin(){
     if(selection.empty()||activeStructureTarget())
         throw std::runtime_error("스핀 값을 표시할 원자를 선택하세요. 구조 칸은 독립 편집 창에서 원자를 선택할 수 있습니다.");
@@ -256,7 +267,7 @@ void transformSelected(int operation){
         });
         if(!result){doc=before;selection=originalSelection;redraw();return;}if(toNative(doc)==toNative(before))return;history.checkpoint(before);
     }else{Document result=before;selection=transformStructures(result,originalSelection,operation==162?-90:operation==163?90:0,operation==160,operation==161);history.checkpoint(before);doc=std::move(result);}
-    tool=Select;changed();fit();status=L"선택 구조를 회전·반전했습니다. Ctrl+Z로 되돌릴 수 있습니다.";
+    tool=Select;changed();status=L"선택 구조를 회전·반전했습니다. Ctrl+Z로 되돌릴 수 있습니다.";
 }
 
 bool activeStructureTarget(){

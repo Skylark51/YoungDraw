@@ -26,7 +26,7 @@ Revvity의 [공식 단축키 안내](https://revvitysignals.com/sites/default/fi
 | 원자 위 a / 3 | 짧은 연결선으로 phenyl 추가 |
 | 결합 위 a | 벤젠 고리 융합 |
 | Alt+K | 선택한 탄소 방향족 고리의 Kekulé / 비편재화 표시 전환 |
-| Space / x / j / e / t | 선택 / 단일결합 / 벤젠 / 화살표 / 텍스트 도구 |
+| Space / x / a / e / t | 선택 / 단일결합 / 벤젠 / 화살표 / 텍스트 도구 |
 | Ctrl+N / O / S / Shift+S / W | 새 문서 / 열기 / 저장 / 다른 이름 저장 / 탭 닫기 |
 | Ctrl+Z / Ctrl+Shift+Z | 실행 취소 / 다시 실행 |
 | Ctrl+Y | 마지막 정렬·이동·회전·반전·크기 변경 등의 작업 반복 |

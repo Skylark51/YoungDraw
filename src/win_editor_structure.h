@@ -3,6 +3,8 @@
 #include "win_editor.h"
 
 namespace yd::editor {
+void applyAtomElement(int id,int element);
+void attachPhenyl(int id);
 
 std::optional<Document> runStructureEditor(const Document& fragment,HWND owner);
 extern std::function<std::optional<Document>(const Document&)> structureEditor;

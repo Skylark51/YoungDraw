@@ -59,7 +59,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
     if(edited){history.checkpoint(before);changed();}
     tool=DottedBond;status=L"점선 단일 결합: 기존 결합을 클릭하거나 원자 사이를 드래그하세요. 1 키: 실선 단일 결합.";redraw();return;
  }
- if(id==interactionToolCommand){tool=Interaction;selection.clear();redraw();return;}if(id>=200&&id<=218){if(id==217){auto before=doc;if(delocalizeBonds(doc,selection)){history.checkpoint(before);changed();}tool=Delocalized;}else{tool=Tool(id-200);selection.clear();}redraw();return;}if(id>=301&&id<=418){element=id-300;int aid=hoverAtom?hoverAtom:(doc.atom(primary())?primary():0);if(aid){history.checkpoint(doc);auto a=doc.atom(aid);setAtomElement(doc,aid,element);a->label.clear();a->labelRuns.clear();a->explicitH=-1;changed();}redraw();return;}
+ if(id==interactionToolCommand){tool=Interaction;selection.clear();redraw();return;}if(id>=200&&id<=218){if(id==217){auto before=doc;if(delocalizeBonds(doc,selection)){history.checkpoint(before);changed();}tool=Delocalized;}else{tool=Tool(id-200);selection.clear();}redraw();return;}if(id>=301&&id<=418){element=id-300;int aid=hoverAtom?hoverAtom:(doc.atom(primary())?primary():0);if(aid){history.checkpoint(doc);applyAtomElement(aid,element);changed();}redraw();return;}
  firstUseGuide(id);
  switch(id){
  case 230:searchCommands();break;

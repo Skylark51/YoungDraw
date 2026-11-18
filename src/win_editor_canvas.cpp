@@ -248,31 +248,31 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  }
  if(!inlineEdit)for(int id:selection){auto it=sc.objectBounds.find(id);if(it!=sc.objectBounds.end()){auto r=it->second;Vec p=screen({r.x,r.y});Pen pen(Color(150,0,135,120),1.5);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,float(p.x-4),float(p.y-4),float(r.w*zoom+8),float(r.h*zoom+8));}else if(auto a=doc.atom(id)){Vec p=screen(a->p);Pen pen(accent,1.5);g.DrawEllipse(&pen,float(p.x-8),float(p.y-8),16.f,16.f);}}
  if(selection.size()==1){auto found=sc.arrowPaths.find(selection.front());if(found!=sc.arrowPaths.end()&&found->second.size()==4){const auto& path=found->second;Pen guidePen(Color(170,0,135,120),1);guidePen.SetDashStyle(DashStyleDash);for(int i:{0,2}){Vec a=screen(path[i]),b=screen(path[i+1]);g.DrawLine(&guidePen,float(a.x),float(a.y),float(b.x),float(b.y));}Pen outline(accent,1.5);SolidBrush body(white),control(accent);for(int i=0;i<4;i++){Vec p=screen(path[i]);g.FillEllipse(i==1||i==2?&control:&body,float(p.x-5),float(p.y-5),10.f,10.f);g.DrawEllipse(&outline,float(p.x-5),float(p.y-5),10.f,10.f);}}}
- if(hoverAtom){Vec p=screen(doc.atom(hoverAtom)->p);Pen pen(accent,1);g.DrawEllipse(&pen,float(p.x-7),float(p.y-7),14.f,14.f);}if(boxing){Pen p(accent,1);p.SetDashStyle(DashStyleDash);g.DrawRectangle(&p,float(std::min(down.x,mouse.x)),float(std::min(down.y,mouse.y)),float(std::abs(down.x-mouse.x)),float(std::abs(down.y-mouse.y)));}if(drawing){if(tool==Orbital){auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,makeScene(draftOrbital(mouse),measure),false,true);g.Restore(transform);}else if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance||tool==Interaction){Document preview=doc;preview.objects.push_back(draftArrow(mouse));auto all=makeScene(preview,measure);Scene arrow;for(auto& item:all.items)if(item.owner==-1)arrow.items.push_back(item);auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,arrow,false,true);g.Restore(transform);}else{Pen p(accent,1.5);p.SetDashStyle(DashStyleDash);g.DrawLine(&p,float(down.x),float(down.y),float(mouse.x),float(mouse.y));}}g.Restore(state);
+ if(auto* hovered=doc.atom(hoverAtom)){Vec p=screen(hovered->p);Pen pen(accent,1);g.DrawEllipse(&pen,float(p.x-7),float(p.y-7),14.f,14.f);}if(boxing){Pen p(accent,1);p.SetDashStyle(DashStyleDash);g.DrawRectangle(&p,float(std::min(down.x,mouse.x)),float(std::min(down.y,mouse.y)),float(std::abs(down.x-mouse.x)),float(std::abs(down.y-mouse.y)));}if(drawing){if(tool==Orbital){auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,makeScene(draftOrbital(mouse),measure),false,true);g.Restore(transform);}else if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance||tool==Interaction){Document preview=doc;preview.objects.push_back(draftArrow(mouse));auto all=makeScene(preview,measure);Scene arrow;for(auto& item:all.items)if(item.owner==-1)arrow.items.push_back(item);auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,arrow,false,true);g.Restore(transform);}else{Pen p(accent,1.5);p.SetDashStyle(DashStyleDash);g.DrawLine(&p,float(down.x),float(down.y),float(mouse.x),float(mouse.y));}}g.Restore(state);
  float rx=float(ww-right);fill(g,{rx,float(top),float(right),float(wh-top-bottom)},palette.panel);const RectF rightClip(rx,89,float(right),float(std::max(0,wh-bottom-89)));
  rightOffset=std::min(rightOffset,std::max(0,(showLayers?737:570)-(wh-bottom)));
  const auto rightHits=hits.size();auto rightState=g.Save();g.SetClip(rightClip);g.TranslateTransform(0,float(-rightOffset));
- button(g,175,L"도구",{rx+12,91,114,28},!showLayers);button(g,176,L"레이어",{rx+132,91,116,28},showLayers);
+ button(g,175,L"도구",{rx+12,91,float((right-30)/2),28},!showLayers);button(g,176,L"레이어",{rx+18+(right-30)/2,91,float((right-30)/2),28},showLayers);
  if(showLayers){
     text(g,L"레이어 잠금",rx+16,142,14,ink,true);
     text(g,L"잠긴 레이어는 클릭되지 않습니다.",rx+16,170,11,muted);
     size_t images=std::count_if(doc.objects.begin(),doc.objects.end(),[](const Object& o){return o.kind==ObjectKind::Image;});
     auto row=[&](float y,const std::wstring& label,size_t count,bool locked,int id){
-        appearance::rounded(g,{rx+12,y,236,64},8,palette.raised);text(g,label,rx+24,y+10,13,ink,true);text(g,std::to_wstring(count)+L"개",rx+24,y+34,11,muted);
-        button(g,id,locked?L"잠김":L"편집 가능",{rx+142,y+16,96,30},locked);
+        appearance::rounded(g,{rx+12,y,float(right-24),64},8,palette.raised);text(g,label,rx+24,y+10,13,ink,true);text(g,std::to_wstring(count)+L"개",rx+24,y+34,11,muted);
+        button(g,id,locked?L"잠김":L"편집 가능",{rx+float(right-110),y+31,86,26},locked);
     };
     row(204,L"이미지",images,doc.imagesLocked,177);row(276,L"그래프",doc.plots.size(),doc.graphsLocked,178);
     text(g,L"빠른 전환",rx+16,372,11,muted,true);
-    button(g,179,L"이미지만 편집",{rx+12,398,236,34},doc.graphsLocked&&!doc.imagesLocked);
-    button(g,180,L"그래프만 편집",{rx+12,442,236,34},doc.imagesLocked&&!doc.graphsLocked);
-    button(g,181,L"모두 잠금 해제",{rx+12,486,236,34});
+    button(g,179,L"이미지만 편집",{rx+12,398,float(right-24),34},doc.graphsLocked&&!doc.imagesLocked);
+    button(g,180,L"그래프만 편집",{rx+12,442,float(right-24),34},doc.imagesLocked&&!doc.graphsLocked);
+    button(g,181,L"모두 잠금 해제",{rx+12,486,float(right-24),34});
     text(g,L"그림 편집 중 그래프가 눌리면",rx+16,554,11,muted);
     text(g,L"'이미지만 편집'을 누르세요.",rx+16,575,11,muted);
     text(g,L"이미지와 그래프는 자동 분류됩니다.",rx+16,616,11,muted);
     text(g,L"잠금 상태도 문서에 저장됩니다.",rx+16,637,11,muted);
     text(g,L"Ctrl+Z로 잠금 변경을 되돌립니다.",rx+16,658,11,muted);
  }else if(isolatedStructureEditing){
-    button(g,110,L"구조 정리  Ctrl+Shift+K",{rx+12,124,236,30});button(g,113,L"구조·이미지 파일 삽입",{rx+12,204,236,30});button(g,165,L"크기 조정  Ctrl+K",{rx+12,244,236,30});
+    button(g,110,L"구조 정리  Ctrl+Shift+K",{rx+12,124,float(right-24),30});button(g,113,L"구조·이미지 파일 삽입",{rx+12,204,float(right-24),30});button(g,165,L"크기 조정  Ctrl+K",{rx+12,244,float(right-24),30});
     text(g,L"이 단계의 구조만 편집합니다.",rx+16,304,13,ink,true);text(g,L"상단 적용 또는 Ctrl+S: 반영",rx+16,342,12,muted);text(g,L"취소 / 창 닫기: 변경 버리기",rx+16,372,12,muted);
  }else{
     auto tile=[&](int id,const wchar_t* label,RectF box,bool active=false){
@@ -283,37 +283,20 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
         const float iconSize=box.Height>=76?32.f:22.f;
         icon(g,id,{box.X+(box.Width-iconSize)*.5f,box.Y+(box.Height>=76?14:4),iconSize,iconSize},fg);
         ui::drawLabel(g,label,{box.X+2,box.GetBottom()-20,box.Width-4,18},
-                      box.Width>100?13.f:12.f,fg,active,true);
+                      box.Width>100?13.f:10.f,fg,active,true);
     };
-    struct SidebarTool {int id;const wchar_t* label;bool active=false;};
-    auto row=[&](float y,std::initializer_list<SidebarTool> tools){
-        float x=rx+12;
-        for(auto item:tools){
-            tile(item.id,item.label,{x,y,75,47},item.active);
-            x+=81;
-        }
-    };
-    auto heading=[&](const wchar_t* label,float y){text(g,label,rx+16,y,11,muted,true);};
-    tile(110,L"구조 정리",{rx+12,124,114,76});
-    tile(112,L"템플릿 보관",{rx+134,124,114,76});
-    tile(182,L"메커니즘",{rx+12,210,114,52},sidebarPage==0);
-    tile(183,L"그래프",{rx+134,210,114,52},sidebarPage==1);
+    constexpr float size=54,gap=6;
+    const int columns=std::max(1,int((right-24+gap)/(size+gap)));
+    auto grid=[&](float y,std::initializer_list<std::pair<int,const wchar_t*>> tools){int i=0;for(auto item:tools){tile(item.first,item.second,{rx+12+(i%columns)*(size+gap),y+(i/columns)*(size+gap),size,size},item.first==mechanismManagerCommand||item.first==plotManagerCommand||(item.first==182&&sidebarPage==0)||(item.first==183&&sidebarPage==1));++i;}return y+((i+columns-1)/columns)*(size+gap);};
+    float y=grid(124,{{110,L"정리"},{112,L"보관"},{182,L"메커니즘"},{183,L"그래프"}})+4;
     if(sidebarPage==1){
-        tile(plotManagerCommand,L"그래프 관리",{rx+12,274,114,100},true);
-        tile(130,L"새 그래프",{rx+134,274,114,100});
-        heading(L"선택한 그래프를 한 창에서 편집",396);
-        text(g,L"데이터·경로 / 축·글자 / 반응·주석",rx+16,420,11,muted);
-        text(g,L"구조 / 굵기·물결",rx+16,444,11,muted);
-        text(g,L"그래프를 선택한 뒤 관리를 누르세요.",rx+16,484,11,muted);
+        y=grid(y,{{plotManagerCommand,L"관리"},{130,L"새 작성"}});
+        text(g,L"그래프를 선택 → 관리",rx+12,y+12,11,muted);
     }else{
-        tile(mechanismManagerCommand,L"관리",{rx+12,274,114,100},true);
-        tile(includeMechanismCommand,L"구조 편입",{rx+134,274,114,100});
-        tile(120,L"새 메커니즘",{rx+12,384,114,100});
-        tile(recognizeMechanismCommand,L"파일에서 인식",{rx+134,384,114,100});
-        heading(L"선택 → 편입 → 배치 미리보기",500);
-        text(g,L"구조·단계·연결은 관리 창에서 편집",rx+16,523,11,muted);
-
+        y=grid(y,{{mechanismManagerCommand,L"관리"},{includeMechanismCommand,L"편입"},{120,L"새 작성"},{recognizeMechanismCommand,L"인식"}});
+        text(g,L"선택 → 편입 → 배치 미리보기",rx+12,y+12,11,muted);
     }
+
  }
  g.Restore(rightState);clipHits(rightHits,rightClip,0,float(-rightOffset));
  if(wh-bottom<(showLayers?737:570))text(g,L"↕ 휠",rx+float(right-44),91,10,muted);

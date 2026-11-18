@@ -11,6 +11,9 @@
 #include "win_editor_text.h"
 #include "win_dialogs.h"
 #include "win_editor_shortcuts.h"
+#include "win_editor_structure.h"
+#include "win_editor_commands.h"
+#include "win_editor_canvas.h"
 #include "win_editor_render.h"
 #include <iostream>
 #include <stdexcept>
@@ -25,6 +28,34 @@ static void CALLBACK driveGraphPicker(HWND owner,UINT,UINT_PTR timer,DWORD){
     SendMessageW(picker,WM_COMMAND,100+pickerMode,0);SendMessageW(picker,WM_COMMAND,200,0);
     if(!doc.plots.empty())stylePreviewSeen=doc.plots[0].mode==pickerMode;
     SendMessageW(picker,WM_COMMAND,pickerCancel?IDCANCEL:IDOK,0);
+}
+static void CALLBACK driveRotation(HWND owner,UINT,UINT_PTR timer,DWORD){
+    HWND dialog=nullptr;while((dialog=FindWindowExW(nullptr,dialog,L"YoungDrawForm",L"선택 구조 회전")))if(GetWindow(dialog,GW_OWNER)==owner)break;
+    if(!dialog)return;KillTimer(owner,timer);SetDlgItemTextW(dialog,100,L"37.5");PostMessageW(dialog,WM_COMMAND,IDOK,0);
+}
+static void editingRegression(HWND hwnd){
+    BYTE keys[256]{};SetKeyboardState(keys);showLayers=false;targetContainer=0;origin={400,300};zoom=2;
+    Bitmap image(1440,940);Graphics graphics(&image);auto repaint=[&](){HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);};
+    for(int pass=0;pass<50;++pass){
+        doc={};int a=doc.addAtom({0,0}),b=doc.addAtom({30,0});doc.addBond(a,b);tool=Erase;selection.clear();history.clear();
+        const auto original=toNative(doc);mouseDown(screen({0,0}));
+        check(!doc.atom(a)&&!hoverAtom&&!hoverBond,"eraser clears deleted hover references before repaint");repaint();hotkey('1');
+        check(history.undo(doc)&&toNative(doc)==original,"erase remains one undoable edit");changed();hoverAtom=a;doc.erase({a});repaint();changed();check(!hoverAtom,"renderer tolerates stale hover from direct document replacement too");
+    }
+    doc={};int root=doc.addAtom({0,0}),end=doc.addAtom({30,0});doc.addBond(root,end);selection={end};hoverAtom=end;tool=Select;
+    auto viewport=origin;double scale=zoom;command(163);check((origin-viewport).length()==0&&zoom==scale,"toolbar rotation preserves viewport");
+    selection={end};SetTimer(hwnd,989,10,driveRotation);command(164);KillTimer(hwnd,989);check((origin-viewport).length()==0&&zoom==scale,"angle preview and apply preserve viewport");
+    keys[VK_MENU]=0x80;SetKeyboardState(keys);key(VK_UP);keys[VK_MENU]=0;SetKeyboardState(keys);check((origin-viewport).length()==0&&zoom==scale,"keyboard rotation preserves viewport");
+    doc={};root=doc.addAtom({0,0});end=doc.addAtom({30,0},8);doc.addBond(root,end);hoverAtom=end;selection={end};
+    check(doc.hydrogens(end)==1,"terminal oxygen defaults to OH");history.clear();hotkey('o');check(doc.hydrogens(end)==0&&doc.atom(end)->explicitH==0,"O shortcut toggles OH to bare O");
+    auto bare=toNative(doc);check(fromNative(bare).hydrogens(end)==0&&fromCdxml(toCdxml(doc)).hydrogens(end)==0,"bare oxygen survives saving");
+    check(history.undo(doc)&&doc.hydrogens(end)==1,"bare oxygen toggle supports undo");command(308);check(doc.hydrogens(end)==0,"oxygen palette toggles OH to O too");command(308);check(doc.hydrogens(end)==1,"repeating oxygen restores automatic H");
+    doc={};hoverAtom=hoverBond=0;tool=Select;hotkey('a');check(tool==Benzene,"a in blank space selects benzene tool");
+    root=doc.addAtom({0,0});mouseDown(screen({0,0})+Vec{14,0});check(doc.atoms.size()==7&&doc.bonds.size()==7,"benzene tool attaches a substituent within expanded atom hit area");
+    check(doc.component(root).size()==7,"expanded hit creates one connected phenyl substituent");
+    doc={};root=doc.addAtom({0,0});end=doc.addAtom({30,0});doc.addBond(root,end);tool=Benzene;mouseDown(screen({15,0}));check(doc.atoms.size()==6&&doc.bonds.size()==6,"middle of bond still fuses benzene to existing edge");
+    doc={};hoverAtom=hoverBond=0;tool=Benzene;mouseDown(screen({100,100}));check(doc.atoms.size()==6&&doc.bonds.size()==6,"blank canvas still draws standalone benzene");
+    selection.clear();hoverAtom=hoverBond=0;tool=Select;
 }
 int main(int argc,char** argv){
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
@@ -162,6 +193,7 @@ int main(int argc,char** argv){
             check(fittedAxes.valueFont>15,"explicit energy numbers remain readable after compression");
             writePreview(L"energy-wave-after.png",doc);check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"wave compression is one reversible edit");
         }
+        editingRegression(hwnd);
         DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();
         std::cout<<"PASS: hidden editor pointer, tab, save and zoom checks\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}

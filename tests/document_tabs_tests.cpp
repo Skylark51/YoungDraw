@@ -634,7 +634,10 @@ int main(int argc,char** argv){
             auto present=[&](int id){return hit(id).Width>0;};
             sidebarPage=0;showLayers=false;repaint();
             check(present(mechanismManagerCommand)&&present(includeMechanismCommand)&&present(120)&&present(recognizeMechanismCommand),"mechanism sidebar exposes manager, selected structure inclusion, new and recognize");
-            check(hit(mechanismManagerCommand).Y==hit(includeMechanismCommand).Y&&hit(includeMechanismCommand).Y<hit(120).Y&&hit(120).Y==hit(recognizeMechanismCommand).Y,"mechanism sidebar prioritizes managing and including structures");
+            check(hit(mechanismManagerCommand).Y==hit(includeMechanismCommand).Y&&hit(includeMechanismCommand).Y==hit(120).Y&&hit(120).Y==hit(recognizeMechanismCommand).Y,"mechanism sidebar prioritizes managing and including structures");
+            check(hit(110).Y==hit(112).Y&&hit(112).Y==hit(182).Y&&hit(182).Y==hit(183).Y,"cleanup storage mechanism and graph share one row");
+            for(int id:{182,183,mechanismManagerCommand,includeMechanismCommand,120,recognizeMechanismCommand})check(hit(id).Width==hit(id).Height&&hit(id).Width==54,"sidebar uses compact squares for tabs and actions");
+            const int fullRight=right;right=180;repaint();check(hit(182).Y>hit(110).Y&&hit(120).Y>hit(mechanismManagerCommand).Y&&hit(120).GetRight()<=ww-12,"narrow sidebar wraps action cards into another row");right=fullRight;repaint();
             check(!present(111)&&hit(mechanismManagerCommand).Width/hit(mechanismManagerCommand).Height<1.2,"sidebar removes duplicate template entry and uses compact square cards");
             auto layoutMenu=GetSubMenu(GetMenu(hwnd),3);check(GetMenuItemCount(layoutMenu)==5,"layout menu groups commands into five submenus");
             check(GetMenuState(GetSubMenu(layoutMenu,4),190,MF_BYCOMMAND)!=UINT(-1)&&GetMenuState(GetSubMenu(layoutMenu,3),190,MF_BYCOMMAND)==UINT(-1),"alignment commands belong only to object alignment submenu");
