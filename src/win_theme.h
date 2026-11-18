@@ -19,4 +19,5 @@ void background(Gdiplus::Graphics& g,Gdiplus::RectF box);
 Gdiplus::Color documentColor(Gdiplus::Color color,bool backing=false);
 void picker(HWND parent,const std::function<void()>& refresh);
 void titlebar(HWND hwnd);
+void nativeControl(HWND hwnd);
 }

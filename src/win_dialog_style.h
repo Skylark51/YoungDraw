@@ -48,10 +48,10 @@ struct DialogColors {
             text.resize(GetWindowTextLengthW(item.hwndItem)+1);
             GetWindowTextW(item.hwndItem,text.data(),int(text.size()));
         }else if(item.itemID!=UINT(-1)){
-            auto length=SendMessageW(item.hwndItem,CB_GETLBTEXTLEN,item.itemID,0);
+            auto length=SendMessageW(item.hwndItem,item.CtlType==ODT_LISTBOX?LB_GETTEXTLEN:CB_GETLBTEXTLEN,item.itemID,0);
             if(length!=CB_ERR){
                 text.resize(length+1);
-                SendMessageW(item.hwndItem,CB_GETLBTEXT,item.itemID,reinterpret_cast<LPARAM>(text.data()));
+                SendMessageW(item.hwndItem,item.CtlType==ODT_LISTBOX?LB_GETTEXT:CB_GETLBTEXT,item.itemID,reinterpret_cast<LPARAM>(text.data()));
             }
         }
         SetTextColor(item.hDC,colorRef(disabled?palette.muted:accent?palette.onAccent:palette.text));

@@ -1,4 +1,5 @@
 #include "win_button_help.h"
+#include "win_theme.h"
 #include "win_editor_chrome.h"
 #include "win_editor_commands.h"
 #include <commctrl.h>
@@ -22,8 +23,8 @@ HWND existingTip(HWND root,HWND button){struct Search{HWND root,button,found;};S
 void attach(HWND button){if(!IsWindow(button)||_wcsicmp(classOf(button).c_str(),L"Button"))return;HWND root=GetAncestor(button,GA_ROOT);auto* owner=context(root);if(!owner)return;UINT_PTR key=UINT_PTR(button);auto text=buttonHelpText(button);auto& entry=owner->entries[key];bool update=!entry.text.empty();entry.text=std::move(text);entry.control=button;entry.native=true;
     HWND tip=existingTip(root,button);if(!tip){tip=ownTip(*owner);update=false;}entry.tip=tip;TOOLINFOW info{sizeof(info)};info.hwnd=root;info.uId=key;info.uFlags=TTF_IDISHWND|TTF_SUBCLASS;info.lpszText=entry.text.data();if(update)SendMessageW(tip,TTM_UPDATETIPTEXTW,0,(LPARAM)&info);else{if(!SendMessageW(tip,TTM_ADDTOOLW,0,(LPARAM)&info))SendMessageW(tip,TTM_UPDATETIPTEXTW,0,(LPARAM)&info);}
 }
-LRESULT CALLBACK dispatchProcedure(HWND h,UINT message,WPARAM wp,LPARAM lp){if(message==attachMessage){try{attach(reinterpret_cast<HWND>(wp));}catch(...){}return 0;}return DefWindowProcW(h,message,wp,lp);}
-LRESULT CALLBACK observe(int code,WPARAM wp,LPARAM lp){if(code>=0&&dispatcher){const auto& message=*reinterpret_cast<CWPRETSTRUCT*>(lp);if(message.message==WM_CREATE||message.message==WM_SETTEXT){wchar_t type[32]{};GetClassNameW(message.hwnd,type,32);if(!_wcsicmp(type,L"Button"))PostMessageW(dispatcher,attachMessage,reinterpret_cast<WPARAM>(message.hwnd),0);}}return CallNextHookEx(hook,code,wp,lp);}
+LRESULT CALLBACK dispatchProcedure(HWND h,UINT message,WPARAM wp,LPARAM lp){if(message==attachMessage){try{appearance::nativeControl(reinterpret_cast<HWND>(wp));attach(reinterpret_cast<HWND>(wp));}catch(...){}return 0;}return DefWindowProcW(h,message,wp,lp);}
+LRESULT CALLBACK observe(int code,WPARAM wp,LPARAM lp){if(code>=0&&dispatcher){const auto& message=*reinterpret_cast<CWPRETSTRUCT*>(lp);if(message.message==WM_CREATE||message.message==WM_SETTEXT){wchar_t type[32]{};GetClassNameW(message.hwnd,type,32);if(message.message==WM_CREATE||!_wcsicmp(type,L"Button"))PostMessageW(dispatcher,attachMessage,reinterpret_cast<WPARAM>(message.hwnd),0);}}return CallNextHookEx(hook,code,wp,lp);}
 }
 std::wstring labelHelp(const std::wstring& source){std::wstring label;for(auto c:source)if(c!=L'&')label+=c;auto match=[&](const wchar_t* key){return label.find(key)!=std::wstring::npos;};
     if(label==L"...")return L"색상 선택창을 열어 옆 항목의 색을 바꿉니다.";

@@ -375,6 +375,27 @@ std::optional<std::pair<int,int>> cycleArrowAt(Vec p){
     }
     return {};
 }
+HMENU canvasContextMenu(int contextOwner,int copyOwner){
+    HMENU menu=CreatePopupMenu();
+    auto add=[&](int id,const wchar_t* label){AppendMenuW(menu,MF_STRING,id,label);};
+    if(reaction(contextOwner)){
+        add(mechanismManagerCommand,L"메커니즘 관리…");
+        if(activeStructureTarget())add(186,L"이 단계 구조 편집…");
+        if(reaction(copyOwner)&&reaction(copyOwner)->explicitConnections()&&!reaction(copyOwner)->slots.empty())add(224,L"원하는 단계만 복사…");
+        HMENU stages=CreatePopupMenu();for(auto entry:std::initializer_list<std::pair<int,const wchar_t*>>{{143,L"단계 삽입…"},{144,L"단계 제거…"},{146,L"두 단계 합치기…"},{145,L"드래그로 단계 연결"},{148,L"단계·연결 표 편집…"},{149,L"화살표 길이…"},{147,L"선택한 연결 제거"}})AppendMenuW(stages,MF_STRING,entry.first,entry.second);
+        AppendMenuW(menu,MF_POPUP,(UINT_PTR)stages,L"단계·연결");add(125,L"자동 정렬");add(126,L"촉매 순환 배치");add(169,L"분기 추가…");add(168,L"화살표 중앙 X…");
+    }else if(plot(contextOwner)){
+        add(plotManagerCommand,L"그래프 관리…");add(137,L"축 설정…");add(plotAnnotationsCommand,L"TS·이름 위치…");add(addEnergyGapCommand,L"에너지 갭 추가…");
+    }else if(!selection.empty()){
+        add(121,L"선택 항목 편집…");add(165,L"크기 조정…");
+        const bool chemical=std::any_of(selection.begin(),selection.end(),[](int id){return doc.atom(id)||doc.bond(id);});
+        if(chemical){add(110,L"구조 정리…");add(166,L"벤젠을 Ph로 축약");}
+        if(!isolatedStructureEditing)add(includeMechanismCommand,L"메커니즘에 편입…");add(112,L"템플릿으로 보관…");add(copyPngCommand,L"그림으로 복사");
+    }else{
+        add(111,L"구조 템플릿 삽입…");add(113,L"구조 파일 삽입…");if(!isolatedStructureEditing){add(120,L"새 메커니즘…");add(130,L"새 그래프…");}AppendMenuW(menu,MF_SEPARATOR,0,nullptr);add(107,L"화면 맞춤");add(184,L"배경·테마…");
+    }
+    return menu;
+}
 void mechanismContextMenu(Vec at){
     HWND hwnd=win;
     if(stageCopyOwner){cancelStageCopy();redraw();return;}
@@ -388,13 +409,11 @@ void mechanismContextMenu(Vec at){
             break;
         }
     SetFocus(hwnd);if(auto hit=cycleArrowAt(world(at))){selection={hit->first};selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;if(!copyOwner)copyOwner=hit->first;}
-    else if(!pickSlot(world(at))){int objectHit=doc.atomAt(world(at),10/zoom);if(!objectHit)objectHit=doc.bondAt(world(at),5/zoom);if(!objectHit)objectHit=objectAt(world(at));if(objectHit&&!contains(selection,objectHit))selection=groupedSelection({objectHit});}
+    else if(!pickSlot(world(at))){int objectHit=doc.atomAt(world(at),10/zoom);if(!objectHit)objectHit=doc.bondAt(world(at),5/zoom);if(!objectHit)objectHit=objectAt(world(at));if(objectHit&&!contains(selection,objectHit))selection=groupedSelection({objectHit});else if(!objectHit){selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;}}
     if(!copyOwner)copyOwner=objectAt(pointInDocument);
-    auto* copyReaction=reaction(copyOwner);
-    HMENU menu=CreatePopupMenu();
-    if(!isolatedStructureEditing&&copyReaction&&copyReaction->explicitConnections()&&!copyReaction->slots.empty()&&!doc.isLocked(copyOwner))
-        AppendMenuW(menu,MF_STRING,copyStagesItem,L"원하는 단계만 복사…");
-    AppendMenuW(menu,activeStructureTarget()?MF_STRING:MF_STRING|MF_GRAYED,186,L"구조 고치기 · 독립 창…");for(auto entry:std::initializer_list<std::pair<int,const wchar_t*>>{{143,L"단계 삽입…"},{144,L"단계 제거…"},{146,L"두 단계 합치기…"},{145,L"드래그로 단계 연결"},{148,L"단계·연결 표 편집…"},{149,L"화살표 길이…"},{147,L"선택한 연결 제거"}})AppendMenuW(menu,MF_STRING,entry.first,entry.second);AppendMenuW(menu,MF_STRING,166,L"벤젠을 Ph로 축약 (Ctrl+Shift+P)");AppendMenuW(menu,MF_STRING,167,L"가져온 메커니즘 정리 (구조 보존)");AppendMenuW(menu,MF_STRING,168,L"화살표 중앙 X 설정…");AppendMenuW(menu,MF_STRING,169,L"메커니즘 분기 추가…");AppendMenuW(menu,MF_STRING,220,L"세로선 분기 화살표…");POINT point{LONG(at.x),LONG(at.y)};ClientToScreen(hwnd,&point);int chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,hwnd,nullptr);DestroyMenu(menu);if(chosen==copyStagesItem){
+    const int contextOwner=activeStructureTarget()?targetContainer:primary();
+    HMENU menu=canvasContextMenu(contextOwner,copyOwner);
+    POINT point{LONG(at.x),LONG(at.y)};ClientToScreen(hwnd,&point);int chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,hwnd,nullptr);DestroyMenu(menu);if(chosen==copyStagesItem){
         stageCopyOwner=copyOwner;
         stagesToCopy.clear();
         selection.clear();

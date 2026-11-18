@@ -474,6 +474,18 @@ static void labelAlignmentChecks(HWND hwnd){
     alignmentPreset=4;
 
 }
+static void contextualUiChecks(HWND hwnd){
+    const auto saved=doc;const auto chosen=selection;auto oldOrigin=origin;auto oldZoom=zoom;
+    doc=Document{};selection.clear();targetContainer=0;tool=Select;origin={400,350};zoom=1;
+    auto inspect=[&](int owner){std::set<int> commands;auto menu=canvasContextMenu(owner);std::function<void(HMENU)> scan=[&](HMENU m){for(int i=0;i<GetMenuItemCount(m);++i){if(auto sub=GetSubMenu(m,i))scan(sub);else commands.insert(int(GetMenuItemID(m,i)));}};scan(menu);DestroyMenu(menu);return commands;};
+    auto commands=inspect(0);check(commands.count(120)&&!commands.count(143)&&!commands.count(169),"empty canvas context excludes mechanism stage actions");
+    int atom=doc.addAtom({0,0},26);selection={atom};commands=inspect(atom);check(commands.count(110)&&!commands.count(143),"structure context exposes structure editing only");
+    Reaction reaction;reaction.id=doc.nextId++;doc.reactions.push_back(reaction);selection={reaction.id};commands=inspect(reaction.id);check(commands.count(143)&&!commands.count(130),"mechanism context contains stage actions only for a mechanism");
+    doc=coordinateDemo();int graph=doc.plots.front().id;sidebarPage=0;showLayers=false;fit();
+    auto sc=scene();Vec click{};for(const auto& item:sc.items)if(item.owner==graph&&!item.points.empty()){click=screen(item.points[0]);if(canvas(click))break;}
+    mouseDown(click);cancel();check(sidebarPage==1,"clicking graph suggests graph tools");command(182);check(sidebarPage==0,"manual mechanism tab remains available after selecting graph");
+    doc=saved;selection=chosen;origin=oldOrigin;zoom=oldZoom;targetContainer=0;
+}
 int main(int argc,char** argv){
     BYTE initialKeys[256]{};SetKeyboardState(initialKeys);
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
@@ -548,6 +560,7 @@ int main(int argc,char** argv){
         if(argc>1&&std::string(argv[1])=="--atom-radicals-only"){
             carbonRadicalChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }
+        contextualUiChecks(hwnd);
         graphCaptionChecks(hwnd);
         if(argc>1&&std::string(argv[1])=="--plot-caption-only"){
             DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
@@ -621,7 +634,10 @@ int main(int argc,char** argv){
             auto present=[&](int id){return hit(id).Width>0;};
             sidebarPage=0;showLayers=false;repaint();
             check(present(mechanismManagerCommand)&&present(includeMechanismCommand)&&present(120)&&present(recognizeMechanismCommand),"mechanism sidebar exposes manager, selected structure inclusion, new and recognize");
-            check(hit(mechanismManagerCommand).Y<hit(includeMechanismCommand).Y&&hit(includeMechanismCommand).Y<hit(120).Y&&hit(120).Y==hit(recognizeMechanismCommand).Y,"mechanism sidebar prioritizes managing and including structures");
+            check(hit(mechanismManagerCommand).Y==hit(includeMechanismCommand).Y&&hit(includeMechanismCommand).Y<hit(120).Y&&hit(120).Y==hit(recognizeMechanismCommand).Y,"mechanism sidebar prioritizes managing and including structures");
+            check(!present(111)&&hit(mechanismManagerCommand).Width/hit(mechanismManagerCommand).Height<1.2,"sidebar removes duplicate template entry and uses compact square cards");
+            auto layoutMenu=GetSubMenu(GetMenu(hwnd),3);check(GetMenuItemCount(layoutMenu)==5,"layout menu groups commands into five submenus");
+            check(GetMenuState(GetSubMenu(layoutMenu,4),190,MF_BYCOMMAND)!=UINT(-1)&&GetMenuState(GetSubMenu(layoutMenu,3),190,MF_BYCOMMAND)==UINT(-1),"alignment commands belong only to object alignment submenu");
             for(int id:{121,127,140,143,144,145,146,147,149,169})check(!present(id),"mechanism tools are consolidated into independent editor");
             for(auto& action:hits)check(!helpText(action.id).empty(),"every visible main button has help");
             for(int id:{100,101,102,104,105,107,125,155,156,170,171,172,173,174,160,161,162,163,164}){
@@ -636,7 +652,7 @@ int main(int argc,char** argv){
             check(present(218)&&present(219)&&hit(150).GetBottom()<=wh-bottom,"orbital tools and style button fit the client height");
             auto before=toNative(doc);command(183);repaint();
             check(present(plotManagerCommand)&&present(130)&&!helpText(plotManagerCommand).empty(),"graph sidebar exposes the manager and new graph entry");
-            check(hit(plotManagerCommand).Y<hit(130).Y,"graph management is the primary sidebar action");
+            check(hit(plotManagerCommand).Y==hit(130).Y,"graph management is the primary sidebar action");
             for(int id:{131,132,133,137,139,138,151,plotAnnotationsCommand,plotWaveWidthCommand,plotWaveGapCommand,plotLegendSizeCommand,plotAxisLengthsCommand})check(!present(id),"individual graph controls are consolidated into the manager window");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;

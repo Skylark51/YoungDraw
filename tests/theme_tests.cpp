@@ -9,6 +9,7 @@
 #include "win_editor_window.h"
 #include "cdxml.h"
 #include "win_theme.h"
+#include "win_dialogs.h"
 #include <commctrl.h>
 
 using namespace yd;
@@ -17,6 +18,13 @@ using namespace yd::editor;
 namespace {
 int requested=0;bool driven=false,valid=true;
 void CALLBACK inspectGallery(HWND owner,UINT,UINT_PTR timer,DWORD){HWND gallery=nullptr;while((gallery=FindWindowExW(nullptr,gallery,L"YoungDrawTemplateGallery",nullptr))){DWORD process=0;GetWindowThreadProcessId(gallery,&process);if(process==GetCurrentProcessId()&&GetWindow(gallery,GW_OWNER)==owner)break;}if(!gallery)return;KillTimer(owner,timer);UpdateWindow(gallery);valid=valid&&ui::regionHelpCount(gallery)==25;SendMessageW(gallery,WM_COMMAND,109,0);UpdateWindow(gallery);valid=valid&&ui::regionHelpCount(gallery)==11;PostMessageW(gallery,WM_COMMAND,IDCANCEL,0);}
+void CALLBACK inspectSearch(HWND owner,UINT,UINT_PTR timer,DWORD){
+ HWND dialog=nullptr;while((dialog=FindWindowExW(nullptr,dialog,L"YoungDrawSearch",L"테마 검색 검증"))){if(GetWindow(dialog,GW_OWNER)==owner)break;}if(!dialog)return;KillTimer(owner,timer);
+ HDC dc=GetDC(dialog);auto brush=(HBRUSH)SendMessageW(dialog,WM_CTLCOLOREDIT,(WPARAM)dc,(LPARAM)GetDlgItem(dialog,10));LOGBRUSH info{};GetObjectW(brush,sizeof(info),&info);
+ valid=valid&&GetTextColor(dc)==appearance::palette().text.ToCOLORREF()&&info.lbColor==appearance::palette().raised.ToCOLORREF();ReleaseDC(dialog,dc);
+ RECT r{};GetClientRect(dialog,&r);Bitmap snapshot(r.right,r.bottom);Graphics g(&snapshot);dc=g.GetHDC();PrintWindow(dialog,dc,PW_CLIENTONLY);g.ReleaseHDC(dc);CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};snapshot.Save((L"search-theme-"+std::to_wstring(requested)+L".png").c_str(),&png,nullptr);
+ PostMessageW(dialog,WM_COMMAND,IDCANCEL,0);
+}
 void CALLBACK chooseTheme(HWND,UINT,UINT_PTR timer,DWORD){
  HWND picker=nullptr;
  // An independently running editor may also have its appearance dialog open.
@@ -30,6 +38,8 @@ void CALLBACK chooseTheme(HWND,UINT,UINT_PTR timer,DWORD){
  SendMessageW(picker,WM_COMMAND,100+requested,0);
  SendMessageW(picker,WM_COMMAND,200+requested%6,0);
  SendMessageW(picker,WM_COMMAND,302,0);
+ SetTimer(picker,998,10,inspectSearch);ui::search(picker,L"테마 검색 검증",{{L"메커니즘",L"단계와 연결"},{L"그래프",L"축과 주석"}},L"열기",true);KillTimer(picker,998);
+ auto popup=CreatePopupMenu();AppendMenuW(popup,MF_STRING,9001,L"테마 팝업 검증");SendMessageW(win,WM_INITMENUPOPUP,(WPARAM)popup,0);MENUITEMINFOW mi{sizeof(mi)};mi.fMask=MIIM_FTYPE|MIIM_DATA;GetMenuItemInfoW(popup,0,TRUE,&mi);valid=valid&&(mi.fType&MFT_OWNERDRAW)&&mi.dwItemData;DestroyMenu(popup);
  const auto& palette=appearance::palette();auto settings=appearance::settings();
  valid=valid&&settings.theme==requested&&settings.pattern==requested%6&&settings.intensity==2;
  Color rendered=appearance::documentColor(Color(255,0,0,0));

@@ -46,7 +46,7 @@ if(WIN32)
     src/office.cpp
     src/win_theme.cpp)
   target_link_libraries(youngdraw_editor PUBLIC youngdraw_storage youngdraw_cdxml
-    gdiplus comdlg32 shell32 comctl32 oleaut32 uuid advapi32 dwmapi)
+    gdiplus comdlg32 shell32 comctl32 oleaut32 uuid advapi32 dwmapi uxtheme)
   add_executable(YoungDraw WIN32 src/winmain.cpp resources/youngdraw.rc)
   target_include_directories(YoungDraw PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources")
   set_property(SOURCE resources/youngdraw.rc APPEND PROPERTY OBJECT_DEPENDS

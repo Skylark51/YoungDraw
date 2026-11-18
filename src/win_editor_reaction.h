@@ -32,6 +32,7 @@ std::vector<Vec> mechanismConnectionPath(int owner,int edge);
 bool beginMechanismConnection(Vec point);
 void finishMechanismConnection(Vec point);
 std::optional<std::pair<int,int>> cycleArrowAt(Vec p);
+HMENU canvasContextMenu(int contextOwner,int copyOwner=0);
 void mechanismContextMenu(Vec at);
 bool deleteSelectedCycleArrow();
 bool deleteSelectedMechanismStage();

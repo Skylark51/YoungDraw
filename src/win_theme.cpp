@@ -9,6 +9,10 @@
 #include <memory>
 #include <string>
 #include <cmath>
+#include <set>
+#include <map>
+#include <uxtheme.h>
+#include "win_dialog_style.h"
 namespace appearance {
 using namespace Gdiplus;
 namespace {
@@ -328,6 +332,66 @@ void background(Graphics& g,RectF box){int w=std::max(1,int(box.Width)),h=std::m
  }
 }
 Color documentColor(Color color,bool backing){const auto& p=palette();if(backing&&color.GetR()==255&&color.GetG()==255&&color.GetB()==255)return p.canvas;if(color.GetR()==color.GetG()&&color.GetG()==color.GetB()&&color.GetR()<190){BYTE v=color.GetR();if(v<40)return p.canvasInk;if(p.darkCanvas)return c(0xa4b2bf);}if(p.darkCanvas){float luminance=.2126f*color.GetR()+.7152f*color.GetG()+.0722f*color.GetB();if(luminance<155){auto lift=[](BYTE v){return BYTE(v+(255-v)*.35f);};return Color(color.GetA(),lift(color.GetR()),lift(color.GetG()),lift(color.GetB()));}}return color;}
-void titlebar(HWND hwnd){BOOL dark=current.theme!=2&&current.theme!=6;DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));COLORREF caption=RGB(palette().chrome.GetR(),palette().chrome.GetG(),palette().chrome.GetB());DwmSetWindowAttribute(hwnd,35,&caption,sizeof(caption));}
+namespace {
+struct MenuBrushes {std::map<COLORREF,HBRUSH> values;~MenuBrushes(){for(auto& entry:values)DeleteObject(entry.second);}};
+MenuBrushes menuBrushes;
+std::set<std::wstring> menuLabels;
+std::set<ULONG_PTR> menuData;
+void themePopup(HMENU menu){
+    auto& brush=menuBrushes.values[palette().panel.ToCOLORREF()];if(!brush)brush=CreateSolidBrush(palette().panel.ToCOLORREF());
+    MENUINFO background{sizeof(background)};background.fMask=MIM_BACKGROUND;background.hbrBack=brush;SetMenuInfo(menu,&background);
+    for(int i=0;i<GetMenuItemCount(menu);++i){
+        wchar_t label[512]{};MENUITEMINFOW item{sizeof(item)};item.fMask=MIIM_FTYPE|MIIM_STRING|MIIM_SUBMENU;item.dwTypeData=label;item.cch=512;
+        if(!GetMenuItemInfoW(menu,i,TRUE,&item)||item.fType&MFT_SEPARATOR)continue;
+        auto stored=menuLabels.insert(label).first;auto data=reinterpret_cast<ULONG_PTR>(stored->c_str());menuData.insert(data);
+        item.fMask=MIIM_FTYPE|MIIM_DATA;item.fType|=MFT_OWNERDRAW;item.dwItemData=data;SetMenuItemInfoW(menu,i,TRUE,&item);
+    }
+}
+struct NativeColors {ui::DialogColors colors;int theme=settings().theme;};
+LRESULT CALLBACK themedWindow(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR){
+    auto* state=static_cast<NativeColors*>(GetPropW(h,L"YoungDraw.NativeColors"));
+    if(!state||state->theme!=settings().theme){delete state;state=new NativeColors;SetPropW(h,L"YoungDraw.NativeColors",state);}
+    auto& colors=state->colors;
+    if(msg==WM_INITMENUPOPUP)themePopup(reinterpret_cast<HMENU>(wp));
+    if(msg==WM_MEASUREITEM){auto* item=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(item->CtlType==ODT_MENU&&menuData.count(item->itemData)){
+        HDC dc=GetDC(h);auto old=SelectObject(dc,GetStockObject(DEFAULT_GUI_FONT));SIZE size{};auto label=reinterpret_cast<const wchar_t*>(item->itemData);GetTextExtentPoint32W(dc,label,int(wcslen(label)),&size);SelectObject(dc,old);ReleaseDC(h,dc);item->itemWidth=size.cx+56;item->itemHeight=28;return TRUE;
+    }}
+    if(msg==WM_DRAWITEM){auto* item=reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+        wchar_t ownerClass[80]{};GetClassNameW(h,ownerClass,80);
+        if(!wcscmp(ownerClass,L"YoungDrawSearch")&&(item->CtlType==ODT_BUTTON||item->CtlType==ODT_LISTBOX)){colors.draw(*item,item->CtlID==IDOK);return TRUE;}
+
+        if(item->CtlType==ODT_MENU&&menuData.count(item->itemData)){
+            const auto& p=palette();bool selected=item->itemState&ODS_SELECTED;SetDCBrushColor(item->hDC,(selected?p.hover:p.panel).ToCOLORREF());FillRect(item->hDC,&item->rcItem,(HBRUSH)GetStockObject(DC_BRUSH));
+            SetBkMode(item->hDC,TRANSPARENT);SetTextColor(item->hDC,((item->itemState&ODS_DISABLED)?p.muted:p.text).ToCOLORREF());
+            std::wstring label=reinterpret_cast<const wchar_t*>(item->itemData);auto tab=label.find(L'\t');RECT r=item->rcItem;r.left+=20;r.right-=22;auto font=SelectObject(item->hDC,GetStockObject(DEFAULT_GUI_FONT));
+            DrawTextW(item->hDC,label.substr(0,tab).c_str(),-1,&r,DT_SINGLELINE|DT_VCENTER|DT_LEFT);
+            if(tab!=std::wstring::npos)DrawTextW(item->hDC,label.substr(tab+1).c_str(),-1,&r,DT_SINGLELINE|DT_VCENTER|DT_RIGHT);
+            if(item->itemState&ODS_CHECKED){r=item->rcItem;r.right=r.left+18;DrawTextW(item->hDC,L"✓",-1,&r,DT_SINGLELINE|DT_VCENTER|DT_CENTER);}
+            MENUITEMINFOW info{sizeof(info)};info.fMask=MIIM_SUBMENU;GetMenuItemInfoW((HMENU)item->hwndItem,item->itemID,FALSE,&info);if(info.hSubMenu){r=item->rcItem;r.left=r.right-18;DrawTextW(item->hDC,L"›",-1,&r,DT_SINGLELINE|DT_VCENTER);}
+            SelectObject(item->hDC,font);return TRUE;
+        }
+        if(item->CtlType==ODT_TAB&&GetPropW(item->hwndItem,L"YoungDraw.NativeTab")){wchar_t label[128]{};TCITEMW tab{};tab.mask=TCIF_TEXT;tab.pszText=label;tab.cchTextMax=128;TabCtrl_GetItem(item->hwndItem,item->itemID,&tab);SetDCBrushColor(item->hDC,((item->itemState&ODS_SELECTED)?palette().raised:palette().panel).ToCOLORREF());FillRect(item->hDC,&item->rcItem,(HBRUSH)GetStockObject(DC_BRUSH));SetBkMode(item->hDC,TRANSPARENT);SetTextColor(item->hDC,palette().text.ToCOLORREF());auto r=item->rcItem;DrawTextW(item->hDC,label,-1,&r,DT_SINGLELINE|DT_VCENTER|DT_CENTER);return TRUE;}
+    }
+    wchar_t cls[80]{};GetClassNameW(h,cls,80);
+    if(!wcscmp(cls,L"YoungDrawSearch")){
+        if(msg==WM_ERASEBKGND||msg==WM_PRINTCLIENT){RECT r{};GetClientRect(h,&r);FillRect((HDC)wp,&r,colors.panel);return TRUE;}
+        if(msg==WM_CTLCOLORSTATIC||msg==WM_CTLCOLOREDIT||msg==WM_CTLCOLORLISTBOX||msg==WM_CTLCOLORBTN)return colors.control(msg,(HDC)wp);
+    }
+    if(msg==WM_NOTIFY){auto* notice=reinterpret_cast<NMHDR*>(lp);wchar_t kind[32]{};GetClassNameW(notice->hwndFrom,kind,32);
+        if(notice->code==NM_CUSTOMDRAW&&!_wcsicmp(kind,L"Button")&&((GetWindowLongPtrW(notice->hwndFrom,GWL_STYLE)&BS_TYPEMASK)==BS_PUSHBUTTON||(GetWindowLongPtrW(notice->hwndFrom,GWL_STYLE)&BS_TYPEMASK)==BS_DEFPUSHBUTTON)){
+            auto* custom=reinterpret_cast<NMCUSTOMDRAW*>(lp);DRAWITEMSTRUCT draw{};draw.CtlType=ODT_BUTTON;draw.hwndItem=notice->hwndFrom;draw.hDC=custom->hdc;draw.rcItem=custom->rc;draw.itemState=custom->uItemState;colors.draw(draw,GetDlgCtrlID(notice->hwndFrom)==IDOK);return CDRF_SKIPDEFAULT;
+        }
+    }
+    if(msg==WM_NCDESTROY){RemoveWindowSubclass(h,themedWindow,id);RemovePropW(h,L"YoungDraw.NativeColors");delete state;}
+    return DefSubclassProc(h,msg,wp,lp);
+}
+}
+void nativeControl(HWND h){
+    if(!IsWindow(h))return;wchar_t cls[80]{};GetClassNameW(h,cls,80);
+    const auto panel=palette().panel;const bool dark=(panel.GetR()+panel.GetG()+panel.GetB())<384;
+    if(!_wcsicmp(cls,L"Edit")||!_wcsicmp(cls,L"ListBox")||!_wcsicmp(cls,L"ComboBox")||!_wcsicmp(cls,WC_LISTVIEWW))SetWindowTheme(h,dark?L"DarkMode_Explorer":L"Explorer",nullptr);
+    if(!_wcsicmp(cls,WC_TABCONTROLW)&&!(GetWindowLongPtrW(h,GWL_STYLE)&TCS_OWNERDRAWFIXED)){SetPropW(h,L"YoungDraw.NativeTab",(HANDLE)1);SetWindowTheme(h,L"",L"");SetWindowLongPtrW(h,GWL_STYLE,GetWindowLongPtrW(h,GWL_STYLE)|TCS_OWNERDRAWFIXED);}
+}
+void titlebar(HWND hwnd){SetWindowSubclass(hwnd,themedWindow,991,0);EnumChildWindows(hwnd,[](HWND child,LPARAM)->BOOL{nativeControl(child);return TRUE;},0);BOOL dark=current.theme!=2&&current.theme!=6;DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));COLORREF caption=RGB(palette().chrome.GetR(),palette().chrome.GetG(),palette().chrome.GetB());DwmSetWindowAttribute(hwnd,35,&caption,sizeof(caption));}
 void picker(HWND parent,const std::function<void()>& refresh){Picker p;p.parent=parent;p.before=current;p.refresh=refresh;WNDCLASSW wc{};wc.lpfnWndProc=pickerProc;wc.hInstance=GetModuleHandleW(nullptr);wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.lpszClassName=L"YoungDrawAppearance";RegisterClassW(&wc);RECT r{0,0,916,700};AdjustWindowRectEx(&r,WS_CAPTION|WS_SYSMENU,FALSE,WS_EX_DLGMODALFRAME);RECT parentRect{};GetWindowRect(parent,&parentRect);int width=r.right-r.left,height=r.bottom-r.top;HMONITOR monitor=MonitorFromWindow(parent,MONITOR_DEFAULTTONEAREST);MONITORINFO info{sizeof(info)};GetMonitorInfoW(monitor,&info);int x=std::clamp(int(parentRect.left+(parentRect.right-parentRect.left-width)/2),int(info.rcWork.left),std::max(int(info.rcWork.left),int(info.rcWork.right)-width));int y=std::clamp(int(parentRect.top+(parentRect.bottom-parentRect.top-height)/2),int(info.rcWork.top),std::max(int(info.rcWork.top),int(info.rcWork.bottom)-height));HWND hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,L"YoungDraw · 배경과 테마",WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN,x,y,width,height,parent,nullptr,wc.hInstance,&p);if(!hwnd)return;titlebar(hwnd);EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(hwnd);MSG msg{};bool quit=false;while(!p.done){BOOL result=GetMessageW(&msg,nullptr,0,0);if(result<=0){quit=result==0;break;}TranslateMessage(&msg);DispatchMessageW(&msg);}if(p.accepted)save();else current=p.before;resetCache();EnableWindow(parent,TRUE);DestroyWindow(hwnd);SetActiveWindow(parent);refresh();if(quit)PostQuitMessage(int(msg.wParam));}
 }

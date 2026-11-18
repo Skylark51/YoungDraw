@@ -60,7 +60,7 @@ bool scrollTools(Vec at,int delta){
     int* offset=nullptr,limit=0;
     if(at.y<89){offset=&topOffset;limit=topLimit;}
     else if(at.x<left){offset=&leftOffset;limit=std::max(0,drawingPanelBottom-(wh-bottom));}
-    else if(at.x>=ww-right){offset=&rightOffset;limit=std::max(0,(showLayers?737:540)-(wh-bottom));}
+    else if(at.x>=ww-right){offset=&rightOffset;limit=std::max(0,(showLayers?737:570)-(wh-bottom));}
     if(!offset)return false;
     *offset=std::clamp(*offset+delta,0,limit);
     hideTooltip();redraw();return true;
@@ -130,7 +130,10 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
          bool hovered=box.Contains(float(mouse.x),float(mouse.y));
          if(hovered){appearance::rounded(g,box,8,palette.hover);}
          Color tint=(id==101||id==102)?palette.accent:ink;
-         icon(g,id,{box.X+7,box.Y+7,30,30},tint);toolbarX+=48;
+         icon(g,id,{box.X+9,box.Y,26,26},tint);
+         std::wstring label=helpText(id);auto cut=label.find_first_of(L"\n ·([");if(cut!=std::wstring::npos)label.resize(cut);
+         switch(id){case 100:label=L"새 문서";break;case 104:label=L"되돌림";break;case 105:label=L"재실행";break;case 107:label=L"맞춤";break;case 125:label=L"정렬";break;case 155:label=L"원자 색";break;case 156:label=L"글자 색";break;case 160:label=L"좌우 반전";break;case 161:label=L"상하 반전";break;case 162:label=L"좌회전";break;case 163:label=L"우회전";break;case 164:label=L"각도";break;case 185:label=L"프로젝트";break;case bondAnimationCommand:label=L"움짤";break;case copyPngCommand:label=L"그림복사";break;}
+         ui::drawLabel(g,label,{box.X-2,box.Y+28,48,15},9.5f,palette.text,false,true);toolbarX+=48;
      }
  };
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
@@ -247,7 +250,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  if(selection.size()==1){auto found=sc.arrowPaths.find(selection.front());if(found!=sc.arrowPaths.end()&&found->second.size()==4){const auto& path=found->second;Pen guidePen(Color(170,0,135,120),1);guidePen.SetDashStyle(DashStyleDash);for(int i:{0,2}){Vec a=screen(path[i]),b=screen(path[i+1]);g.DrawLine(&guidePen,float(a.x),float(a.y),float(b.x),float(b.y));}Pen outline(accent,1.5);SolidBrush body(white),control(accent);for(int i=0;i<4;i++){Vec p=screen(path[i]);g.FillEllipse(i==1||i==2?&control:&body,float(p.x-5),float(p.y-5),10.f,10.f);g.DrawEllipse(&outline,float(p.x-5),float(p.y-5),10.f,10.f);}}}
  if(hoverAtom){Vec p=screen(doc.atom(hoverAtom)->p);Pen pen(accent,1);g.DrawEllipse(&pen,float(p.x-7),float(p.y-7),14.f,14.f);}if(boxing){Pen p(accent,1);p.SetDashStyle(DashStyleDash);g.DrawRectangle(&p,float(std::min(down.x,mouse.x)),float(std::min(down.y,mouse.y)),float(std::abs(down.x-mouse.x)),float(std::abs(down.y-mouse.y)));}if(drawing){if(tool==Orbital){auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,makeScene(draftOrbital(mouse),measure),false,true);g.Restore(transform);}else if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance||tool==Interaction){Document preview=doc;preview.objects.push_back(draftArrow(mouse));auto all=makeScene(preview,measure);Scene arrow;for(auto& item:all.items)if(item.owner==-1)arrow.items.push_back(item);auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,arrow,false,true);g.Restore(transform);}else{Pen p(accent,1.5);p.SetDashStyle(DashStyleDash);g.DrawLine(&p,float(down.x),float(down.y),float(mouse.x),float(mouse.y));}}g.Restore(state);
  float rx=float(ww-right);fill(g,{rx,float(top),float(right),float(wh-top-bottom)},palette.panel);const RectF rightClip(rx,89,float(right),float(std::max(0,wh-bottom-89)));
- rightOffset=std::min(rightOffset,std::max(0,(showLayers?737:540)-(wh-bottom)));
+ rightOffset=std::min(rightOffset,std::max(0,(showLayers?737:570)-(wh-bottom)));
  const auto rightHits=hits.size();auto rightState=g.Save();g.SetClip(rightClip);g.TranslateTransform(0,float(-rightOffset));
  button(g,175,L"도구",{rx+12,91,114,28},!showLayers);button(g,176,L"레이어",{rx+132,91,116,28},showLayers);
  if(showLayers){
@@ -269,7 +272,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
     text(g,L"잠금 상태도 문서에 저장됩니다.",rx+16,637,11,muted);
     text(g,L"Ctrl+Z로 잠금 변경을 되돌립니다.",rx+16,658,11,muted);
  }else if(isolatedStructureEditing){
-    button(g,110,L"구조 정리  Ctrl+Shift+K",{rx+12,124,236,30});button(g,111,L"템플릿",{rx+12,164,236,30});button(g,113,L"구조·이미지 파일 삽입",{rx+12,204,236,30});button(g,165,L"크기 조정  Ctrl+K",{rx+12,244,236,30});
+    button(g,110,L"구조 정리  Ctrl+Shift+K",{rx+12,124,236,30});button(g,113,L"구조·이미지 파일 삽입",{rx+12,204,236,30});button(g,165,L"크기 조정  Ctrl+K",{rx+12,244,236,30});
     text(g,L"이 단계의 구조만 편집합니다.",rx+16,304,13,ink,true);text(g,L"상단 적용 또는 Ctrl+S: 반영",rx+16,342,12,muted);text(g,L"취소 / 창 닫기: 변경 버리기",rx+16,372,12,muted);
  }else{
     auto tile=[&](int id,const wchar_t* label,RectF box,bool active=false){
@@ -277,8 +280,8 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
         const bool hovered=box.Contains(float(mouse.x),float(mouse.y));
         const auto fg=active?palette.onAccent:palette.text;
         appearance::rounded(g,box,7,active?palette.accent:hovered?palette.hover:palette.raised);
-        const float iconSize=box.Height>=50?26.f:22.f;
-        icon(g,id,{box.X+(box.Width-iconSize)*.5f,box.Y+4,iconSize,iconSize},fg);
+        const float iconSize=box.Height>=76?32.f:22.f;
+        icon(g,id,{box.X+(box.Width-iconSize)*.5f,box.Y+(box.Height>=76?14:4),iconSize,iconSize},fg);
         ui::drawLabel(g,label,{box.X+2,box.GetBottom()-20,box.Width-4,18},
                       box.Width>100?13.f:12.f,fg,active,true);
     };
@@ -291,28 +294,29 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
         }
     };
     auto heading=[&](const wchar_t* label,float y){text(g,label,rx+16,y,11,muted,true);};
-    row(124,{{110,L"구조 정리"},{111,L"템플릿"},{112,L"템플릿 보관"}});
-    tile(182,L"메커니즘",{rx+12,180,114,46},sidebarPage==0);
-    tile(183,L"그래프",{rx+132,180,116,46},sidebarPage==1);
+    tile(110,L"구조 정리",{rx+12,124,114,76});
+    tile(112,L"템플릿 보관",{rx+134,124,114,76});
+    tile(182,L"메커니즘",{rx+12,210,114,52},sidebarPage==0);
+    tile(183,L"그래프",{rx+134,210,114,52},sidebarPage==1);
     if(sidebarPage==1){
-        tile(plotManagerCommand,L"그래프 관리",{rx+12,235,237,68},true);
-        tile(130,L"새 그래프",{rx+12,315,237,55});
+        tile(plotManagerCommand,L"그래프 관리",{rx+12,274,114,100},true);
+        tile(130,L"새 그래프",{rx+134,274,114,100});
         heading(L"선택한 그래프를 한 창에서 편집",396);
         text(g,L"데이터·경로 / 축·글자 / 반응·주석",rx+16,420,11,muted);
         text(g,L"구조 / 굵기·물결",rx+16,444,11,muted);
         text(g,L"그래프를 선택한 뒤 관리를 누르세요.",rx+16,484,11,muted);
     }else{
-        tile(mechanismManagerCommand,L"메커니즘 관리",{rx+12,235,237,68},true);
-        tile(includeMechanismCommand,L"메커니즘에 편입하기",{rx+12,315,237,60});
-        tile(120,L"새 메커니즘",{rx+12,387,114,55});
-        tile(recognizeMechanismCommand,L"파일에서 인식",{rx+134,387,114,55});
-        heading(L"선택 → 편입 → 배치 미리보기",468);
-        text(g,L"구조·단계·연결은 관리 창에서 편집",rx+16,493,11,muted);
+        tile(mechanismManagerCommand,L"관리",{rx+12,274,114,100},true);
+        tile(includeMechanismCommand,L"구조 편입",{rx+134,274,114,100});
+        tile(120,L"새 메커니즘",{rx+12,384,114,100});
+        tile(recognizeMechanismCommand,L"파일에서 인식",{rx+134,384,114,100});
+        heading(L"선택 → 편입 → 배치 미리보기",500);
+        text(g,L"구조·단계·연결은 관리 창에서 편집",rx+16,523,11,muted);
 
     }
  }
  g.Restore(rightState);clipHits(rightHits,rightClip,0,float(-rightOffset));
- if(wh-bottom<(showLayers?737:540))text(g,L"↕ 휠",rx+float(right-44),91,10,muted);
+ if(wh-bottom<(showLayers?737:570))text(g,L"↕ 휠",rx+float(right-44),91,10,muted);
  fill(g,{0,float(wh-bottom),float(ww),float(bottom)},palette.chrome);rule(g,0,float(wh-bottom),float(ww),float(wh-bottom),border);text(g,status,14,float(wh-bottom+9),11,muted);Graphics out(dc);presentBuffer(out,*paintBuffer);ui::setRegionHelp(win,regionHelp);}
 
 } // namespace yd::editor

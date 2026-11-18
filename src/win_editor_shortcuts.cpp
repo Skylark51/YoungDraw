@@ -172,19 +172,16 @@ void searchCommands(){
     std::vector<ui::SearchItem> entries;
     std::vector<int> commands;
     HMENU bar=GetMenu(win);
-    for(int i=0;i<GetMenuItemCount(bar);++i){
-        wchar_t group[96]{};GetMenuStringW(bar,i,group,96,MF_BYPOSITION);
-        auto menu=GetSubMenu(bar,i);
+    std::function<void(HMENU,const std::wstring&)> scan=[&](HMENU menu,const std::wstring& group){
         for(int j=0;j<GetMenuItemCount(menu);++j){
-            const UINT id=GetMenuItemID(menu,j);
-            if(!id||id==UINT(-1)||(GetMenuState(menu,j,MF_BYPOSITION)&(MF_GRAYED|MF_DISABLED)))continue;
+            if(GetMenuState(menu,j,MF_BYPOSITION)&(MF_GRAYED|MF_DISABLED))continue;
             wchar_t label[240]{};GetMenuStringW(menu,j,label,240,MF_BYPOSITION);
-            if(id==230)continue;
-            std::wstring title(label);
-            if(const auto pos=title.find(L'\t');pos!=std::wstring::npos)title.replace(pos,1,L"   ·   ");
+            if(auto child=GetSubMenu(menu,j)){scan(child,group.empty()?label:group+L" / "+label);continue;}
+            const UINT id=GetMenuItemID(menu,j);if(!id||id==UINT(-1)||id==230)continue;
+            std::wstring title(label);if(const auto pos=title.find(L'\t');pos!=std::wstring::npos)title.replace(pos,1,L"   ·   ");
             entries.push_back({std::move(title),group});commands.push_back(int(id));
         }
-    }
+    };scan(bar,L"");
     if(auto selected=ui::search(win,L"명령 검색 · Ctrl+Shift+F",entries,L"실행"))command(commands[*selected]);
 }
 void key(WPARAM k){

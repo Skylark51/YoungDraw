@@ -287,11 +287,12 @@ struct SearchDialog {
             s->query=control(L"EDIT",L"",10,14,14,608,27,WS_TABSTOP|ES_AUTOHSCROLL,WS_EX_CLIENTEDGE);
             SendMessageW(s->query,EM_SETCUEBANNER,TRUE,LPARAM(L"검색어를 입력하세요"));
             s->list=control(L"LISTBOX",L"",11,14,50,608,s->showDetails?170:252,
-                WS_TABSTOP|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT,WS_EX_CLIENTEDGE);
+                WS_TABSTOP|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS,WS_EX_CLIENTEDGE);
+            SendMessageW(s->list,LB_SETITEMHEIGHT,0,22);
             if(s->showDetails)s->details=control(L"EDIT",L"",12,14,227,608,75,
                 WS_TABSTOP|WS_VSCROLL|ES_MULTILINE|ES_READONLY,WS_EX_CLIENTEDGE);
-            control(L"BUTTON",s->action,IDOK,414,312,100,29,WS_TABSTOP|BS_DEFPUSHBUTTON);
-            control(L"BUTTON",L"닫기",IDCANCEL,522,312,100,29,WS_TABSTOP);
+            control(L"BUTTON",s->action,IDOK,414,312,100,29,WS_TABSTOP|BS_OWNERDRAW);
+            control(L"BUTTON",L"닫기",IDCANCEL,522,312,100,29,WS_TABSTOP|BS_OWNERDRAW);
             s->filter(hwnd);return 0;
         }
         if(!s)return DefWindowProcW(hwnd,msg,wp,lp);

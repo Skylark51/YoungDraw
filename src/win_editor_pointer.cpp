@@ -194,7 +194,7 @@ Vec sproutPoint(int id){return bondEndpoint(doc,id,doc.atom(id)->p,kind());}
 Vec endpoint(Vec p){Vec a=startAtom?doc.atom(startAtom)->p:world(down);int target=doc.atomAt(world(p),8/zoom);if(target&&target!=startAtom)return doc.atom(target)->p;if((p-down).length()<5)return startAtom?bondEndpoint(doc,startAtom,doc.atom(startAtom)->p,kind(),element):a+Vec{std::cos(-pi/6),std::sin(-pi/6)}*defaultBondLength(doc,0,kind(),element);if(startAtom&&!(GetKeyState(VK_MENU)&0x8000))return bondEndpoint(doc,startAtom,world(p),kind(),element);return snapped(a,world(p),defaultBondLength(doc,startAtom,kind(),element),(GetKeyState(VK_MENU)&0x8000)!=0);}
 int objectAt(Vec p){auto sc=scene();for(auto it=doc.objects.rbegin();it!=doc.objects.rend();++it){if(doc.isLocked(it->id))continue;auto box=sc.objectBounds.find(it->id);if(box==sc.objectBounds.end())continue;auto b=box->second;double t=5/zoom;if(p.x<b.x-t||p.x>b.x+b.w+t||p.y<b.y-t||p.y>b.y+b.h+t)continue;if(hitObject(sc,it->id,p,t))return it->id;}
  for(auto& r:doc.reactions){auto b=sc.objectBounds[r.id];if(p.x>=b.x-5&&p.x<=b.x+b.w+5&&p.y>=b.y-5&&p.y<=b.y+b.h+5)return r.id;}for(auto& plot:doc.plots){if(doc.isLocked(plot.id))continue;auto b=sc.objectBounds[plot.id];if(p.x>=b.x-5&&p.x<=b.x+b.w+5&&p.y>=b.y-5&&p.y<=b.y+b.h+5)return plot.id;}return 0;}
-bool pickSlot(Vec p){if(!guides)return false;for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();i++){Vec c=reactionSlot(r,i);if(std::abs(p.x-c.x)<r.slotWidth/2&&std::abs(p.y-c.y)<r.slotHeight/2){targetContainer=r.id;targetSlot=i;targetAbove=false;selection={r.id};status=L"구조 삽입 영역 선택: Ctrl+V로 복사한 구조를 삽입합니다.";redraw();return true;}}
+bool pickSlot(Vec p){if(!guides)return false;for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();i++){Vec c=reactionSlot(r,i);if(std::abs(p.x-c.x)<r.slotWidth/2&&std::abs(p.y-c.y)<r.slotHeight/2){targetContainer=r.id;targetSlot=i;targetAbove=false;sidebarPage=0;selection={r.id};status=L"구조 삽입 영역 선택: Ctrl+V로 복사한 구조를 삽입합니다.";redraw();return true;}}
  for(auto& plot:doc.plots)if(!doc.isLocked(plot.id))for(size_t i=0;i<plot.states.size();i++)for(bool above:{false,true}){Vec c=plotAnchor(plot,i,above);if(std::abs(p.x-c.x)<24&&std::abs(p.y-c.y)<27.5){targetContainer=plot.id;targetSlot=i;targetAbove=above;sidebarPage=1;selection={plot.id};status=L"그래프 삽입 영역 선택: Ctrl+V로 복사한 구조를 삽입합니다.";redraw();return true;}}return false;}
 bool beginCurveHandle(Vec p){
     if(selection.size()!=1||(GetKeyState(VK_CONTROL)&0x8000))return false;
@@ -232,7 +232,15 @@ void updateDrag(){
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
 void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(!dragSelection.empty())selection=dragSelection;}dragSelection.clear();energyDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
-void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contains(float(p.x),float(p.y))){command(156);return;}if(!finishInline(true))return;SetFocus(win);for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();
+void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contains(float(p.x),float(p.y))){command(156);return;}if(!finishInline(true))return;SetFocus(win);for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;if(canvas(p)){
+    const Vec at=world(p);int hit=doc.atomAt(at,10/zoom);if(!hit)hit=doc.bondAt(at,5/zoom);if(!hit)hit=objectAt(at);
+    if(plot(hit)){sidebarPage=1;showLayers=false;}
+    else if(reaction(hit)){sidebarPage=0;showLayers=false;}
+    else if(hit){
+        for(const auto& r:doc.reactions)for(const auto& slot:r.slots)if(contains(slot.members,hit)){sidebarPage=0;showLayers=false;}
+        for(const auto& graph:doc.plots)for(const auto& state:graph.states)if(contains(state.above,hit)||contains(state.below,hit)){sidebarPage=1;showLayers=false;}
+    }
+}if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();
  if(placeEnergyGap(p))return;
  if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000)&&!mechanismConnecting&&!mechanismConnectionDrag&&!isolatedStructureEditing){
     int owner=0;size_t edge=0;double nearest=10;
