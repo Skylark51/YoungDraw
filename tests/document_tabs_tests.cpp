@@ -626,8 +626,8 @@ int main(int argc,char** argv){
             auto originalDoc=doc;auto originalHistory=history;auto originalSelection=selection;bool originalDirty=dirty;auto originalOrigin=origin;double originalZoom=zoom;
             // Hosted Windows desktops may cap the native window below the width
             // required by these full-toolbar layout assertions.
-            const int nativeWidth=ww,nativeHeight=wh;
-            ww=std::max(1440,ww);wh=std::max(1040,wh);
+            const int nativeWidth=ww,nativeHeight=wh,nativeRight=right;
+            ww=std::max(1440,ww);wh=std::max(1040,wh);right=260;
             Bitmap snapshot(ww,wh,PixelFormat32bppARGB);Graphics graphics(&snapshot);
             auto repaint=[&](){HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);};
             auto hit=[&](int id)->RectF{for(auto& h:hits)if(h.id==id)return h.box;return {};};
@@ -708,7 +708,7 @@ int main(int argc,char** argv){
             CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
             check(snapshot.Save(L"orbital-sidebar-preview.png",&png,nullptr)==Ok,"render orbital drawing tools and mechanism sidebar");
             sidebarPage=1;repaint();check(snapshot.Save(L"graph-sidebar-preview.png",&png,nullptr)==Ok,"render organized graph sidebar");
-            ww=nativeWidth;wh=nativeHeight;repaint();
+            ww=nativeWidth;wh=nativeHeight;right=nativeRight;repaint();
             doc=originalDoc;history=originalHistory;selection=originalSelection;dirty=originalDirty;origin=originalOrigin;zoom=originalZoom;tool=Select;orbitalKind=OrbitalKind::P;orbitalPhase=0;sidebarPage=0;
         }
         {
