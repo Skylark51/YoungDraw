@@ -28,6 +28,7 @@ inline constexpr int plotManagerCommand = 252;
 inline constexpr int plotFontCommand = 253;
 inline constexpr int mechanismManagerCommand = 254;
 inline constexpr int includeMechanismCommand = 255;
+inline constexpr int reopenClosedDocumentCommand = 256;
 inline constexpr int exportPngCommand = 247;
 inline constexpr int copyPngCommand = 248;
 

@@ -19,7 +19,8 @@ Revvity의 [공식 단축키 안내](https://revvitysignals.com/sites/default/fi
 | Ctrl+G / Ctrl+Shift+G | 그룹 / 그룹 해제 |
 | Ctrl+D | 선택 부분을 CDXML 텍스트로 복사 |
 | Ctrl+Shift+Alt+P | 기존 CDXML·구조 클립보드 붙여넣기 |
-| Ctrl+B / I / U / T | 선택한 독립 텍스트 전체의 굵게 / 기울임 / 밑줄 / 일반 서식 |
+| Ctrl+B / I / U | 선택한 독립 텍스트 전체의 굵게 / 기울임 / 밑줄 |
+| Ctrl+T / Ctrl+Shift+T | 새 문서 탭 / 최근에 닫은 탭 다시 열기 (이번 실행에서 최근 20개) |
 | Ctrl+Shift+L / C | 선택한 독립 텍스트 왼쪽 / 가운데 정렬 |
 | F9 / F10 | 텍스트 입력 중 아래 / 위첨자. Ctrl+= / Ctrl+Shift+=도 유지 |
 | Shift+G | 오비탈 도구 |

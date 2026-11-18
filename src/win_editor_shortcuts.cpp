@@ -153,6 +153,8 @@ void shortcutSettings(){
 }
 void showHelp(){
     std::vector<ui::SearchItem> entries;
+    entries.push_back({L"문서 · 새 탭과 닫은 탭 복원",
+        L"Ctrl+T 또는 Ctrl+N 새 문서 탭 / Ctrl+W 현재 탭 닫기 / Ctrl+Shift+T 최근에 닫은 탭 다시 열기. 반복하면 최근에 닫은 순서대로 복원합니다. Ctrl+Tab 다음 탭 / Ctrl+Shift+Tab 이전 탭."});
     for(const auto& guide:guidesList)entries.push_back({guide.title,guide.steps});
     entries.push_back({L"편집 · 실행 취소와 다시 실행",
         L"Ctrl+Z 실행 취소 / Ctrl+Shift+Z 다시 실행. Ctrl+Y는 보기 → 단축키 호환에서 작업 반복 또는 다시 실행으로 지정합니다."});
@@ -210,6 +212,7 @@ void key(WPARAM k){
         return;
     }
     if(ctrl){
+        if(k=='T'){command(shift?reopenClosedDocumentCommand:100);return;}
         if(shift&&k=='F'){searchCommands();return;}
         if(shift&&k=='P'){command(166);return;}
         if(shift&&(k=='H'||k=='V')){command(k=='H'?160:161);return;}
@@ -223,7 +226,7 @@ void key(WPARAM k){
         case 'A':selection=doc.editableIds();tool=Select;break;case 'C':copy();break;case 'D':copyCdxmlText();break;
         case 'X':copy();if(!selection.empty()){history.checkpoint(doc);doc.erase(selection);selection.clear();changed();}break;
         case 'V':pasteClipboard();break;case 'K':command(shift?110:165);break;case 'R':command(164);break;
-        case 'B':formatSelectedText(1);break;case 'I':formatSelectedText(2);break;case 'U':formatSelectedText(4);break;case 'T':formatSelectedText(0,true);break;
+        case 'B':formatSelectedText(1);break;case 'I':formatSelectedText(2);break;case 'U':formatSelectedText(4);break;
         case 'G':command(shift?199:198);break;
         case VK_LEFT:duplicateReaction({-1,0});break;case VK_RIGHT:duplicateReaction({1,0});break;case VK_UP:duplicateReaction({0,-1});break;case VK_DOWN:duplicateReaction({0,1});break;
         case VK_OEM_PLUS:zoom=std::min(12.,zoom*1.15);break;case VK_OEM_MINUS:zoom=std::max(.12,zoom/1.15);break;

@@ -18,6 +18,7 @@ void refreshDocumentTabs();
 bool switchDocumentTab(size_t index);
 void newDocumentTab(Document document={},std::wstring path=L"",bool fromOffice=false);
 bool closeDocumentTab(size_t index);
+bool reopenClosedDocumentTab();
 bool closeAllDocuments();
 void manageProjects(const std::wstring& initial={});
 void showRecent();

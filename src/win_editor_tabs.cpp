@@ -27,6 +27,8 @@ namespace yd::editor {
 HWND documentTabs=nullptr;HFONT tabFont=nullptr;bool officeDocument=false;
 std::vector<DocumentTab> documents;size_t activeDocument=0;
 namespace {
+std::vector<DocumentTab> closedDocuments;
+constexpr size_t closedDocumentLimit=20;
 constexpr auto recentKey=L"Software\\YoungDraw\\RecentDocuments";
 std::vector<std::wstring> recentDocuments(){
     std::vector<std::wstring> files;
@@ -188,6 +190,12 @@ bool closeDocumentTab(size_t index){
     if(!switchDocumentTab(index)||!discard())return false;
     closePlotManager();
     bool closingOffice=officeDocument&&office::editing();if(closingOffice)office::close();
+    storeDocumentTab();
+    auto closed=documents[index];
+    // Reopened Office documents become independent drawings, never stale OLE sessions.
+    if(closed.office){closed.office=false;closed.path.clear();closed.dirty=true;}
+    closedDocuments.push_back(std::move(closed));
+    if(closedDocuments.size()>closedDocumentLimit)closedDocuments.erase(closedDocuments.begin());
     documents.erase(documents.begin()+index);
     if(documents.empty()){documents.emplace_back();activeDocument=0;doc={};history.clear();filePath.clear();selection.clear();targetContainer=0;targetSlot=0;targetAbove=false;dirty=officeDocument=false;tool=Select;fit();storeDocumentTab();title();}
     else {activeDocument=std::min(index,documents.size()-1);auto next=documents[activeDocument];
@@ -195,6 +203,19 @@ bool closeDocumentTab(size_t index){
         doc=next.document;history=next.history;filePath=next.path;status=next.status;selection=next.selection;targetContainer=next.target;targetSlot=next.slot;targetAbove=next.above;dirty=next.dirty;officeDocument=next.office;zoom=next.zoom;origin=next.origin;tool=next.tool;hoverAtom=hoverBond=0;title();redraw();}
     snapshotRecovery();
     if(closingOffice)ShowWindow(win,SW_SHOW);
+    return true;
+}
+bool reopenClosedDocumentTab(){
+    if(isolatedStructureEditing)return false;
+    if(closedDocuments.empty()){
+        status=L"다시 열 수 있는 최근에 닫은 탭이 없습니다.";repaintOnly();return false;
+    }
+    if(!finishInline(true))return false;
+    storeDocumentTab();
+    documents.push_back(closedDocuments.back());
+    if(!switchDocumentTab(documents.size()-1)){documents.pop_back();return false;}
+    closedDocuments.pop_back();
+    snapshotRecovery();
     return true;
 }
 bool closeAllDocuments(){

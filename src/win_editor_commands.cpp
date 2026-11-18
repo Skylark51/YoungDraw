@@ -66,6 +66,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  case 231:showHelp();break;
  case 232:shortcutSettings();break;
  case 233:showRecent();break;
+ case reopenClosedDocumentCommand:reopenClosedDocumentTab();break;
  case bondAnimationCommand:createBondAnimation();break;
  case 143:case 144:case 145:case 146:case 147:case 148:case 149:editMechanismControls(id);break;
  case 186:if(isolatedStructureEditing){writeFile(isolatedStructureResult,toNative(doc));dirty=false;DestroyWindow(win);}else editTargetStructure();break;
