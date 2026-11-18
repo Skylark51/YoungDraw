@@ -24,6 +24,61 @@
 #include "third_party_notices.h"
 
 namespace yd::editor {
+namespace {
+void editDocumentStyle(){
+    const Document before=doc;
+    const auto& old=before.style;
+    const auto fields=std::vector<ui::Field>{
+        {L"글꼴",old.labelFont,false,ui::fontFamilies(win),false,4,false,true},
+        {L"굵게",(old.labelFace&1)?"1":"0",false,{L"보통",L"굵게"}},
+        ui::numericField(L"글자 크기 (pt)\n휠 또는 ↑ / ↓ 키",old.fontSize,4,144,1),
+        ui::numericField(L"선 굵기 (pt)\n휠 또는 ↑ / ↓ 키",old.lineWidth,.1,30,.1)
+    };
+    auto preview=[&](const std::vector<std::string>& values)->std::wstring{
+        const auto family=ui::wide(values[0]);
+        FontFamily font(family.c_str());
+        if(family.empty()||font.GetLastStatus()!=Ok)return L"설치된 글꼴을 선택하세요.";
+        Style updated=old;
+        updated.labelFont=values[0];
+        updated.labelFace=(old.labelFace&~1)|(values[1]=="1"?1:0);
+        updated.fontSize=values[2]==number(old.fontSize)?old.fontSize:numeric(values[2],4,144);
+        updated.lineWidth=values[3]==number(old.lineWidth)?old.lineWidth:numeric(values[3],.1,30);
+        const double textScale=updated.fontSize/old.fontSize;
+        const double inkScale=updated.lineWidth/old.lineWidth;
+        updated.boldWidth=old.boldWidth*inkScale;
+        auto candidate=before;
+        candidate.style=updated;
+        auto restyleText=[&](std::string& name,int& face,double& size){
+            if(updated.labelFont!=old.labelFont)name=updated.labelFont;
+            if(updated.labelFace!=old.labelFace)face=(face&~1)|(updated.labelFace&1);
+            size*=textScale;
+        };
+        for(auto& atom:candidate.atoms)if(!candidate.isLocked(atom.id)){
+            if(atom.labelSize)*atom.labelSize*=textScale;
+            if(atom.labelFace&&updated.labelFace!=old.labelFace)*atom.labelFace=(*atom.labelFace&~1)|(updated.labelFace&1);
+            for(auto& run:atom.labelRuns)restyleText(run.font,run.face,run.size);
+        }
+        for(auto& bond:candidate.bonds)if(!candidate.isLocked(bond.id)){
+            if(bond.lineWidth)*bond.lineWidth*=inkScale;
+            if(bond.boldWidth)*bond.boldWidth*=inkScale;
+        }
+        for(auto& object:candidate.objects)if(!candidate.isLocked(object.id)){
+            if(object.kind==ObjectKind::Text){
+                restyleText(object.font,object.face,object.fontSize);
+                for(auto& run:object.runs)restyleText(run.font,run.face,run.size);
+            }else if(object.kind!=ObjectKind::Image)object.width*=inkScale;
+        }
+        doc=std::move(candidate);redraw();UpdateWindow(win);
+        return {};
+    };
+    const auto result=ui::form(win,L"문서 서식",fields,preview);
+    if(!result){doc=before;redraw();return;}
+    if(toNative(doc)!=toNative(before)){
+        history.checkpoint(before);changed();
+        status=L"문서 서식을 적용했습니다. Ctrl+Z로 되돌릴 수 있습니다.";
+    }
+}
+}
 
 void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==spinMultiplicityPlotCommand||id==reactionProfilePlotCommand||id==167||id==insertBranchArrowsCommand||id==externalMechanismCommand||id==bondAnimationCommand||id==recognizeMechanismCommand)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();
  if(id==thirdPartyNoticesCommand){MessageBoxW(win,ui::wide(thirdPartyNotices).c_str(),L"오픈소스 라이선스",MB_OK|MB_ICONINFORMATION);return;}
@@ -134,7 +189,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
      p.p=target-midpoint;
      doc.plots.push_back(p);selection={p.id};tool=Select;changed();editPlot(p.id);break;}
  case 131:if(plot(primary()))editPlot(primary());else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 132:if(plot(primary()))editSeries(primary(),true);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;case 133:if(plot(primary()))editSeries(primary(),false);else throw std::runtime_error("에너지 그래프를 선택하세요.");break;
- case 125:case 126:{Document before=doc;try{optimizeMechanism(doc,selection,id==126);}catch(...){doc=before;throw;}history.checkpoint(before);selection.clear();changed();fit();break;}case 127:reactionSettings(primary());break;case 135:addBilateralBranch(primary());break;case 137:plotSettings(primary());break;case changePlotStyleCommand:changePlotStyle(primary());break;case plotAxisLengthsCommand:editPlotAxisLengths(primary());break;case 138:publicationLayout(primary());break;case 139:editPlotStages(primary());break;case 136:snapPlotStages(primary());break;case 142:editPlotColors(primary());break;case 151:editPlotCrossings(primary());break;case plotAnnotationsCommand:editPlotAnnotations(primary());break;case addEnergyGapCommand:addEnergyGap(primary());break;case 150:history.checkpoint(doc);applyHouseStyle(doc);status=L"Arial 굵게, 14 pt 라벨, 2 pt 결합선을 적용했습니다.";changed();fit();break;case 134:guides=!guides;break;case 140:newDocumentTab(mechanismGuide());sidebarPage=0;tool=Select;status=L"메커니즘 예제·도움말입니다. 확대하여 직선·촉매 순환·분기·합류 예제를 편집하고 CDXML로 저장할 수 있습니다.";changed();fit();break;case 141:sidebarPage=1;history.checkpoint(doc);doc=coordinateDemo();selection.clear();targetContainer=0;filePath.clear();tool=Select;status=L"배치 예제입니다. Ctrl+Z로 이전 문서를 복원합니다.";changed();fit();break;
+ case 125:case 126:{Document before=doc;try{optimizeMechanism(doc,selection,id==126);}catch(...){doc=before;throw;}history.checkpoint(before);selection.clear();changed();fit();break;}case 127:reactionSettings(primary());break;case 135:addBilateralBranch(primary());break;case 137:plotSettings(primary());break;case changePlotStyleCommand:changePlotStyle(primary());break;case plotAxisLengthsCommand:editPlotAxisLengths(primary());break;case 138:publicationLayout(primary());break;case 139:editPlotStages(primary());break;case 136:snapPlotStages(primary());break;case 142:editPlotColors(primary());break;case 151:editPlotCrossings(primary());break;case plotAnnotationsCommand:editPlotAnnotations(primary());break;case addEnergyGapCommand:addEnergyGap(primary());break;case 150:editDocumentStyle();break;case 134:guides=!guides;break;case 140:newDocumentTab(mechanismGuide());sidebarPage=0;tool=Select;status=L"메커니즘 예제·도움말입니다. 확대하여 직선·촉매 순환·분기·합류 예제를 편집하고 CDXML로 저장할 수 있습니다.";changed();fit();break;case 141:sidebarPage=1;history.checkpoint(doc);doc=coordinateDemo();selection.clear();targetContainer=0;filePath.clear();tool=Select;status=L"배치 예제입니다. Ctrl+Z로 이전 문서를 복원합니다.";changed();fit();break;
  }redraw();}
 
 } // namespace yd::editor

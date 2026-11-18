@@ -80,9 +80,9 @@ LRESULT CALLBACK inlineProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
 void beginInline(std::optional<InlineTarget> target,Vec at){
     if(tool!=Text)return;
     if(!finishInline(true))return;if(target&&doc.isLocked(target->owner))return;inlineBefore=doc;
-    if(target)inlineTarget=*target;else{Object o;o.id=doc.nextId++;o.kind=ObjectKind::Text;o.fontSize=doc.style.fontSize;o.face=1;o.points={at};doc.objects.push_back(o);inlineTarget={o.id,0,-1,at,o.fontSize};}
+    if(target)inlineTarget=*target;else{Object o;o.id=doc.nextId++;o.kind=ObjectKind::Text;o.fontSize=doc.style.fontSize;o.face=doc.style.labelFace;o.font=doc.style.labelFont;o.points={at};doc.objects.push_back(o);inlineTarget={o.id,0,-1,at,o.fontSize};}
     selection={inlineTarget.owner};inlineValid=true;auto value=inlineValue(inlineTarget);
-    inlineTypeface="Arial";inlineFace=doc.style.labelFace;inlineColor=RGB(0,0,0);
+    inlineTypeface=doc.style.labelFont;inlineFace=doc.style.labelFace;inlineColor=RGB(0,0,0);
     inlineWidth=inlineHeight=0;inlineAnchor=inlineTarget.p;double lo=1e20,hi=-1e20,ty=1e20;
     for(auto& t:scene().items)if(t.type==Primitive::Text&&!t.points.empty()&&t.owner==inlineTarget.owner&&t.textRole==inlineTarget.role&&t.textIndex==inlineTarget.index){inlineTarget.size=std::max(inlineTarget.size,t.fontSize);lo=std::min(lo,t.points[0].x);hi=std::max(hi,t.points[0].x+measure(t.text,t.fontSize,t.font,t.face));ty=std::min(ty,t.points[0].y);}
     if(hi>=lo)inlineAnchor={(lo+hi)/2,ty};if(auto* o=textObject(inlineTarget.owner);o&&o->centerText)inlineAnchor=o->points[0];

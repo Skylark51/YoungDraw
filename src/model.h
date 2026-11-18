@@ -21,6 +21,7 @@ struct Style {
     double bondLength=30, lineWidth=2, boldWidth=3.2, margin=2;
     double hashSpacing=2.7, bondSpacing=.12, fontSize=14;
     int labelFace=1;
+    std::string labelFont="Arial";
 };
 enum class BondKind { Single, Double, Triple, Wedge, Hash, Dash, Bold, Wavy, Aromatic, Dative, Dot };
 struct TextRun { std::string text,color="#000000",font="Arial"; double size=10; int face=0; };

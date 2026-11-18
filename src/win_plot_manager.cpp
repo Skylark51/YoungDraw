@@ -12,6 +12,8 @@
 #include "cdxml.h"
 #include "plot_data.h"
 #include <commctrl.h>
+#include <windowsx.h>
+#include <uxtheme.h>
 
 namespace yd::editor {
 HWND plotManagerWindow=nullptr;
@@ -27,12 +29,12 @@ const std::vector<std::vector<Card>> pages={
     {{242,242,L"X축 표시·굵기",L"숨김 또는 획 조절"},{243,243,L"Y축 표시·굵기",L"숨김 또는 획 조절"},{244,244,L"곡선 굵기",L"경로 선 굵기"},{245,245,L"그림 선 굵기",L"선택 후 + / - 조절"},{plotWaveWidthCommand,250,L"물결 굵기",L"선택 후 + / - 조절"},{plotWaveGapCommand,251,L"물결·곡선 간격",L"본선 절단 여백"}}
 };
 struct Manager{
-    HWND window=nullptr,tooltip=nullptr;int owner=0,page=0;bool busy=false;
-    HWND grid=nullptr;bool dataOpen=false;int weightAction=0;ULONGLONG transitionStart=0;int transitionOffset=0;std::optional<Scene> cachedScene;
+    HWND window=nullptr;int owner=0,page=0;bool busy=false;
+    HWND grid=nullptr;bool dataOpen=false;int weightAction=0;ULONGLONG transitionStart=0;int transitionOffset=0;int wheelAction=0,wheelDelta=0;std::optional<Scene> cachedScene;
     HFONT font=nullptr;ui::DialogColors colors;std::vector<HWND> cards;RectF preview;
     ~Manager(){if(font)DeleteObject(font);}
     EnergyPlot* graph(){return plot(owner);}
-    HWND button(int id,const wchar_t* label){auto h=CreateWindowExW(0,L"BUTTON",label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,1,1,window,(HMENU)INT_PTR(id),GetModuleHandleW(nullptr),nullptr);SendMessageW(h,WM_SETFONT,(WPARAM)font,TRUE);return h;}
+    HWND button(int id,const wchar_t* label){auto h=CreateWindowExW(0,L"BUTTON",label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,1,1,window,(HMENU)INT_PTR(id),GetModuleHandleW(nullptr),nullptr);SetWindowTheme(h,L"",L"");SendMessageW(h,WM_SETFONT,(WPARAM)font,TRUE);return h;}
     void targets(){
         auto combo=GetDlgItem(window,slotControl);int selected=targetContainer==owner?int(targetSlot):int(SendMessageW(combo,CB_GETCURSEL,0,0));SendMessageW(combo,CB_RESETCONTENT,0,0);
         if(auto* p=graph())for(size_t i=0;i<p->states.size();i++){auto label=std::to_wstring(i+1)+L" · "+ui::wide(p->states[i].label);SendMessageW(combo,CB_ADDSTRING,0,(LPARAM)label.c_str());}
@@ -82,15 +84,24 @@ struct Manager{
         page=selected;targets();layout();for(int i=0;i<5;i++)InvalidateRect(GetDlgItem(window,tabFirst+i),nullptr,FALSE);
     }
     void initializeCards(){
-        tooltip=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,0,0,0,0,window,nullptr,GetModuleHandleW(nullptr),nullptr);SendMessageW(tooltip,TTM_SETMAXTIPWIDTH,0,340);
-        for(const auto& category:pages)for(const auto& card:category){auto h=button(card.action,card.label);cards.push_back(h);TOOLINFOW tip{sizeof(tip)};tip.uFlags=TTF_IDISHWND|TTF_SUBCLASS;tip.hwnd=window;tip.uId=UINT_PTR(h);tip.lpszText=const_cast<wchar_t*>(card.detail);SendMessageW(tooltip,TTM_ADDTOOLW,0,(LPARAM)&tip);}
+        for(const auto& category:pages)for(const auto& card:category)cards.push_back(button(card.action,card.label));
         selectPage(0);ui::attachWindowHelp(window);
     }
     void stepWeight(bool increase){
-        if(page!=4||!graph()||doc.isLocked(owner)||(weightAction!=245&&weightAction!=plotWaveWidthCommand))return;
-        Document before=doc;auto* p=graph();if(weightAction==245)p->structureInkScale=std::clamp(p->structureInkScale+(increase?.1:-.1),.25,4.);
-        else p->waveWidth=std::clamp((p->waveWidth>0?p->waveWidth:1.)+(increase?.1:-.1),.1,20.);
-        if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}for(auto h:cards)InvalidateRect(h,nullptr,FALSE);
+        if(page==4)stepPlotAppearance(owner,weightAction,increase?1:-1);
+    }
+    void wheel(POINT cursor,int delta){
+        if(busy||(dataOpen&&page==0))return;
+        for(const auto& card:pages[size_t(page)]){
+            RECT bounds{};GetWindowRect(GetDlgItem(window,card.action),&bounds);
+            if(!PtInRect(&bounds,cursor))continue;
+            if(wheelAction!=card.action){wheelAction=card.action;wheelDelta=0;}
+            wheelDelta+=delta;
+            const int steps=wheelDelta/WHEEL_DELTA;wheelDelta%=WHEEL_DELTA;
+            stepPlotAppearance(owner,card.action,steps);
+            return;
+        }
+        wheelAction=0;
     }
     std::wstring value(int id){auto* p=graph();if(!p)return L"그래프 없음";
         if(id==plotFontCommand)return ui::wide(p->fontFamily);
@@ -100,17 +111,20 @@ struct Manager{
         return ui::wide(number(n))+(percent?L"%":L" pt");
     }
     void draw(const DRAWITEMSTRUCT& item){
-        Graphics g(item.hDC);g.SetSmoothingMode(SmoothingModeAntiAlias);const auto& palette=appearance::palette();
-        RectF box(float(item.rcItem.left),float(item.rcItem.top),float(item.rcItem.right-item.rcItem.left),float(item.rcItem.bottom-item.rcItem.top));
-        const bool tab=item.CtlID>=tabFirst&&item.CtlID<tabFirst+5;const bool active=tab&&int(item.CtlID)-tabFirst==page;
-        SolidBrush base(palette.panel);g.FillRectangle(&base,box);
-        appearance::rounded(g,box,8,active?palette.accent:item.itemState&ODS_SELECTED?palette.hover:palette.raised);
-        const auto color=active?palette.onAccent:palette.text;
+        const auto& palette=appearance::palette();
+        RECT client{};GetClientRect(item.hwndItem,&client);
+        SetDCBrushColor(item.hDC,palette.panel.ToCOLORREF());
+        FillRect(item.hDC,&client,static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+        Graphics g(item.hDC);g.SetSmoothingMode(SmoothingModeAntiAlias);
+        RectF box(0.f,0.f,float(client.right),float(client.bottom));
+        const bool tab=item.CtlID>=tabFirst&&item.CtlID<tabFirst+5;
+        const bool active=(tab&&int(item.CtlID)-tabFirst==page)||(!tab&&int(item.CtlID)==weightAction);
+        const bool keyboardFocus=(item.itemState&ODS_FOCUS)&&!(item.itemState&ODS_NOFOCUSRECT);
+        const bool pressed=(item.itemState&ODS_SELECTED)!=0;
+        const auto color=active||keyboardFocus||pressed?palette.accent:palette.text;
         const Card* card=nullptr;for(auto& entry:pages[size_t(page)])if(entry.action==int(item.CtlID))card=&entry;
         if(card){icon(g,card->icon,{box.X+(box.Width-32)/2,box.Y+6,32,32},color);ui::drawLabel(g,card->label,{box.X+4,box.Y+42,box.Width-8,22},13.f,color,true,true);auto current=value(card->action);ui::drawLabel(g,current.empty()?card->detail:current,{box.X+4,box.Y+67,box.Width-8,17},11.f,palette.muted,false,true);}
         else{wchar_t label[128]{};GetWindowTextW(item.hwndItem,label,128);ui::drawLabel(g,label,box,13.f,color,active,true);}
-        if(!tab&&int(item.CtlID)==weightAction){Pen outline(palette.accent,2);g.DrawRectangle(&outline,box.X+2,box.Y+2,box.Width-4,box.Height-4);}
-        if(item.itemState&ODS_FOCUS){RECT focus=item.rcItem;InflateRect(&focus,-4,-4);DrawFocusRect(item.hDC,&focus);}
     }
     void paint(HDC dc){
         Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);const auto& palette=appearance::palette();RECT client{};GetClientRect(window,&client);SolidBrush background(palette.panel);g.FillRectangle(&background,0,0,client.right,client.bottom);
@@ -118,7 +132,7 @@ struct Manager{
         text(g,L"선택 그래프 미리보기",preview.X,68,12,palette.muted,true);appearance::rounded(g,preview,8,Color(255,255,255,255));
         if(graph())try{if(!cachedScene)cachedScene=makeScene(doc.subset({owner}),measure);const auto& sc=*cachedScene;auto b=sc.bounds;double scale=std::min((preview.Width-32)/std::max(1.,b.w),(preview.Height-32)/std::max(1.,b.h));auto saved=g.Save();g.SetClip(preview);g.TranslateTransform(preview.X+(preview.Width-float(b.w*scale))/2-float(b.x*scale),preview.Y+(preview.Height-float(b.h*scale))/2-float(b.y*scale));g.ScaleTransform(float(scale),float(scale));render(g,sc);g.Restore(saved);}catch(const std::exception&){text(g,L"미리보기를 표시할 수 없습니다.",preview.X+16,preview.Y+24,12,palette.muted);}
         else text(g,L"그래프가 삭제되었습니다. 창을 닫고 다시 선택하세요.",preview.X+12,preview.Y+24,12,palette.muted);
-        text(g,page==4?L"그림 선·물결 굵기 버튼을 선택한 뒤 + / - 키로 조절 · Ctrl+Z: 실행 취소":page==3?L"상태·위/아래 영역 선택 → 삽입된 해당 구조만 편집합니다.":L"데이터 표는 하단 패널에서 입력하고 그래프에 즉시 반영합니다.",20,float(client.bottom-70),11,palette.muted);
+        text(g,page==4?L"크기·굵기 위에서 휠로 조절 · Ctrl+Z: 실행 취소":page==1?L"크기·간격 위에서 휠로 조절할 수 있습니다.":page==3?L"상태·위/아래 영역 선택 → 삽입된 해당 구조만 편집합니다.":L"데이터 표는 하단 패널에서 입력하고 그래프에 즉시 반영합니다.",20,float(client.bottom-70),11,palette.muted);
     }
     void act(int action){
         if(action==131){openData();return;}
@@ -154,8 +168,9 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     case WM_DRAWITEM:self->draw(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
     case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:return self->colors.control(message,reinterpret_cast<HDC>(wp));
     case WM_COMMAND:{int action=LOWORD(wp);if(action==IDCANCEL){if(!self->flushGrid())return 0;DestroyWindow(h);return 0;}if(action>=tabFirst&&action<tabFirst+5){self->selectPage(action-tabFirst);return 0;}if(action==slotControl||action==sideControl){targetContainer=self->owner;targetSlot=size_t(SendDlgItemMessageW(h,slotControl,CB_GETCURSEL,0,0));targetAbove=SendDlgItemMessageW(h,sideControl,CB_GETCURSEL,0,0)==0;return 0;}if(self->busy)return 0;
-        const bool modal=action!=131&&action!=4400&&action!=104&&action!=105;self->busy=true;if(modal)EnableWindow(h,FALSE);try{self->act(action);}catch(const std::exception& error){MessageBoxW(h,ui::wide(error.what()).c_str(),L"그래프 관리",MB_OK|MB_ICONINFORMATION);}self->busy=false;if(modal)EnableWindow(h,TRUE);
-        if(action==136||action==addEnergyGapCommand){DestroyWindow(h);SetForegroundWindow(win);SetFocus(win);}else if(IsWindowVisible(h)){SetForegroundWindow(h);if(action!=131)SetFocus(h);}return 0;}
+        const auto previousFocus=GetFocus();const bool modal=action!=131&&action!=4400&&action!=104&&action!=105;self->busy=true;if(modal)EnableWindow(h,FALSE);try{self->act(action);}catch(const std::exception& error){MessageBoxW(h,ui::wide(error.what()).c_str(),L"그래프 관리",MB_OK|MB_ICONINFORMATION);}self->busy=false;if(modal)EnableWindow(h,TRUE);
+        if(action==136||action==addEnergyGapCommand){DestroyWindow(h);SetForegroundWindow(win);SetFocus(win);}else if(modal&&IsWindowVisible(h)){SetActiveWindow(h);if(previousFocus&&(previousFocus==h||IsChild(h,previousFocus))&&IsWindowVisible(previousFocus))SetFocus(previousFocus);}return 0;}
+    case WM_MOUSEWHEEL:self->wheel({GET_X_LPARAM(lp),GET_Y_LPARAM(lp)},GET_WHEEL_DELTA_WPARAM(wp));return 0;
     case WM_KEYDOWN:if(wp==VK_ADD||wp==VK_OEM_PLUS||wp==VK_SUBTRACT||wp==VK_OEM_MINUS){self->stepWeight(wp==VK_ADD||wp==VK_OEM_PLUS);return 0;}break;
     case WM_CLOSE:if(!self->flushGrid())return 0;DestroyWindow(h);return 0;
     case WM_NCDESTROY:if(plotManagerWindow==h)plotManagerWindow=nullptr;SetWindowLongPtrW(h,GWLP_USERDATA,0);delete self;return DefWindowProcW(h,message,wp,lp);
@@ -172,6 +187,6 @@ void managePlot(int id,bool visible){
     if(!h){delete state;throw std::runtime_error("그래프 관리 창을 열 수 없습니다.");}plotManagerWindow=h;if(visible){ShowWindow(h,SW_SHOW);UpdateWindow(h);}
 }
 void closePlotManager(){if(plotManagerWindow)DestroyWindow(plotManagerWindow);}
-void refreshPlotManager(){if(plotManagerWindow){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m)m->cachedScene.reset();InvalidateRect(plotManagerWindow,nullptr,FALSE);}}
-bool handlePlotManagerMessage(MSG& message){if(!plotManagerWindow||!IsWindowEnabled(plotManagerWindow)||(message.hwnd!=plotManagerWindow&&!IsChild(plotManagerWindow,message.hwnd)))return false;if(message.message==WM_KEYDOWN&&(message.wParam==VK_ADD||message.wParam==VK_OEM_PLUS||message.wParam==VK_SUBTRACT||message.wParam==VK_OEM_MINUS)){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m->page==4){m->stepWeight(message.wParam==VK_ADD||message.wParam==VK_OEM_PLUS);return true;}}if(message.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&message.wParam=='Z'){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m->grid&&IsChild(m->grid,message.hwnd))return false;SendMessageW(plotManagerWindow,WM_COMMAND,(GetKeyState(VK_SHIFT)&0x8000)?105:104,0);return true;}return IsDialogMessageW(plotManagerWindow,&message)!=FALSE;}
+void refreshPlotManager(){if(plotManagerWindow){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m)m->cachedScene.reset();InvalidateRect(plotManagerWindow,nullptr,FALSE);if(m)for(auto card:m->cards)InvalidateRect(card,nullptr,FALSE);}}
+bool handlePlotManagerMessage(MSG& message){if(!plotManagerWindow||!IsWindowEnabled(plotManagerWindow)||(message.hwnd!=plotManagerWindow&&!IsChild(plotManagerWindow,message.hwnd)))return false;if(message.message==WM_MOUSEWHEEL){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(!m->grid||!IsChild(m->grid,message.hwnd)){SendMessageW(plotManagerWindow,message.message,message.wParam,message.lParam);return true;}}if(message.message==WM_KEYDOWN&&(message.wParam==VK_ADD||message.wParam==VK_OEM_PLUS||message.wParam==VK_SUBTRACT||message.wParam==VK_OEM_MINUS)){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m->page==4){m->stepWeight(message.wParam==VK_ADD||message.wParam==VK_OEM_PLUS);return true;}}if(message.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&message.wParam=='Z'){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m->grid&&IsChild(m->grid,message.hwnd))return false;SendMessageW(plotManagerWindow,WM_COMMAND,(GetKeyState(VK_SHIFT)&0x8000)?105:104,0);return true;}return IsDialogMessageW(plotManagerWindow,&message)!=FALSE;}
 }

@@ -46,40 +46,88 @@ void editPlotAxisLengths(int id){
         doc=std::move(candidate);redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
     const auto result=ui::form(win,L"그래프 축 길이·굵기",{
-        {L"가로축 길이 (pt)",number((axes.xEnd-axes.origin).length())},
-        {L"세로축 길이 (pt)",number((axes.yEnd-axes.origin).length())},
-        {L"전체 획 굵기 (%, 100: 기본)",number(plot(id)->inkScale*100)},
-        {L"배치","축 교차점은 고정하고 이름·주석·삽입 구조가 따라갑니다."}},preview);
+        ui::numericField(L"가로축 길이 (pt)",(axes.xEnd-axes.origin).length(),100,4000,5),
+        ui::numericField(L"세로축 길이 (pt)",(axes.yEnd-axes.origin).length(),70,4000,5),
+        ui::numericField(L"전체 획 굵기 (%, 100: 기본)",plot(id)->inkScale*100,25,400,5),
+        {L"조절","숫자 위에서 휠 또는 ↑ / ↓ 키로 조절할 수 있습니다."}},preview);
     if(result){if(preview(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
+}
+namespace {
+struct PlotNumber {
+    double value, minimum, maximum, increment, firstPositive, automaticStart;
+    double step(int steps) const {
+        if(value<=0&&steps>0)return std::clamp(automaticStart+(steps-1)*increment,firstPositive,maximum);
+        if(value<=0&&steps<0)return value;
+        const double next=value+steps*increment;
+        return next<firstPositive&&minimum<firstPositive?0.:std::clamp(next,minimum,maximum);
+    }
+};
+PlotNumber plotNumber(const EnergyPlot& p,int field){
+    const double axisStart=std::max(.8,doc.style.lineWidth*.6);
+    const PlotNumber settings[]={
+        {p.stateFontSize,0,72,1,4,doc.style.fontSize},
+        {p.valueFontSize,0,72,1,4,doc.style.fontSize},
+        {p.showXAxis?(p.xAxisWidth>0?p.xAxisWidth:-1):0,-1,100,.1,.1,axisStart},
+        {p.showYAxis?(p.yAxisWidth>0?p.yAxisWidth:-1):0,-1,100,.1,.1,axisStart},
+        {p.curveWidth,0,100,.1,.1,p.series.empty()?doc.style.lineWidth:p.series.front().width},
+        {p.structureInkScale*100,25,400,10,25,100},
+        {p.yTitleGap,0,300,1,1,1},
+        {p.legendFontSize,0,72,1,4,doc.style.fontSize},
+        {p.waveWidth,0,20,.1,.1,1},
+        {p.waveGap,-1,100,1,0,1}
+    };
+    return settings[field];
+}
+void setPlotNumber(EnergyPlot& graph,int field,double value){
+    double* targets[]={&graph.stateFontSize,&graph.valueFontSize,&graph.xAxisWidth,&graph.yAxisWidth,
+        &graph.curveWidth,&graph.structureInkScale,&graph.yTitleGap,&graph.legendFontSize,&graph.waveWidth,&graph.waveGap};
+    *targets[field]=field==5?value/100:(field==2||field==3)?std::max(0.,value):value;
+    if(field==2)graph.showXAxis=value!=0;
+    if(field==3)graph.showYAxis=value!=0;
+    if(field==1)graph.fixedValueFontSize=value>0;
+}
+}
+bool stepPlotAppearance(int id,int action,int steps){
+    const int field=action>=plotAppearanceFirstCommand&&action<=plotAppearanceLastCommand?action-plotAppearanceFirstCommand:
+        action==plotLegendSizeCommand?7:action==plotWaveWidthCommand?8:action==plotWaveGapCommand?9:-1;
+    if(field<0)return false;
+    auto* graph=plot(id);
+    if(!graph||doc.isLocked(id)||!steps)return true;
+    const auto setting=plotNumber(*graph,field);
+    const double next=setting.step(steps);
+    if(std::abs(next-setting.value)<1e-8)return true;
+    history.checkpoint(doc);setPlotNumber(*graph,field,next);changed();
+    return true;
 }
 void editPlotAppearance(int id,int field){
     const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("조절할 에너지 그래프를 선택하세요.");
     if(field<0||field>9)return;
     const Document before=doc;
     const wchar_t* labels[]={L"축 아래 이름 크기 (pt, 0: 자동)",L"데이터 값 크기 (pt, 0: 자동)",L"X축 (pt, 0: 숨김, -1: 자동)",L"Y축 (pt, 0: 숨김, -1: 자동)",L"곡선 굵기 (pt, 0: 경로별 설정)",L"삽입 그림 선 굵기 (%, 100: 기본)",L"Y축 제목 간격 (pt, 0: 자동, 최대 300)",L"범례 글자 크기 (pt, 0: 자동, 4~72)",L"물결 굵기 (pt, 0: 자동, 0.1~20)",L"물결·곡선 추가 여백 (pt, -1: 자동, 0~100)"};
-    const double current[]={p->stateFontSize,p->valueFontSize,p->showXAxis?(p->xAxisWidth>0?p->xAxisWidth:-1):0,p->showYAxis?(p->yAxisWidth>0?p->yAxisWidth:-1):0,p->curveWidth,p->structureInkScale*100,p->yTitleGap,p->legendFontSize,p->waveWidth,p->waveGap};
+    const auto setting=plotNumber(*p,field);
     auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
-        const double value=numeric(values[0],field==5?25:(field==2||field==3||field==9)?-1:0,(field<2||field==7)?72:field==5?400:field==6?300:field==8?20:100);
-        if((field<2||field==7)&&value>0&&value<4)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
-        if(field==8&&value>0&&value<.1)return L"물결 굵기는 0(자동) 또는 0.1~20 pt로 입력하세요.";
-        if(field==9&&value<0&&value!=-1)return L"물결 간격은 -1(자동) 또는 0~100 pt로 입력하세요.";
-        if((field==2||field==3)&&value<0&&value!=-1)return L"축은 0(숨김), -1(자동) 또는 양수 굵기로 입력하세요.";
-        doc=before;auto& graph=*plot(id);
-        double* targets[]={&graph.stateFontSize,&graph.valueFontSize,&graph.xAxisWidth,&graph.yAxisWidth,&graph.curveWidth,&graph.structureInkScale,&graph.yTitleGap,&graph.legendFontSize,&graph.waveWidth,&graph.waveGap};
-        *targets[field]=field==5?value/100:(field==2||field==3)?std::max(0.,value):value;if(field==2)graph.showXAxis=value!=0;if(field==3)graph.showYAxis=value!=0;if(field==1)graph.fixedValueFontSize=value>0;redraw();UpdateWindow(win);return {};
+        const double value=numeric(values[0],setting.minimum,setting.maximum);
+        if(value>0&&value<setting.firstPositive){
+            if(field==8)return L"물결 굵기는 0(자동) 또는 0.1~20 pt로 입력하세요.";
+            if(field<2||field==7)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
+        }
+        if(value<0&&value!=-1)return L"자동은 -1, 그 외에는 0 이상을 입력하세요.";
+        doc=before;setPlotNumber(*plot(id),field,value);redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
-    ui::Field control{labels[field],number(current[field])};
-    if(field==5||field==8){control.label+=L" · + / - 키로 조절";control.stepValue=[field](const std::string& text,int direction){try{return number(std::clamp(numeric(text,0,400)+(field==5?10:.1)*direction,field==5?25.:.1,field==5?400.:20.));}catch(...){return std::string(field==5?"100":"1");}};}
+    ui::Field control{std::wstring(labels[field])+L"\n휠 또는 ↑ / ↓ 키로 조절",number(setting.value)};
+    control.stepValue=[setting](const std::string& text,int steps) mutable {
+        auto current=setting;
+        try{current.value=numeric(text,setting.minimum,setting.maximum);}catch(const std::exception&){}
+        return number(current.step(steps));
+    };
     auto result=ui::form(win,L"그래프 개별 크기·굵기",{control},update);
     if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }
 void editPlotFont(int id){
     const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("글꼴을 바꿀 그래프를 선택하세요.");
-    std::vector<std::wstring> fonts;LOGFONTW query{};query.lfCharSet=DEFAULT_CHARSET;HDC dc=GetDC(win);
-    EnumFontFamiliesExW(dc,&query,[](const LOGFONTW* font,const TEXTMETRICW*,DWORD,LPARAM data)->int{auto& list=*reinterpret_cast<std::vector<std::wstring>*>(data);if(font->lfFaceName[0]!=L'@')list.emplace_back(font->lfFaceName);return 1;},reinterpret_cast<LPARAM>(&fonts),0);ReleaseDC(win,dc);
-    std::sort(fonts.begin(),fonts.end());fonts.erase(std::unique(fonts.begin(),fonts.end()),fonts.end());
+    const auto fonts=ui::fontFamilies(win);
     const Document before=doc;const auto family=p->fontFamily;const int face=p->fontFace;
     auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
         const auto name=ui::wide(values[0]);FontFamily chosen(name.c_str());if(values[0].empty()||values[0].size()>128||chosen.GetLastStatus()!=Ok)return L"설치된 글꼴 이름을 선택하세요.";

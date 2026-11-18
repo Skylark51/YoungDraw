@@ -172,7 +172,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
      else if(h.id>=200&&h.id<=218)shown=h.id-200;
  }
  text(g,toolNames[size_t(shown)],12,772,10,muted);
- button(g,150,L"Arial 굵게 / 2 pt",{12,794,156,29});
+ button(g,150,ui::wide(doc.style.labelFont)+((doc.style.labelFace&1)?L" 굵게":L"")+L" / "+ui::wide(number(doc.style.lineWidth))+L" pt",{12,794,156,29});
 
  g.Restore(leftState);clipHits(leftHits,leftClip,0,float(-leftOffset));
  if(wh-bottom<drawingPanelBottom)text(g,L"↕ 휠",float(left-46),89,10,muted);

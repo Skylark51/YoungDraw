@@ -3,15 +3,50 @@
 #include "win_ui.h"
 #include "win_dialog_style.h"
 #include "win_scripts.h"
+#include "mechanism_data.h"
+#include "win_editor_render.h"
+#include "win_editor_state.h"
 #include <commctrl.h>
 #include <commdlg.h>
+#include <windowsx.h>
 namespace ui {
 namespace {
 struct GraphPicker {
+    std::vector<yd::Scene> mechanisms;
+    int count() const {return mechanisms.empty()?5:int(mechanisms.size());}
     GraphChoice choice;DialogColors colors;HFONT font=nullptr;bool done=false,ok=false,editStyle=false;std::function<void(int)> preview;
 };
 const wchar_t* graphNames[]={L"부드러운 곡선",L"직선",L"준위 · 점선 연결",L"준위 · 실선 연결",L"독립 에너지 준위"};
 const wchar_t* graphDetails[]={L"봉우리와 중간체를 부드럽게 연결",L"상태 사이를 직선으로 연결",L"평평한 준위를 점선으로 연결",L"평평한 준위를 실선으로 연결",L"스핀 다중도 등 개별 상태 비교"};
+constexpr const wchar_t* mechanismNames[]={L"직선",L"가로 → 아래 → 순환",L"가로 → 아래 → 분기·합류",L"촉매 순환"};
+void drawMechanismCard(const DRAWITEMSTRUCT& item,const GraphPicker& picker,int mode){
+    using namespace Gdiplus;
+    const auto& palette=picker.colors.palette;
+    const bool selected=picker.choice.mode==mode;
+    Graphics g(item.hDC);g.SetSmoothingMode(SmoothingModeAntiAlias);
+    SolidBrush panel(palette.panel);
+    RectF box(float(item.rcItem.left),float(item.rcItem.top),float(item.rcItem.right-item.rcItem.left),float(item.rcItem.bottom-item.rcItem.top));
+    g.FillRectangle(&panel,box);
+    RectF square(box.X+8,box.Y+2,144,144);
+    appearance::rounded(g,square,13,selected?palette.accent:palette.raised);
+    square.Inflate(-4,-4);
+    appearance::rounded(g,square,10,Color(255,250,250,250));
+    const auto& scene=picker.mechanisms[mode];
+    const auto& b=scene.bounds;
+    const float scale=std::min((square.Width-22)/float(std::max(1.,b.w)),(square.Height-28)/float(std::max(1.,b.h)));
+    const auto transform=g.Save();
+    g.TranslateTransform(square.X+(square.Width-float(b.w)*scale)/2-float(b.x)*scale,
+        square.Y+(square.Height-float(b.h)*scale)/2-float(b.y)*scale);
+    g.ScaleTransform(scale,scale);
+    yd::editor::render(g,scene);
+    g.Restore(transform);
+    if(selected){
+        SolidBrush dot(palette.accent);g.FillEllipse(&dot,square.GetRight()-14,square.Y+6,8.f,8.f);
+    }
+    const bool focused=(item.itemState&ODS_FOCUS)&&!(item.itemState&ODS_NOFOCUSRECT);
+    ui::drawLabel(g,mechanismNames[mode],{box.X,box.Y+151,box.Width,30},12.f,
+        selected||focused?palette.accent:palette.text,selected,true);
+}
 void drawGraphCard(const DRAWITEMSTRUCT& item,GraphPicker& picker,int mode){
     using namespace Gdiplus;
     Graphics g(item.hDC);g.SetSmoothingMode(SmoothingModeAntiAlias);
@@ -43,6 +78,13 @@ LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
         picker=static_cast<GraphPicker*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(picker));
         picker->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
         auto control=[&](const wchar_t* kind,const wchar_t* label,DWORD style,int id,int x,int y,int w,int h){auto c=CreateWindowW(kind,label,WS_CHILD|WS_VISIBLE|style,x,y,w,h,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);SendMessageW(c,WM_SETFONT,WPARAM(picker->font),TRUE);return c;};
+        if(!picker->mechanisms.empty()){
+            control(L"STATIC",L"경로 예시를 보고 양식을 선택하세요.",0,0,22,16,640,28);
+            for(int i=0;i<picker->count();++i)control(L"BUTTON",mechanismNames[i],WS_TABSTOP|BS_OWNERDRAW,100+i,16+i*164,50,160,182);
+            control(L"BUTTON",L"만들기",WS_TABSTOP|BS_OWNERDRAW,IDOK,450,248,100,34);
+            control(L"BUTTON",L"취소",WS_TABSTOP|BS_OWNERDRAW,IDCANCEL,562,248,100,34);
+            return 0;
+        }
         control(L"STATIC",picker->editStyle?L"현재 그래프의 스타일을 선택하세요":L"그래프 형태를 선택하세요",0,0,22,16,680,30);
         for(int i=0;i<5;++i)control(L"BUTTON",graphNames[i],WS_TABSTOP|BS_OWNERDRAW,100+i,22+(i%3)*228,53+(i/3)*169,216,156);
         if(!picker->editStyle){
@@ -60,43 +102,106 @@ LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_ERASEBKGND){RECT r{};GetClientRect(hwnd,&r);FillRect(HDC(wp),&r,picker->colors.panel);return 1;}
     if(message==WM_CTLCOLORSTATIC)return picker->colors.control(message,HDC(wp));
     if(message==WM_DRAWITEM){const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);
-        if(item.CtlID>=100&&item.CtlID<105)drawGraphCard(item,*picker,int(item.CtlID)-100);
+        if(item.CtlID>=100&&item.CtlID<100+UINT(picker->count())){
+            const int mode=int(item.CtlID)-100;
+            if(picker->mechanisms.empty())drawGraphCard(item,*picker,mode);
+            else drawMechanismCard(item,*picker,mode);
+        }
         else picker->colors.draw(item,item.CtlID==IDOK||(item.CtlID==200&&!picker->choice.freeEnergy)||(item.CtlID==201&&picker->choice.freeEnergy));
         return TRUE;
     }
     if(message==DM_GETDEFID)return MAKELRESULT(IDOK,DC_HASDEFID);
     if(message==WM_COMMAND){int id=LOWORD(wp);
-        if(id>=100&&id<105){picker->choice.mode=id-100;if(picker->preview)picker->preview(picker->choice.mode);for(int i=100;i<105;++i)InvalidateRect(GetDlgItem(hwnd,i),nullptr,TRUE);return 0;}
+        if(id>=100&&id<100+picker->count()){picker->choice.mode=id-100;if(picker->preview)picker->preview(picker->choice.mode);for(int i=100;i<100+picker->count();++i)InvalidateRect(GetDlgItem(hwnd,i),nullptr,TRUE);return 0;}
         if(!picker->editStyle&&(id==200||id==201)){picker->choice.freeEnergy=id==201;for(int i=200;i<=201;++i)InvalidateRect(GetDlgItem(hwnd,i),nullptr,TRUE);return 0;}
         if(id==IDOK||id==IDCANCEL){picker->done=true;picker->ok=id==IDOK;PostMessageW(hwnd,WM_NULL,0,0);return 0;}
     }
     if(message==WM_CLOSE){picker->done=true;PostMessageW(hwnd,WM_NULL,0,0);return 0;}
     return DefWindowProcW(hwnd,message,wp,lp);
 }
+std::optional<GraphChoice> showPathPicker(HWND owner,GraphPicker& picker,const wchar_t* title,int width,int height,const wchar_t* className){
+    const auto instance=GetModuleHandleW(nullptr);
+    WNDCLASSW wc{};wc.lpfnWndProc=graphPickerProc;wc.hInstance=instance;wc.lpszClassName=className;
+    wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
+    constexpr DWORD style=WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN;
+    RECT area{0,0,width,height};AdjustWindowRectEx(&area,style,FALSE,0);
+    const int w=area.right-area.left,h=area.bottom-area.top;const auto r=ownedWindowRect(owner,w,h,picker.editStyle);
+    auto hwnd=CreateWindowExW(0,className,title,style,r.left,r.top,w,h,owner,nullptr,instance,&picker);
+    if(!hwnd)return {};
+    const auto previousFocus=GetFocus();
+    appearance::titlebar(hwnd);attachWindowHelp(hwnd);EnableWindow(owner,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(GetDlgItem(hwnd,100+picker.choice.mode));
+    MSG msg{};BOOL result=1;
+    while(!picker.done&&(result=GetMessageW(&msg,nullptr,0,0))>0)if(!IsDialogMessageW(hwnd,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}
+    EnableWindow(owner,TRUE);DestroyWindow(hwnd);SetActiveWindow(owner);DeleteObject(picker.font);
+    if(previousFocus&&(previousFocus==owner||IsChild(owner,previousFocus)))SetFocus(previousFocus);
+    if(result==0)PostQuitMessage(int(msg.wParam));
+    if(picker.ok)return picker.choice;
+    return {};
+}
 }
 std::optional<GraphChoice> graphChoice(HWND owner,int initialMode,bool editStyle,const std::function<void(int)>& preview){
-    static bool registered=false;if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=graphPickerProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawGraphPicker";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);registered=true;}
     GraphPicker picker;picker.choice.mode=std::clamp(initialMode,0,4);picker.editStyle=editStyle;picker.preview=preview;
-    RECT area{0,0,710,editStyle?509:598};AdjustWindowRectEx(&area,WS_CAPTION|WS_SYSMENU|WS_POPUP,FALSE,WS_EX_DLGMODALFRAME);
-    const int w=area.right-area.left,h=area.bottom-area.top;const auto r=ownedWindowRect(owner,w,h,editStyle);
-    auto hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawGraphPicker",editStyle?L"그래프 스타일 변경":L"새 에너지 그래프",WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,w,h,owner,nullptr,GetModuleHandleW(nullptr),&picker);
-    if(!hwnd)return {};
-    appearance::titlebar(hwnd);EnableWindow(owner,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(GetDlgItem(hwnd,100+picker.choice.mode));
-    MSG msg{};while(!picker.done&&GetMessageW(&msg,nullptr,0,0)>0)if(!IsDialogMessageW(hwnd,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}
-    DestroyWindow(hwnd);EnableWindow(owner,TRUE);SetActiveWindow(owner);DeleteObject(picker.font);
-    if(picker.ok)return picker.choice;return {};
+    return showPathPicker(owner,picker,editStyle?L"그래프 스타일 변경":L"새 에너지 그래프",710,editStyle?509:598,L"YoungDrawGraphPicker");
+}
+std::optional<yd::MechanismTemplate> mechanismChoice(HWND owner){
+    GraphPicker picker;
+    for(auto layout:{yd::MechanismTemplate::Linear,yd::MechanismTemplate::FeedIntoCycle,
+        yd::MechanismTemplate::SplitAndMerge,yd::MechanismTemplate::CatalyticCycle}){
+        yd::Document sample;
+        auto path=yd::mechanismTemplate(layout);
+        path.id=sample.nextId++;
+        for(size_t i=0;i<path.slots.size();++i)path.slots[i].label=std::to_string(i+1);
+        for(auto& caption:path.above)caption.clear();
+        path.centerLabel.clear();
+        sample.style.lineWidth=4;
+        sample.style.fontSize=24;
+        sample.reactions.push_back(std::move(path));
+        picker.mechanisms.push_back(makeScene(sample,yd::editor::measure));
+    }
+    auto chosen=showPathPicker(owner,picker,L"반응 메커니즘 만들기",688,298,L"YoungDrawMechanismPicker");
+    if(chosen)return static_cast<yd::MechanismTemplate>(chosen->mode);
+    return {};
 }
 static HWND editSurface(HWND control){COMBOBOXINFO info{sizeof(info)};return GetComboBoxInfo(control,&info)&&info.hwndItem?info.hwndItem:control;}
+std::vector<std::wstring> fontFamilies(HWND window){
+    std::vector<std::wstring> fonts;LOGFONTW query{};query.lfCharSet=DEFAULT_CHARSET;
+    HDC dc=GetDC(window);
+    EnumFontFamiliesExW(dc,&query,[](const LOGFONTW* font,const TEXTMETRICW*,DWORD,LPARAM data)->int{
+        auto& list=*reinterpret_cast<std::vector<std::wstring>*>(data);
+        if(font->lfFaceName[0]!=L'@')list.emplace_back(font->lfFaceName);
+        return 1;
+    },reinterpret_cast<LPARAM>(&fonts),0);
+    ReleaseDC(window,dc);
+    std::sort(fonts.begin(),fonts.end());fonts.erase(std::unique(fonts.begin(),fonts.end()),fonts.end());
+    return fonts;
+}
+Field numericField(std::wstring label,double value,double minimum,double maximum,double increment){
+    Field field{std::move(label),yd::editor::number(value)};
+    field.stepValue=[=](const std::string& text,int steps){
+        double current=value;
+        try{current=yd::editor::numeric(text);}catch(const std::exception&){}
+        return yd::editor::number(std::clamp(current+steps*increment,minimum,maximum));
+    };
+    return field;
+}
+static void stepEdit(HWND hwnd,const Field& field,int steps){
+    const int length=GetWindowTextLengthW(hwnd);
+    std::wstring current(length+1,L'\0');
+    current.resize(GetWindowTextW(hwnd,current.data(),length+1));
+    const auto next=wide(field.stepValue(utf8(current),steps));
+    if(next==current)return;
+    SetWindowTextW(hwnd,next.c_str());
+    SendMessageW(hwnd,EM_SETSEL,next.size(),next.size());
+}
 static LRESULT CALLBACK scriptEditProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR ref){
     const auto& field=*reinterpret_cast<const Field*>(ref);
     if(multilineShortcut(hwnd,msg,wp)||(field.scripts&&scriptShortcut(hwnd,msg,wp)))return 0;
-    if(msg==WM_CHAR&&(wp==L'+'||wp==L'-')&&field.stepValue){
-        const int length=GetWindowTextLengthW(hwnd);
-        std::wstring current(length+1,L'\0');
-        current.resize(GetWindowTextW(hwnd,current.data(),length+1));
-        const auto next=wide(field.stepValue(utf8(current),wp==L'+'?1:-1));
-        SetWindowTextW(hwnd,next.c_str());
-        SendMessageW(hwnd,EM_SETSEL,next.size(),next.size());
+    if(field.stepWithSigns&&field.stepValue&&msg==WM_CHAR&&(wp==L'+'||wp==L'-')){
+        stepEdit(hwnd,field,wp==L'+'?1:-1);
+        return 0;
+    }
+    if(field.stepValue&&msg==WM_KEYDOWN&&(wp==VK_UP||wp==VK_DOWN)){
+        stepEdit(hwnd,field,wp==VK_UP?1:-1);
         return 0;
     }
     if(msg==WM_GETDLGCODE)return DefSubclassProc(hwnd,msg,wp,lp)|DLGC_WANTCHARS|DLGC_WANTARROWS;
@@ -118,6 +223,8 @@ using FormTabs=std::vector<std::pair<std::wstring,std::vector<size_t>>>;
 struct Form {
     FormTabs tabs;
     HWND tab=nullptr;
+    HWND wheelInput=nullptr;
+    int wheelDelta=0;
     std::vector<std::vector<HWND>> rows;
     int contentBottom=16;
     RECT picture{};
@@ -192,6 +299,20 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         return 0;
     }
     if(!f)return DefWindowProcW(hwnd,msg,wp,lp);
+    if(msg==WM_MOUSEWHEEL){
+        const POINT cursor{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};
+        for(size_t i=0;i<f->edits.size();++i){
+            auto input=f->edits[i];RECT bounds{};
+            if(!f->fields[i].stepValue||!IsWindowVisible(input)||!GetWindowRect(input,&bounds)||!PtInRect(&bounds,cursor))continue;
+            if(f->wheelInput!=input){f->wheelInput=input;f->wheelDelta=0;}
+            f->wheelDelta+=GET_WHEEL_DELTA_WPARAM(wp);
+            const int steps=f->wheelDelta/WHEEL_DELTA;f->wheelDelta%=WHEEL_DELTA;
+            if(steps)stepEdit(input,f->fields[i],steps);
+            return 1;
+        }
+        f->wheelInput=nullptr;
+        return 0;
+    }
     if(msg==WM_PAINT&&f->illustration){
         PAINTSTRUCT ps{};HDC dc=BeginPaint(hwnd,&ps);
         try{f->illustration(dc,f->picture,read(*f));}catch(const std::exception&){}
@@ -234,14 +355,18 @@ std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& tit
     }
     const int height=92+f.contentBottom+(callback?43:0)+(illustration?132:0);
     const RECT r=ownedWindowRect(parent,700,height,bool(callback));
-    HWND hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawForm",title.c_str(),WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,700,height,parent,nullptr,GetModuleHandleW(nullptr),&f);
+    HWND hwnd=CreateWindowExW(0,L"YoungDrawForm",title.c_str(),WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,700,height,parent,nullptr,GetModuleHandleW(nullptr),&f);
     if(!hwnd)return {};
+    const auto previousFocus=GetFocus();
     appearance::titlebar(hwnd);EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);
     SetFocus(f.tab?f.tab:f.edits.empty()?f.apply:f.edits.front());MSG msg{};while(!f.done&&GetMessageW(&msg,nullptr,0,0)>0){const bool editKey=msg.message==WM_KEYDOWN&&
             (msg.wParam==VK_HOME||msg.wParam==VK_END||(msg.wParam=='A'&&(GetKeyState(VK_CONTROL)&0x8000)))&&
             GetWindowSubclass(msg.hwnd,scriptEditProc,1,nullptr);
+        if(msg.message==WM_MOUSEWHEEL&&SendMessageW(hwnd,msg.message,msg.wParam,msg.lParam))continue;
         if(editKey||!IsDialogMessageW(hwnd,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
-    DestroyWindow(hwnd);if(f.font)DeleteObject(f.font);EnableWindow(parent,TRUE);SetActiveWindow(parent);if(f.ok)return f.result;return {};
+    EnableWindow(parent,TRUE);DestroyWindow(hwnd);if(f.font)DeleteObject(f.font);SetActiveWindow(parent);
+    if(previousFocus&&(previousFocus==parent||IsChild(parent,previousFocus)))SetFocus(previousFocus);
+    if(f.ok)return f.result;return {};
 }
 namespace {
 struct SearchDialog {
@@ -324,7 +449,7 @@ std::optional<size_t> search(HWND owner,const std::wstring& title,const std::vec
     if(!registered)return {};
     SearchDialog state{entries,action,showDetails};
     const RECT rect=ownedWindowRect(owner,652,393);
-    auto hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawSearch",title.c_str(),
+    auto hwnd=CreateWindowExW(0,L"YoungDrawSearch",title.c_str(),
         WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,rect.left,rect.top,652,393,owner,nullptr,nullptr,&state);
     if(!hwnd)return {};
     appearance::titlebar(hwnd);EnableWindow(owner,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(state.query);

@@ -117,7 +117,7 @@ void exportZip(const Project& project,const fs::path& path,const PngWriter& png)
 
 struct Manager {
     HWND window=nullptr, projects=nullptr, items=nullptr, note=nullptr, heading=nullptr, hint=nullptr;
-    HWND search=nullptr, breadcrumb=nullptr, tooltip=nullptr;
+    HWND search=nullptr, breadcrumb=nullptr;
     HFONT iconFont=nullptr;
     HIMAGELIST images=nullptr;
     std::vector<int> visible;
@@ -161,26 +161,32 @@ struct Manager {
         int side=std::clamp(rightWidth,180,std::max(180,w/2));
         int x=left+22,px=std::max(x+180,w-side-10);side=w-px-10;
         auto place=[&](int id,int xx,int yy,int ww,int hh){MoveWindow(GetDlgItem(window,id),xx,yy,std::max(1,ww),std::max(1,hh),TRUE);};
-        place(1,10,10,left-34,24);place(16,left-24,6,34,32);
-        for(int i=0;i<6;++i)place(10+i,10+(i%3)*36,42+(i/3)*36,32,32);
-        MoveWindow(projects,10,118,left,std::max(1,h-152),TRUE);
+        constexpr int tileHeight=46,rowPitch=48;
+        const int leftTile=left/3;
+        place(1,10,10,left-44,24);place(16,left-30,4,40,tileHeight);
+        for(int i=0;i<6;++i)place(10+i,10+(i%3)*leftTile,52+(i/3)*rowPitch,leftTile,tileHeight);
+        const int projectsTop=52+2*rowPitch;
+        MoveWindow(projects,10,projectsTop,left,std::max(1,h-projectsTop-34),TRUE);
         place(3,x,10,std::max(1,px-x-10),24);
         const int actionIds[]={20,21,22,23,24,25,26,27,29,30,31,17,18};
-        int cols=std::max(1,(px-x-10)/36),rows=(13+cols-1)/cols;
-        for(int i=0;i<13;++i)place(actionIds[i],x+(i%cols)*36,42+(i/cols)*36,32,32);
-        int sy=46+rows*36;place(46,x,sy,px-x-10,22);MoveWindow(search,x,sy+24,std::max(1,px-x-10),28,TRUE);
+        const int centerWidth=px-x-10;
+        const int cols=std::max(1,centerWidth/55),rows=(13+cols-1)/cols;
+        const int tileWidth=std::clamp(centerWidth/cols,55,72);
+        for(int i=0;i<13;++i)place(actionIds[i],x+(i%cols)*tileWidth,38+(i/cols)*rowPitch,tileWidth,tileHeight);
+        const int sy=40+rows*rowPitch;place(46,x,sy,px-x-10,22);MoveWindow(search,x,sy+24,std::max(1,px-x-10),28,TRUE);
         MoveWindow(breadcrumb,x,sy+58,std::max(1,px-x-10),24,TRUE);
         int top=sy+86;MoveWindow(items,x,top,std::max(1,px-x-10),std::max(1,h-top-34),TRUE);
         ListView_SetColumnWidth(items,0,std::max(90,px-x-115));ListView_SetColumnWidth(items,1,90);
-        leftGrip={left+10,118,x,h-34};rightGrip={px-9,42,px,h-34};
-        for(int i=32;i<=35;++i)place(i,px+(i-32)*36,6,32,32);
-        preview={px,42,w-10,std::max(110,h/2)};
-        place(2,px,preview.bottom+8,side,24);MoveWindow(note,px,preview.bottom+36,std::max(1,side),std::max(1,h-int(preview.bottom)-104),TRUE);
-        place(28,px,h-60,32,28);place(36,px+40,h-58,side-40,24);
+        leftGrip={left+10,projectsTop,x,h-34};rightGrip={px-9,52,px,h-34};
+        constexpr int previewTile=44;
+        for(int i=32;i<=35;++i)place(i,px+(i-32)*previewTile,4,previewTile,tileHeight);
+        preview={px,54,w-10,std::max(110,h/2)};
+        place(2,px,preview.bottom+8,side,24);MoveWindow(note,px,preview.bottom+36,std::max(1,side),std::max(1,h-int(preview.bottom)-118),TRUE);
+        place(28,px,h-78,56,tileHeight);place(36,px+62,h-66,side-62,24);
         MoveWindow(hint,10,h-26,std::max(1,w-20),22,TRUE);
         for(int id:{1,3,16,40,41,42,43,2,28,36,44,45,46})ShowWindow(GetDlgItem(window,id),expanded?SW_HIDE:SW_SHOW);
         for(int id=10;id<=31;++id)if(GetDlgItem(window,id))ShowWindow(GetDlgItem(window,id),expanded?SW_HIDE:SW_SHOW);
-        if(expanded){preview={10,46,w-10,h-10};for(int i=32;i<=35;++i)place(i,10+(i-32)*36,6,32,32);}
+        if(expanded){preview={10,54,w-10,h-10};for(int i=32;i<=35;++i)place(i,10+(i-32)*previewTile,4,previewTile,tileHeight);}
         InvalidateRect(window,nullptr,TRUE);
     }
     void saveNote(){
@@ -359,24 +365,40 @@ struct Manager {
         const bool list=draw.CtlType==ODT_LISTBOX;
         const bool active=(draw.itemState&(list?ODS_SELECTED:ODS_SELECTED|ODS_HOTLIGHT))!=0;
         const bool disabled=(draw.itemState&ODS_DISABLED)!=0;
-        const bool primary=!list&&(draw.CtlID==14||draw.CtlID==23);
-        const bool accent=!disabled&&(list?active:primary&&!active);
-        auto background=accent?palette.accent:active?palette.hover:list||disabled?palette.panel:palette.raised;
         auto area=draw.rcItem;auto dc=draw.hDC;
-        fill(dc,area,background);
-        if(!list)frame(dc,area,draw.itemState&ODS_FOCUS?palette.accent:palette.edge);
-        SetTextColor(dc,color(disabled?palette.muted:accent?palette.onAccent:palette.text));SetBkMode(dc,TRANSPARENT);
-        auto previous=SelectObject(dc,list?font:iconFont);
-        if(list)area.left+=8;
-        wchar_t label[256]{};
-        if(list&&draw.itemID<all.size())SendMessageW(draw.hwndItem,LB_GETTEXT,draw.itemID,(LPARAM)label);
+        fill(dc,area,list&&active?palette.accent:list?palette.panel:palette.chrome);
+        SetBkMode(dc,TRANSPARENT);
+        auto previous=SelectObject(dc,font);
+        if(list){
+            area.left+=8;
+            wchar_t label[256]{};
+            if(draw.itemID<all.size())SendMessageW(draw.hwndItem,LB_GETTEXT,draw.itemID,(LPARAM)label);
+            SetTextColor(dc,color(active?palette.onAccent:palette.text));
+            DrawTextW(dc,label,-1,&area,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);
+        }
         if(!list){
             const wchar_t* glyph=L"\xE10F";
             switch(draw.CtlID){case 10:glyph=L"\xE109";break;case 11:glyph=L"\xE946";break;case 12:case 25:glyph=L"\xE74D";break;case 13:glyph=L"\xE8B5";break;case 14:glyph=L"\xE898";break;case 15:glyph=L"\xE838";break;case 16:glyph=L"\xE721";break;case 17:glyph=L"\xE8C8";break;case 18:glyph=L"\xE898";break;case 20:glyph=L"\xE8A5";break;case 21:glyph=L"\xE8E5";break;case 22:glyph=L"\xE8C8";break;case 23:glyph=L"\xE768";break;case 24:glyph=L"\xE70F";break;case 26:case 30:glyph=L"\xE74A";break;case 27:glyph=L"\xE74B";break;case 28:glyph=L"\xE74E";break;case 29:glyph=L"\xE8F4";break;case 31:glyph=L"\xE8DE";break;case 32:glyph=expanded?L"\xE73F":L"\xE740";break;case 33:glyph=L"\xE8A3";break;case 34:glyph=L"\xE71F";break;case 35:glyph=L"\xE72C";break;}
-            lstrcpynW(label,glyph,256);
+            const wchar_t* captions[]={L"새로",L"정보",L"삭제",L"가져오기",L"내보내기",L"폴더",L"검색",L"복제",L"ZIP 저장",L"",
+                L"새 구조",L"파일 추가",L"문서 추가",L"열기",L"이름·노트",L"삭제",L"위로",L"아래로",L"노트 저장",
+                L"새 폴더",L"상위 폴더",L"이동",L"크게 보기",L"확대",L"축소",L"초기화"};
+            const wchar_t* caption=draw.CtlID==32&&expanded?L"목록 보기":captions[draw.CtlID-10];
+            constexpr int side=25;
+            const int x=(area.left+area.right-side)/2,y=area.top+1;
+            RECT square{x,y,x+side,y+side};
+            const bool primary=!disabled&&(draw.CtlID==14||draw.CtlID==23);
+            {
+                Gdiplus::Graphics g(dc);g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+                appearance::rounded(g,{float(x),float(y),float(side),float(side)},6,
+                    active?palette.hover:primary?palette.accent:palette.raised);
+                ui::drawLabel(g,caption,{float(area.left),float(square.bottom+1),float(area.right-area.left),float(area.bottom-square.bottom-1)},
+                    11.f,disabled?palette.muted:palette.text,false,true);
+            }
+            SetTextColor(dc,color(disabled?palette.muted:primary&&!active?palette.onAccent:palette.text));
+            SelectObject(dc,iconFont);
+            DrawTextW(dc,glyph,-1,&square,DT_SINGLELINE|DT_VCENTER|DT_CENTER|DT_NOPREFIX);
         }
-        DrawTextW(dc,label,-1,&area,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX|(list?DT_LEFT:DT_CENTER));
-        if(draw.itemState&ODS_FOCUS){area=draw.rcItem;InflateRect(&area,-3,-3);DrawFocusRect(dc,&area);}
+        if((draw.itemState&ODS_FOCUS)&&!(draw.itemState&ODS_NOFOCUSRECT)){area=draw.rcItem;InflateRect(&area,-2,-1);DrawFocusRect(dc,&area);}
         SelectObject(dc,previous);
     }
     static LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
@@ -405,9 +427,6 @@ struct Manager {
                 self->control(L"STATIC",L"파일·폴더·노트 검색 (Ctrl+F)",46,SS_ENDELLIPSIS);
                 self->search=self->control(L"EDIT",L"",44,WS_BORDER|WS_TABSTOP|ES_AUTOHSCROLL);SendMessageW(self->search,EM_SETCUEBANNER,TRUE,(LPARAM)L"파일·폴더·노트 검색 (Ctrl+F)");
                 self->breadcrumb=self->control(L"STATIC",L"",45,SS_ENDELLIPSIS);
-                self->tooltip=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,h,nullptr,GetModuleHandleW(nullptr),nullptr);
-                SendMessageW(self->tooltip,TTM_SETMAXTIPWIDTH,0,300);
-                for(int id=10;id<=35;++id){HWND button=GetDlgItem(h,id);if(!button)continue;wchar_t label[256]{};GetWindowTextW(button,label,256);TOOLINFOW info{sizeof(info)};info.uFlags=TTF_IDISHWND|TTF_SUBCLASS;info.hwnd=h;info.uId=UINT_PTR(button);info.lpszText=label;SendMessageW(self->tooltip,TTM_ADDTOOLW,0,(LPARAM)&info);}
                 self->projects=self->control(L"LISTBOX",L"",40,WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|WS_TABSTOP);
                 SendMessageW(self->projects,LB_SETITEMHEIGHT,0,24);
                 self->items=self->control(WC_LISTVIEWW,L"",41,LVS_REPORT|LVS_SHOWSELALWAYS|WS_TABSTOP);
@@ -423,7 +442,7 @@ struct Manager {
                 LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=260;col.pszText=const_cast<wchar_t*>(L"이름 · 드래그로 순서 변경");ListView_InsertColumn(self->items,0,&col);col.cx=90;col.pszText=const_cast<wchar_t*>(L"형식");ListView_InsertColumn(self->items,1,&col);
                 self->note=self->control(L"EDIT",L"",42,WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_TABSTOP);SendMessageW(self->note,EM_SETLIMITTEXT,1024*1024,0);
                 self->hint=self->control(L"STATIC",L"다른 PC의 프로젝트: 폴더 전체를 옮긴 뒤 불러오기에서 project.ydproject 선택",43,SS_ENDELLIPSIS);
-                DragAcceptFiles(h,TRUE);self->layout();self->load();return 0;}
+                DragAcceptFiles(h,TRUE);self->layout();self->load();ui::attachWindowHelp(h);return 0;}
             case WM_ERASEBKGND:{
                 RECT area{};GetClientRect(h,&area);fill((HDC)wp,area,appearance::palette().chrome);return TRUE;}
             case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{
@@ -493,7 +512,7 @@ void manage(HWND owner,const Callbacks& callbacks,const fs::path& initial){
     const int w=std::min(1140,int(monitor.rcWork.right-monitor.rcWork.left));
     const int h=std::min(760,int(monitor.rcWork.bottom-monitor.rcWork.top));
     const RECT r=ui::ownedWindowRect(owner,w,h);
-    HWND window=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,L"내 프로젝트 — YoungDraw",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,r.left,r.top,w,h,owner,nullptr,wc.hInstance,&manager);
+    HWND window=CreateWindowExW(0,wc.lpszClassName,L"내 프로젝트 — YoungDraw",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,r.left,r.top,w,h,owner,nullptr,wc.hInstance,&manager);
     if(!window)throw std::runtime_error("프로젝트 창을 열 수 없습니다.");
     appearance::titlebar(window);
     EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);MSG msg{};

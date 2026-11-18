@@ -132,7 +132,7 @@ std::optional<TemplateChoice> templateGallery(HWND parent,const std::vector<Temp
     static bool registered=false;if(!registered){WNDCLASSW wc{};wc.style=CS_DBLCLKS;wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawTemplateGallery";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);registered=true;}
     Gallery f;f.cards=&cards;f.category=initialCategory;f.painter=painter;filter(f);
     RECT work{};SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0);int width=std::min(1180,int(work.right-work.left)-24),height=std::min(820,int(work.bottom-work.top)-24);
-    HWND hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawTemplateGallery",L"템플릿 · 미리보기와 삽입",WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,work.left+(work.right-work.left-width)/2,work.top+(work.bottom-work.top-height)/2,width,height,parent,nullptr,GetModuleHandleW(nullptr),&f);
+    HWND hwnd=CreateWindowExW(0,L"YoungDrawTemplateGallery",L"템플릿 · 미리보기와 삽입",WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,work.left+(work.right-work.left-width)/2,work.top+(work.bottom-work.top-height)/2,width,height,parent,nullptr,GetModuleHandleW(nullptr),&f);
     if(!hwnd)return {};appearance::titlebar(hwnd);EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(f.edit);MSG msg;
     while(!f.done&&GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
     DestroyWindow(hwnd);if(f.font)DeleteObject(f.font);if(f.editBrush)DeleteObject(f.editBrush);EnableWindow(parent,TRUE);SetActiveWindow(parent);

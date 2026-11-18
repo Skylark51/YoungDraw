@@ -357,7 +357,7 @@ std::optional<Document> mechanismEditor(HWND parent,const Document& draft,int ow
     Editor editor;editor.draft=draft;editor.source=original?*original:draft;editor.owner=owner;editor.callbacks=callbacks;
     MONITORINFO m{sizeof(m)};GetMonitorInfoW(MonitorFromWindow(parent,MONITOR_DEFAULTTONEAREST),&m);
     int width=std::min(1280L,m.rcWork.right-m.rcWork.left),height=std::min(900L,m.rcWork.bottom-m.rcWork.top);auto r=ui::ownedWindowRect(parent,width,height);
-    HWND window=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,original?L"메커니즘 변환 미리보기 · 적용 전 편집":L"메커니즘 편집 · 그림에서 직접 수정",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,r.left,r.top,width,height,parent,nullptr,wc.hInstance,&editor);
+    HWND window=CreateWindowExW(0,wc.lpszClassName,original?L"메커니즘 변환 미리보기 · 적용 전 편집":L"메커니즘 편집 · 그림에서 직접 수정",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,r.left,r.top,width,height,parent,nullptr,wc.hInstance,&editor);
     if(!window)throw std::runtime_error("메커니즘 편집창을 열 수 없습니다.");appearance::titlebar(window);EnableWindow(parent,FALSE);ShowWindow(window,SW_SHOW);
     MSG msg{};while(IsWindow(window)){
         auto result=GetMessageW(&msg,nullptr,0,0);if(result<=0){if(result==0)PostQuitMessage(int(msg.wParam));break;}

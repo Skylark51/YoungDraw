@@ -409,7 +409,7 @@ std::optional<Table> table(HWND parent,const std::wstring& title,const std::vect
     if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=gridProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawGrid";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);registered=true;}
     Grid g;g.columns=columns;g.rows=rows;g.original=rows;g.preview=preview;g.cellError=cellError;g.scripts=scripts;g.hint=hint;g.stages=stages;g.scriptColumn=scriptColumn<0?(stages?1:0):scriptColumn;if(g.rows.empty())g.rows.push_back(std::vector<std::string>(columns.size()));const RECT r=ownedWindowRect(parent,990,680);
     if(columnEdit){g.columnEdit=columnEdit;g.originalColumns=columns;}
-    HWND hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawGrid",title.c_str(),WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,990,680,parent,nullptr,GetModuleHandleW(nullptr),&g);
+    HWND hwnd=CreateWindowExW(0,L"YoungDrawGrid",title.c_str(),WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,990,680,parent,nullptr,GetModuleHandleW(nullptr),&g);
     if(!hwnd)return {};
     appearance::titlebar(hwnd);EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);selectCell(g,0,0);
     MSG msg;while(!g.done&&GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN&&!g.edit&&(GetKeyState(VK_CONTROL)&0x8000)&&(msg.wParam=='Z'||msg.wParam=='Y')){undo(g,msg.wParam=='Y'||(GetKeyState(VK_SHIFT)&0x8000));continue;}TranslateMessage(&msg);DispatchMessageW(&msg);}

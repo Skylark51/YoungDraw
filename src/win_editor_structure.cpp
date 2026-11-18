@@ -357,12 +357,8 @@ void resizeSelected(){
         Document candidate=before;auto affected=resizeStructure(candidate,ids,numeric(values[0],minPercent,maxPercent)/100.,container,slot,above);
         doc=std::move(candidate);selection=inSlot?originalSelection:affected;redraw();UpdateWindow(win);return {};
     };
-    ui::Field scale{L"배율 (100%: 원래 크기)\n+ / − : 5%p씩 조절","100"};
-    scale.stepValue=[=](const std::string& text,int direction){
-        double percent=100;
-        try{percent=numeric(text,minPercent,maxPercent);}catch(const std::exception&){}
-        return number(std::clamp(percent+direction*5,minPercent,maxPercent));
-    };
+    auto scale=ui::numericField(L"배율 (100%: 원래 크기)\n휠 또는 + / − : 5%p씩 조절",100,minPercent,maxPercent,5);
+    scale.stepWithSigns=true;
     auto result=ui::form(win,L"구조 크기 조정 · Ctrl+K",{scale},update);
     if(!result){doc=before;selection=originalSelection;redraw();return;}
     update(*result);if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();status=L"선택한 부분의 크기를 조정했습니다. Ctrl+Z로 되돌릴 수 있습니다.";}

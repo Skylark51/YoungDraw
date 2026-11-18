@@ -160,6 +160,12 @@ static void CALLBACK driveNewMechanism(HWND parent,UINT,UINT_PTR timer,DWORD){
     HWND dialog=GetLastActivePopup(parent);
     wchar_t name[64]{};
     GetClassNameW(dialog,name,64);
+    if(std::wstring(name)==L"YoungDrawMechanismPicker"){
+        for(int id=100;id<104;++id)check(ui::hasButtonHelp(GetDlgItem(dialog,id)),"mechanism previews have path descriptions");
+        SendMessageW(dialog,WM_COMMAND,100+mechanismLayoutChoice,0);
+        PostMessageW(dialog,WM_COMMAND,IDOK,0);
+        return;
+    }
     if(std::wstring(name)==L"YoungDrawForm"){
         wchar_t title[64]{};
         GetWindowTextW(dialog,title,64);
@@ -167,8 +173,8 @@ static void CALLBACK driveNewMechanism(HWND parent,UINT,UINT_PTR timer,DWORD){
             SetDlgItemTextW(dialog,100,L"4");
             SetDlgItemTextW(dialog,101,L"1");
             SetDlgItemTextW(dialog,102,L"3");
-        }else SendDlgItemMessageW(dialog,100,CB_SETCURSEL,mechanismLayoutChoice,0);
-        PostMessageW(dialog,WM_COMMAND,IDOK,0);
+            PostMessageW(dialog,WM_COMMAND,IDOK,0);
+        }
         return;
     }
     if(std::wstring(name)!=L"YoungDrawMechanismEditor")return;
@@ -365,6 +371,35 @@ static void pngExportChecks(HWND hwnd){
     Document wavePreview;auto graph=reactionProfilePlot();graph.id=wavePreview.nextId++;graph.states[1].breakAfter=true;graph.states[1].breakStyle=1;graph.states[1].breakScale=.1;graph.inkScale=1.5;graph.series[0].width=4;graph.series[0].name="Reaction pathway";graph.legendFontSize=20;wavePreview.plots={graph};writePreview(L"wave-legend-preview.png",wavePreview,true);
     doc={};selection.clear();history.clear();std::cout<<"Transparent PNG file and clipboard checks passed\n";
 }
+static void CALLBACK driveDocumentStyle(HWND parent,UINT,UINT_PTR timer,DWORD){
+    HWND dialog=GetLastActivePopup(parent);
+    wchar_t title[64]{};GetWindowTextW(dialog,title,64);
+    if(std::wstring(title)!=L"문서 서식")return;
+    KillTimer(parent,timer);
+    SetDlgItemTextW(dialog,100,L"Times New Roman");
+    SendDlgItemMessageW(dialog,101,CB_SETCURSEL,0,0);
+    SendDlgItemMessageW(dialog,102,WM_KEYDOWN,VK_UP,0);
+    RECT width{};GetWindowRect(GetDlgItem(dialog,103),&width);
+    SendMessageW(dialog,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),MAKELPARAM(width.left+10,width.top+10));
+    const auto apply=IsWindowEnabled(GetDlgItem(dialog,IDOK));
+    PostMessageW(dialog,WM_COMMAND,apply?IDOK:IDCANCEL,0);
+}
+static void documentStyleChecks(HWND hwnd){
+    doc={};history.clear();selection.clear();
+    const int atom=doc.addAtom({20,25},8);
+    selection={atom};origin={270,360};zoom=1.7;
+    const auto before=toNative(doc);
+    SetTimer(hwnd,903,10,driveDocumentStyle);
+    command(150);
+    KillTimer(hwnd,903);
+    check(doc.style.labelFont=="Times New Roman"&&!(doc.style.labelFace&1)&&doc.style.fontSize==15&&
+        std::abs(doc.style.lineWidth-2.1)<1e-8,"sidebar style edits from typed input, a direction key and the mouse wheel");
+    check(origin.x==270&&origin.y==360&&zoom==1.7&&selection==std::vector<int>{atom}&&
+        doc.atom(atom)->p.x==20&&doc.atom(atom)->p.y==25,"style edits retain selection, coordinates and viewport");
+    check(fromNative(toNative(doc)).style.labelFont==doc.style.labelFont&&
+        fromCdxml(toCdxml(doc)).style.labelFont==doc.style.labelFont,"document font survives native and CDXML round trips");
+    check(history.undo(doc)&&toNative(doc)==before,"document style changes share one undo checkpoint");
+}
 static void graphManagerChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
     const auto before=toNative(doc);managePlot(owner,false);auto manager=plotManagerWindow;check(manager&&IsWindow(manager)&&toNative(doc)==before,"graph manager opens without modifying the selected graph");
@@ -393,6 +428,13 @@ static void graphManagerChecks(HWND hwnd){
     check(structureInSlot(doc,owner,0,true).atoms[0].element==8&&toNative(structureInSlot(doc,owner,1,true))==otherSlot&&doc.plots[0].series[0].values==energies,"manager edits a chosen structure independently of other states and graph data");
     SendMessageW(manager,WM_COMMAND,104,0);check(toNative(structureInSlot(doc,owner,0,true))==originalSlot,"independent structure edit undoes through the manager");
     SendMessageW(manager,WM_COMMAND,4004,0);formBefore=toNative(doc);formAction=31;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotWaveWidthCommand,0);check(formDriven&&doc.plots[0].waveWidth==3.2,"manager retains custom wave controls");
+    RECT waveCard{};GetWindowRect(GetDlgItem(manager,plotWaveWidthCommand),&waveCard);
+    const LPARAM wheelPoint=MAKELPARAM((waveCard.left+waveCard.right)/2,(waveCard.top+waveCard.bottom)/2);
+    SendMessageW(manager,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA/2),wheelPoint);
+    SendMessageW(manager,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA/2),wheelPoint);
+    check(std::abs(doc.plots[0].waveWidth-3.3)<1e-8,"wheel adjusts the hovered card after a full wheel increment");
+    SendMessageW(manager,WM_COMMAND,104,0);
+    check(std::abs(doc.plots[0].waveWidth-3.2)<1e-8,"graph card wheel increments are undoable");
     auto weightBefore=doc.plots[0].structureInkScale;SendMessageW(manager,WM_KEYDOWN,VK_ADD,0);
     check(std::abs(doc.plots[0].waveWidth-3.3)<1e-8&&doc.plots[0].structureInkScale==weightBefore,"plus adjusts only the selected wave thickness");
     SendMessageW(manager,WM_KEYDOWN,VK_SUBTRACT,0);check(std::abs(doc.plots[0].waveWidth-3.2)<1e-8,"minus reverses a wave thickness step");
@@ -548,7 +590,7 @@ int main(int argc,char** argv){
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
         if(argc>1&&std::string(argv[1])=="--plot-manager-only"){
-            graphManagerChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+            documentStyleChecks(hwnd);graphManagerChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }
         if(argc>1&&std::string(argv[1])=="--png-export-only"){
             pngExportChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;

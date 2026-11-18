@@ -232,7 +232,7 @@ void updateDrag(){
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
 void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(!dragSelection.empty())selection=dragSelection;}dragSelection.clear();energyDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
-void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contains(float(p.x),float(p.y))){command(156);return;}if(!finishInline(true))return;SetFocus(win);for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;if(canvas(p)){
+void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!finishInline(true))return;for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;SetFocus(win);if(canvas(p)){
     const Vec at=world(p);int hit=atomHit(at);if(!hit)hit=doc.bondAt(at,5/zoom);if(!hit)hit=objectAt(at);
     if(plot(hit)){sidebarPage=1;showLayers=false;}
     else if(reaction(hit)){sidebarPage=0;showLayers=false;}

@@ -101,11 +101,10 @@ void editReaction(int id){
     if(auto edited=mechanismEditor(win,before,id))if(toNative(*edited)!=toNative(before)){history.checkpoint(before);doc=std::move(*edited);selection={id};targetContainer=0;changed();fit();}
 }
 void newReaction(){
-    auto values=ui::form(win,L"반응 메커니즘 만들기",{{L"경로 양식","0",false,{
-        L"직선",L"가로 → 아래 → 촉매 순환",L"가로 → 아래 → 좌우 분기·합류",L"촉매 순환"}}});
-    if(!values)return;
+    const auto choice=ui::mechanismChoice(win);
+    if(!choice)return;
     Document before=doc,base=doc;
-    const auto layout=static_cast<MechanismTemplate>(std::stoi(values->front()));
+    const auto layout=*choice;
     int horizontal=1,leftCount=2,rightCount=1;
     if(layout==MechanismTemplate::SplitAndMerge){
         auto counts=ui::form(win,L"원형 분기·합류 단계 수",{

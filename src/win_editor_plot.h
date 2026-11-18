@@ -17,6 +17,7 @@ void plotSettings(int id);
 void editPlotFont(int id);
 void changePlotStyle(int id);
 void editPlotAxisLengths(int id);
+bool stepPlotAppearance(int id,int action,int steps);
 void editPlotAppearance(int id,int field);
 bool adjustSelectedPlotWeight(bool increase);
 void editPlotStages(int id);

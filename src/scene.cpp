@@ -105,14 +105,14 @@ Scene makeScene(const Document& d,const Measure& measure){
         }
         // A radical annotates the skeletal vertex; only an explicit label shows C.
         if(a.element==6&&a.label.empty()&&!a.isotope&&(a.radical||(!isolated&&!a.charge)))continue;
-        std::string el=a.label.empty()?symbol(a.element):a.label;double fs=atomStyle.fontSize,w=textWidth(measure,el,fs,"Arial",atomStyle.labelFace);
+        std::string el=a.label.empty()?symbol(a.element):a.label;double fs=atomStyle.fontSize,w=textWidth(measure,el,fs,atomStyle.labelFont,atomStyle.labelFace);
         double anchor=w/2;
         if(!a.label.empty()){
             auto formatted=chemicalScripts(el);auto script=formatted.find("^{");auto sym=symbol(a.element);auto pos=formatted.find(sym);
-            if(script!=std::string::npos&&pos!=std::string::npos&&pos<script)anchor=textWidth(measure,formatted.substr(0,pos),fs,"Arial",atomStyle.labelFace)+textWidth(measure,sym,fs,"Arial",atomStyle.labelFace)/2;
+            if(script!=std::string::npos&&pos!=std::string::npos&&pos<script)anchor=textWidth(measure,formatted.substr(0,pos),fs,atomStyle.labelFont,atomStyle.labelFace)+textWidth(measure,sym,fs,atomStyle.labelFont,atomStyle.labelFace)/2;
         }
         double x=a.p.x-anchor,y=a.p.y-fs/2;boxes[a.id]={x-atomStyle.margin,y-atomStyle.margin,w+2*atomStyle.margin,fs+2*atomStyle.margin};
-        Primitive t;t.owner=a.id;t.type=Primitive::Text;t.points={{x,y}};t.fontSize=fs;t.face=atomStyle.labelFace;t.color=a.color;t.text=el;emitText(labels,t,{x,y},false,measure);
+        Primitive t;t.owner=a.id;t.type=Primitive::Text;t.points={{x,y}};t.fontSize=fs;t.font=atomStyle.labelFont;t.face=atomStyle.labelFace;t.color=a.color;t.text=el;emitText(labels,t,{x,y},false,measure);
         if(chemicalScripts(el).find("^{")!=std::string::npos){boxes[a.id].y-=fs*.35;boxes[a.id].h+=fs*.35;}
         // Only neutral common heteroatoms get automatic H labels in v0.1.
         int h=a.label.empty()&&(a.element==7||a.element==8||a.element==16)?d.hydrogens(a.id):0;
@@ -143,10 +143,10 @@ Scene makeScene(const Document& d,const Measure& measure){
     for(const auto& a:d.atoms)if((a.charge&&!atomLabelHasCharge(a))||a.radical){
         double fs=a.labelSize.value_or(d.style.fontSize)*a.drawingScale;
         auto box=boxes.count(a.id)?boxes.at(a.id):Rect{a.p.x,a.p.y,0,0};
-        Primitive mark;mark.type=Primitive::Text;mark.owner=a.id;mark.textRole=13;mark.fontSize=fs*.7;mark.face=a.labelFace.value_or(d.style.labelFace);mark.color=a.color;
+        Primitive mark;mark.type=Primitive::Text;mark.owner=a.id;mark.textRole=13;mark.fontSize=fs*.7;mark.font=d.style.labelFont;mark.face=a.labelFace.value_or(d.style.labelFace);mark.color=a.color;
         int charge=atomLabelHasCharge(a)?0:a.charge;
         mark.text=(std::abs(charge)>1?std::to_string(std::abs(charge)):"")+(charge>0?"+":charge<0?"\xe2\x88\x92":"")+(a.radical==1?"\xe2\x80\xa2\xe2\x80\xa2":a.radical==3?"\xe2\x80\xa2\xe2\x80\xa2":a.radical?"\xe2\x80\xa2":"");
-        double width=textWidth(measure,mark.text,mark.fontSize,"Arial",mark.face),height=mark.fontSize;
+        double width=textWidth(measure,mark.text,mark.fontSize,mark.font,mark.face),height=mark.fontSize;
         Vec best=a.p+a.annotationOffset;
         if(!a.annotationManual){
             std::vector<Vec> candidates={{box.x+box.w,box.y-height*.65},{box.x-width,box.y-height*.65},{box.x+box.w,box.y+box.h-height*.25},{box.x-width,box.y+box.h-height*.25},{a.p.x-width/2,box.y-height-2},{a.p.x-width/2,box.y+box.h+2}};
@@ -229,7 +229,7 @@ Scene makeScene(const Document& d,const Measure& measure){
     strokeColor="#000000";s.items.insert(s.items.end(),labels.begin(),labels.end());
     int arrowIndex=-1;std::vector<int> hiddenArrowIndices;
     auto arrow=[&](Vec a,Vec z,const std::string& color,double width,int head,double headScale=1.){if(arrowIndex>=0&&std::find(hiddenArrowIndices.begin(),hiddenArrowIndices.end(),arrowIndex)!=hiddenArrowIndices.end())return;Vec v=z-a;double len=v.length();if(len<1e-6)return;headScale=std::min(headScale,len/8);Vec u=v*(1/len),n{-u.y,u.x};Primitive p;p.reactionArrow=arrowIndex;p.owner=owner;p.points={a,head?z-u*(4.8*headScale):z};p.width=width;p.color=color;s.items.push_back(p);if(head){p.type=Primitive::Polygon;p.points=head==2?std::vector<Vec>{z,z-u*(5*headScale)+n*(2*headScale)}:std::vector<Vec>{z,z-u*(5*headScale)+n*(2*headScale),z-u*(5*headScale)-n*(2*headScale)};s.items.push_back(p);}};
-    auto addText=[&](std::string value,Vec p,double size=9,std::string color="#000000",bool center=false,int role=0,int index=-1){Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=value;t.fontSize=size*d.style.fontSize/10.;t.face=d.style.labelFace;t.color=color;for(unsigned char c:value)if(c>=0xe3)t.font="Malgun Gothic";emitText(s.items,t,p,center,measure);};
+    auto addText=[&](std::string value,Vec p,double size=9,std::string color="#000000",bool center=false,int role=0,int index=-1){Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=value;t.fontSize=size*d.style.fontSize/10.;t.face=d.style.labelFace;t.color=color;t.font=d.style.labelFont;if(t.font=="Arial")for(unsigned char c:value)if(c>=0xe3)t.font="Malgun Gothic";emitText(s.items,t,p,center,measure);};
     for(auto& o:d.objects){owner=o.id;Primitive p;p.owner=o.id;p.points=o.points;p.width=o.width;p.color=o.color;p.filled=o.filled;p.fontSize=o.fontSize;p.font=o.font;p.dash=o.dash;p.face=o.face;p.closed=o.closed;p.text=o.text;
         if(o.points.empty())continue;
         if(o.kind==ObjectKind::Line&&!o.head&&o.autoRoute&&o.points.size()==2){
@@ -254,7 +254,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         size_t count=parts.size();while(count&&parts[count-1].empty())count--;
         if(!count){addText("",at,8,"#000000",true,role,index);return;}
         double size=8;for(auto& reaction:d.reactions)if(reaction.id==owner)size=mechanismFontSize(reaction,d.style)*10/d.style.fontSize;
-        double total=0;auto width=[&](const std::string& text){return textWidth(measure,text,size*d.style.fontSize/10.,"Arial",d.style.labelFace);};
+        double total=0;auto width=[&](const std::string& text){return textWidth(measure,text,size*d.style.fontSize/10.,d.style.labelFont,d.style.labelFace);};
         auto gap=[&](){return size*d.style.fontSize/10.*.4;};
         for(size_t i=0;i<count;i++)total+=width(parts[i])+(i?width("/")+2*gap():0);
         if(total>available&&available>0){size*=available/total;total=available;}
@@ -446,7 +446,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 }
             }
             auto legendWidth=[&](const std::string& text){
-                return textWidth(measure,text,font,"Arial",d.style.labelFace);
+                return textWidth(measure,text,font,d.style.labelFont,d.style.labelFace);
             };
             double y=top-font*3;
             if(!r.unit.empty()&&!spins.empty())y-=font*1.5;

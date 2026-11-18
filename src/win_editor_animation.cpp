@@ -882,7 +882,7 @@ struct ExportProgress {
     bool stopped=false;
     explicit ExportProgress(HWND parent):owner(parent){
         const RECT r=ui::ownedWindowRect(owner,420,176);
-        window=CreateWindowExW(WS_EX_DLGMODALFRAME,L"STATIC",L"GIF 생성 중",WS_POPUP|WS_CAPTION,
+        window=CreateWindowExW(0,L"STATIC",L"GIF 생성 중",WS_POPUP|WS_CAPTION,
             r.left,r.top,420,176,owner,nullptr,nullptr,nullptr);
         if(!window)throw std::runtime_error("진행 창을 열 수 없습니다.");
         readout=CreateWindowW(L"STATIC",L"첫 프레임 생성 중…",WS_CHILD|WS_VISIBLE,16,14,378,28,window,nullptr,nullptr,nullptr);
@@ -890,7 +890,7 @@ struct ExportProgress {
         cancel=CreateWindowW(L"BUTTON",L"취소",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,290,83,104,28,window,nullptr,nullptr,nullptr);
         for(auto child:{readout,cancel})SendMessageW(child,WM_SETFONT,WPARAM(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
         SetWindowSubclass(window,proc,1,reinterpret_cast<DWORD_PTR>(this));
-        EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);SetFocus(cancel);
+        appearance::titlebar(window);EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);SetFocus(cancel);
     }
     ~ExportProgress(){EnableWindow(owner,TRUE);DestroyWindow(window);SetActiveWindow(owner);}
     static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR data){
@@ -1345,10 +1345,10 @@ std::optional<std::vector<size_t>> pickRoute(const Document& source,const Reacti
     }();
     if(!registered)return {};
     const RECT r=ui::ownedWindowRect(win,1040,670);
-    HWND hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,L"YoungDrawRoutePicker",L"분기 메커니즘 경로",
+    HWND hwnd=CreateWindowExW(0,L"YoungDrawRoutePicker",L"분기 메커니즘 경로",
         WS_POPUP|WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN,r.left,r.top,r.right-r.left,r.bottom-r.top,win,nullptr,nullptr,&picker);
     if(!hwnd)return {};
-    EnableWindow(win,FALSE);ShowWindow(hwnd,SW_SHOW);
+    appearance::titlebar(hwnd);EnableWindow(win,FALSE);ShowWindow(hwnd,SW_SHOW);
     MSG msg{};BOOL got=1;
     while(!picker.done&&(got=GetMessageW(&msg,nullptr,0,0))>0){
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE)picker.done=true;
@@ -1376,7 +1376,7 @@ void previewAnimation(std::vector<AnimationStage> stages,Document selected){
     GetMonitorInfoW(MonitorFromWindow(win,MONITOR_DEFAULTTONEAREST),&monitor);
     const auto rect=ui::ownedWindowRect(win,std::min(1050,int(monitor.rcWork.right-monitor.rcWork.left)),
         std::min(680,int(monitor.rcWork.bottom-monitor.rcWork.top)));
-    auto hwnd=CreateWindowExW(WS_EX_DLGMODALFRAME,windowClass,L"결합 애니메이션 미리보기",
+    auto hwnd=CreateWindowExW(0,windowClass,L"결합 애니메이션 미리보기",
         WS_CAPTION|WS_SYSMENU|WS_THICKFRAME|WS_MAXIMIZEBOX|WS_POPUP|WS_CLIPCHILDREN,
         rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,win,nullptr,GetModuleHandleW(nullptr),&preview);
     if(!hwnd)throw std::runtime_error("애니메이션 미리보기 창을 열 수 없습니다.");
