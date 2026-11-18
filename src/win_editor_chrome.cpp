@@ -159,7 +159,7 @@ void icon(Graphics& g,int id,RectF box,Color color){
     default:arrow();break;
     }g.Restore(st);
 }
-const std::vector<std::wstring> toolNames={L"선택·이동 [Space]",L"단일 결합 [x]",L"이중 결합",L"삼중 결합",L"쐐기 결합",L"해시 결합",L"5각 고리",L"6각 고리",L"벤젠 [a]",L"지우개",L"반응 화살표 [e]",L"전자쌍 이동 화살표",L"단전자 이동 화살표",L"텍스트 [t] · 클릭하여 입력",L"이미지 삽입",L"직선 [l]",L"공명 화살표 ↔ [r]",L"공명 결합 (실선+파선)",L"오비탈 · 드래그: 방향·크기",L"상호작용 점선",L"점선 단일 결합"};
+const std::vector<std::wstring> toolNames={L"선택·이동 [Space]",L"단일 결합 [x]",L"이중 결합",L"삼중 결합",L"쐐기 결합",L"해시 결합",L"5각 고리",L"6각 고리",L"벤젠 [a]",L"지우개 · 드래그: 범위 삭제",L"반응 화살표 [e]",L"전자쌍 이동 화살표",L"단전자 이동 화살표",L"텍스트 [t] · 클릭하여 입력",L"이미지 삽입",L"직선 [l]",L"공명 화살표 ↔ [r]",L"공명 결합 (실선+파선)",L"오비탈 · 드래그: 방향·크기",L"상호작용 점선",L"점선 단일 결합"};
 void toolButton(Graphics& g,int id,RectF r,bool active){
     hits.push_back({id,r});bool hovered=r.Contains(float(mouse.x),float(mouse.y));appearance::rounded(g,r,7,active?accent:hovered?appearance::palette().hover:appearance::palette().raised);
     std::wstring key=id==200?L"Space":id==201?L"x":id==208?L"a":id==210?L"e":id==213?L"t":id==215?L"l":id==216?L"r":id==217?L"공명":id==218?L"오비탈":id==219?L"설정":id==dottedBondCommand?L"결합":id==interactionToolCommand?L"점선":L"";

@@ -241,6 +241,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
         for(const auto& graph:doc.plots)for(const auto& state:graph.states)if(contains(state.above,hit)||contains(state.below,hit)){sidebarPage=1;showLayers=false;}
     }
 }if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();
+ if(tool==Erase){boxing=true;SetCapture(win);status=L"지우개 · 드래그: 사각형 범위 일괄 삭제 · 클릭: 한 항목 삭제 · Esc: 취소";redraw();return;}
  if(placeEnergyGap(p))return;
  if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000)&&!mechanismConnecting&&!mechanismConnectionDrag&&!isolatedStructureEditing){
     int owner=0;size_t edge=0;double nearest=10;
@@ -251,7 +252,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
     if(owner){insertMechanismLinkStage(owner,edge);return;}
  }
  if(beginMechanismConnection(p))return;selectedCycleOwner=0;selectedCycleArrow=-1;
- if((tool==Select&&!(GetKeyState(VK_MENU)&0x8000))||tool==Erase)if(auto hit=cycleArrowAt(world(p))){selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;selection={hit->first};targetContainer=0;if(tool==Erase)deleteSelectedCycleArrow();else{status=L"화살표 선택 · Del: 연결 삭제 · 양끝 원 드래그: 연결 변경·길이 조절 · 우클릭: 추가 편집";redraw();}return;}
+ if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000))if(auto hit=cycleArrowAt(world(p))){selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;selection={hit->first};targetContainer=0;status=L"화살표 선택 · Del: 연결 삭제 · 양끝 원 드래그: 연결 변경·길이 조절 · 우클릭: 추가 편집";redraw();return;}
  if(snapPlot){
     auto* graph=plot(snapPlot);if(!graph||doc.isLocked(snapPlot)){snapPlot=0;snapStart.reset();return;}
     auto hit=nearestPlotSnap(scene(),p);if(!hit){status=L"표시된 준위의 점 가까이를 클릭하세요. Esc: 취소";redraw();return;}
@@ -298,7 +299,6 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
     for(auto i=sc.items.rbegin();i!=sc.items.rend();++i)if(i->textRole==13&&!groupedObject(i->owner)){Vec at=i->points[0];double width=measure(i->text,i->fontSize,i->font,i->face);if(w.x>=at.x-2&&w.x<=at.x+width+2&&w.y>=at.y-2&&w.y<=at.y+i->fontSize+2){annotationDrag=i->owner;annotationStart=at;dragBefore=dragBase=doc;selection={i->owner};curveHandle=-1;dragging=true;moved=copyDrag=false;SetCapture(win);status=L"전하·라디칼 표시 위치 이동 · Esc: 취소 · Ctrl+Z: 되돌리기";redraw();return;}}}
  if(beginCurveHandle(p))return;curveHandle=-1;Vec w=world(p);int aid=atomHit(w,tool==Benzene?benzenePickRadius:atomPickRadius),bid=doc.bondAt(w,5/zoom),oid=aid||bid?0:objectAt(w);hoverAtom=aid;hoverBond=aid?0:bid;
  if((GetKeyState(VK_CONTROL)&0x8000)&&!aid&&!bid&&!oid){panning=true;panOrigin=origin;SetCapture(win);return;}
- if(tool==Erase){int id=aid?aid:bid?bid:oid;if(id){history.checkpoint(doc);doc.erase({id});selection.clear();changed();}return;}
  if(tool==Select){
     if(auto target=textAt(w);target&&(target->role==3||target->role==9||
         (target->role==0&&textObject(target->owner)&&!importedEnergy(textObject(target->owner)->text).empty()))){
@@ -312,7 +312,38 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if(h.id==156&&h.box.Contain
  if((GetKeyState(VK_MENU)&0x8000)&&aid){selection={aid};editObject(aid);return;}
  if(!aid&&bid){history.checkpoint(doc);auto b=doc.bond(bid);if(b->kind==BondKind::Aromatic&&kind()==BondKind::Aromatic){Vec a=doc.atom(b->a)->p,v=doc.atom(b->b)->p-a;for(auto& stroke:scene().items)if(stroke.owner==bid&&stroke.dash&&stroke.points.size()==2){Vec offset=(stroke.points[0]+stroke.points[1])*.5-a;b->doubleSide=(v.x*offset.y-v.y*offset.x)>0?-1:1;break;}}else if(b->kind==kind()&&(kind()==BondKind::Wedge||kind()==BondKind::Hash))std::swap(b->a,b->b);else setBondKind(doc,bid,kind());b->customOrder.clear();b->customDisplay.clear();selection={bid};changed();return;}
  startAtom=aid;drawing=true;SetCapture(win);redraw();}
-void mouseUp(Vec p){if(mechanismConnectionDrag){finishMechanismConnection(p);return;}if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging&&energyDrag){dragging=false;if((p-down).length()>2)dropEnergy(world(p));energyDrag.reset();ReleaseCapture();redraw();return;}if(dragging){mouse=p;updateDrag();crossingDrag.reset();gapDrag.reset();
+static void finishErase(Vec p){
+    mouse=p;boxing=false;ReleaseCapture();
+    std::vector<int> ids;
+    const bool region=(p-down).length()>4;
+    if(region){
+        const Vec a=world(down),b=world(p);
+        const Rect area{std::min(a.x,b.x),std::min(a.y,b.y),std::abs(a.x-b.x),std::abs(a.y-b.y)};
+        for(const auto& atom:doc.atoms)if(!doc.isLocked(atom.id)&&inside(area,atom.p))ids.push_back(atom.id);
+        for(const auto& [id,box]:scene().objectBounds)
+            if(!doc.atom(id)&&!doc.isLocked(id)&&inside(area,{box.x,box.y})&&inside(area,{box.x+box.w,box.y+box.h}))ids.push_back(id);
+    }else{
+        if(auto hit=cycleArrowAt(world(down))){
+            selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;selection={hit->first};targetContainer=0;
+            deleteSelectedCycleArrow();redraw();return;
+        }
+        const Vec at=world(down);
+        int id=atomHit(at);if(!id)id=doc.bondAt(at,5/zoom);if(!id)id=objectAt(at);
+        if(id&&!doc.isLocked(id))ids.push_back(id);
+    }
+    if(!ids.empty()){
+        history.checkpoint(doc);
+        // A rectangle deletes only its contents, even if a user group spans its edge.
+        if(region){
+            for(auto& group:doc.groups)group.members.erase(std::remove_if(group.members.begin(),group.members.end(),[&](int id){return contains(ids,id);}),group.members.end());
+            doc.groups.erase(std::remove_if(doc.groups.begin(),doc.groups.end(),[](const Group& g){return g.members.empty();}),doc.groups.end());
+        }
+        doc.erase(ids);selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;
+        status=region?L"범위 안의 항목을 일괄 삭제했습니다. Ctrl+Z: 되돌리기":L"항목을 삭제했습니다. Ctrl+Z: 되돌리기";changed();
+    }
+    redraw();
+}
+void mouseUp(Vec p){if(tool==Erase&&boxing){finishErase(p);return;}if(mechanismConnectionDrag){finishMechanismConnection(p);return;}if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging&&energyDrag){dragging=false;if((p-down).length()>2)dropEnergy(world(p));energyDrag.reset();ReleaseCapture();redraw();return;}if(dragging){mouse=p;updateDrag();crossingDrag.reset();gapDrag.reset();
  if(plotLevelDrag&&!plotLevelDrag->horizontal&&moved){
     auto* graph=plot(plotLevelDrag->owner);
     for(const auto& original:dragBefore.plots)if(original.id==graph->id){graph->yMin=original.yMin;graph->yMax=original.yMax;break;}

@@ -43,9 +43,43 @@ static void editingRegression(HWND hwnd){
     for(int pass=0;pass<50;++pass){
         doc={};int a=doc.addAtom({0,0}),b=doc.addAtom({30,0});doc.addBond(a,b);tool=Erase;selection.clear();history.clear();
         const auto original=toNative(doc);mouseDown(screen({0,0}));
+        check(toNative(doc)==original,"eraser waits for release so dragging can define a region");mouseUp(screen({0,0}));
         check(!doc.atom(a)&&!hoverAtom&&!hoverBond,"eraser clears deleted hover references before repaint");repaint();hotkey('1');
         check(history.undo(doc)&&toNative(doc)==original,"erase remains one undoable edit");changed();hoverAtom=a;doc.erase({a});repaint();changed();check(!hoverAtom,"renderer tolerates stale hover from direct document replacement too");
     }
+    for(double scale:{.5,1.,2.,4.})for(bool reverse:{false,true}){
+        zoom=scale;doc={};history.clear();dirty=false;selection.clear();tool=Erase;
+        int a=doc.addAtom({0,0}),b=doc.addAtom({30,0}),outside=doc.addAtom({100,0});doc.addBond(a,b);
+        doc.groups.push_back({doc.nextId++,{a,outside}});
+        Object line;line.id=doc.nextId++;line.kind=ObjectKind::Line;line.points={{0,25},{30,25}};doc.objects.push_back(line);
+        Object image;image.id=doc.nextId++;image.kind=ObjectKind::Image;image.points={{0,35},{20,50}};doc.objects.push_back(image);doc.imagesLocked=true;
+        const auto original=toNative(doc);changed();dirty=false;
+        Vec first=screen({-20,-20}),last=screen({50,70});if(reverse)std::swap(first,last);
+        mouseDown(first);check(boxing&&toNative(doc)==original,"region erase starts without changing the document");
+        mouse=last;repaint();check(toNative(doc)==original,"region preview does not delete contents");
+        mouseUp(last);
+        check(!doc.atom(a)&&!doc.atom(b)&&doc.atom(outside)&&doc.bonds.empty(),"region erases enclosed atoms and bonds without expanding a group beyond the rectangle");
+        check(doc.objects.size()==1&&doc.objects[0].id==image.id,"region erases enclosed objects and preserves locked images");
+        check(dirty&&!boxing&&selection.empty(),"region erase commits and clears interaction state");
+        check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"entire region erasure has exactly one undo checkpoint");
+        check(history.redo(doc)&&!doc.atom(a)&&doc.atom(outside),"region erasure supports redo");
+        history.undo(doc);history.clear();dirty=false;changed();dirty=false;
+        mouseDown(first);mouse=last;key(VK_ESCAPE);mouseUp(last);
+        check(toNative(doc)==original&&!dirty&&!history.undo(doc),"Escape cancels region erasure without dirtying or undo history");
+        mouseDown(first);SendMessageW(hwnd,WM_CAPTURECHANGED,0,0);mouseUp(last);
+        check(toNative(doc)==original&&!boxing&&!history.undo(doc),"capture loss cancels region erasure");
+        mouseDown(screen({150,80}));mouseUp(screen({200,110}));
+        check(toNative(doc)==original&&!dirty&&!history.undo(doc),"empty region leaves the document and history unchanged");
+    }
+    zoom=2;doc={};history.clear();selection.clear();tool=Erase;
+    int eraseStart=doc.addAtom({0,0}),eraseEnd=doc.addAtom({30,30});changed();
+    mouseDown(screen({0,0}));mouseUp(screen({50,50}));
+    check(!doc.atom(eraseStart)&&!doc.atom(eraseEnd),"region erasure can start directly on an atom");
+    doc={};history.clear();Object partial;partial.id=doc.nextId++;partial.kind=ObjectKind::Line;partial.points={{0,0},{100,0}};doc.objects.push_back(partial);changed();dirty=false;
+    mouseDown(screen({20,-20}));mouseUp(screen({70,20}));
+    check(doc.objects.size()==1&&!dirty&&!history.undo(doc),"partially enclosed objects stay outside the deletion batch");
+    mouseDown(screen({50,0}));mouseUp(screen({50,0})+Vec{2,1});
+    check(doc.objects.empty()&&history.undo(doc)&&doc.objects.size()==1&&!history.undo(doc),"click erasure tolerates small pointer jitter and remains one undoable edit");
     doc={};int root=doc.addAtom({0,0}),end=doc.addAtom({30,0});doc.addBond(root,end);selection={end};hoverAtom=end;tool=Select;
     auto viewport=origin;double scale=zoom;command(163);check((origin-viewport).length()==0&&zoom==scale,"toolbar rotation preserves viewport");
     selection={end};SetTimer(hwnd,989,10,driveRotation);command(164);KillTimer(hwnd,989);check((origin-viewport).length()==0&&zoom==scale,"angle preview and apply preserve viewport");
