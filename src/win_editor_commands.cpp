@@ -138,6 +138,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  case 101:openDocuments(openDocumentFiles());break;
  case copyPngCommand:copyPng();break;
   case exportPngCommand:{auto path=fileDialog(true,5);if(path){writePreview(*path,doc,true);status=L"투명 PNG 그림을 내보냈습니다.";}break;}
+  case exportTiffCommand:{auto path=fileDialog(true,6);if(path){writeTiff(*path,selection.empty()?doc:selectedDocument());status=L"고해상도 TIFF 그림을 저장했습니다.";}break;}
   case 102:save();break;case 103:{auto p=fileDialog(true,1);if(p){writeFile(*p,toSvg(scene()));status=L"SVG를 내보냈습니다. 가져온 미지원 객체는 결과를 확인하세요.";}break;}case 108:{auto p=fileDialog(true,2);if(p){writeFile(*p,toCdxml(doc));status=L"CDXML을 내보냈습니다.";}break;}
   case 106:{
       int choice=MessageBoxW(win,L"JACS 출판용 SVG\n\n예: 단일 열 (240 pt)\n아니요: 두 열 (504 pt)\n취소: 내보내기 중단",

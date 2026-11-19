@@ -43,32 +43,46 @@ HENHMETAFILE officePicture(const Document& d){
     g.ScaleTransform(dx/72.f,dy/72.f);g.TranslateTransform(float(6-b.x),float(6-b.y));render(g,sc);}
     ReleaseDC(nullptr,dc);return metafile.GetHENHMETAFILE();
 }
-std::unique_ptr<Bitmap> drawingBitmap(const Document& d,bool transparent){
+std::unique_ptr<Bitmap> drawingBitmap(const Document& d,bool transparent,float dpi){
     auto sc=makeScene(d,measure);if(sc.items.empty())throw std::runtime_error("내보낼 그림이 없습니다.");
-    auto b=sc.bounds;double scale=std::min(2.5,2000./std::max(b.w,b.h));
-    auto image=std::make_unique<Bitmap>(std::max(1,int(std::ceil(b.w*scale))),std::max(1,int(std::ceil(b.h*scale))),PixelFormat32bppARGB);
+    auto b=sc.bounds;
+    const double scale=std::min(dpi>0?dpi/72.:2.5,(dpi>0?6000.:2000.)/std::max(b.w,b.h));
+    const auto format=dpi>0&&!transparent?PixelFormat24bppRGB:PixelFormat32bppARGB;
+    auto image=std::make_unique<Bitmap>(std::max(1,int(std::ceil(b.w*scale))),std::max(1,int(std::ceil(b.h*scale))),format);
     if(image->GetLastStatus()!=Ok)throw std::runtime_error("그림을 만들 수 없습니다.");
+    const float outputDpi=float(scale*72);
+    if(dpi>0&&image->SetResolution(outputDpi,outputDpi)!=Ok)throw std::runtime_error("그림 해상도를 설정할 수 없습니다.");
     {
-        Graphics g(image.get());g.Clear(transparent?Color(0,0,0,0):Color(255,255,255,255));g.SetSmoothingMode(SmoothingModeHighQuality);g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+        Graphics g(image.get());g.SetPageUnit(UnitPixel);g.Clear(transparent?Color(0,0,0,0):Color(255,255,255,255));g.SetSmoothingMode(SmoothingModeHighQuality);g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+        if(dpi>0)g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
         g.TranslateTransform(float(-b.x*scale),float(-b.y*scale));g.ScaleTransform(float(scale),float(scale));render(g,sc);
     }
     return image;
 }
-std::string encodePng(Bitmap& image){
+namespace {
+std::string encodeBitmap(Bitmap& image,const wchar_t* mime,const EncoderParameters* parameters=nullptr){
     UINT count=0,size=0;GetImageEncodersSize(&count,&size);std::vector<BYTE> memory(size);auto* encoders=reinterpret_cast<ImageCodecInfo*>(memory.data());
-    if(!size||GetImageEncoders(count,size,encoders)!=Ok)throw std::runtime_error("PNG encoder unavailable");
-    const CLSID* encoder=nullptr;for(UINT i=0;i<count;i++)if(wcscmp(encoders[i].MimeType,L"image/png")==0){encoder=&encoders[i].Clsid;break;}
-    if(!encoder)throw std::runtime_error("PNG encoder unavailable");
+    if(!size||GetImageEncoders(count,size,encoders)!=Ok)throw std::runtime_error("그림 인코더를 찾을 수 없습니다.");
+    const CLSID* encoder=nullptr;for(UINT i=0;i<count;i++)if(wcscmp(encoders[i].MimeType,mime)==0){encoder=&encoders[i].Clsid;break;}
+    if(!encoder)throw std::runtime_error("그림 인코더를 찾을 수 없습니다.");
     Microsoft::WRL::ComPtr<IStream> stream;
-    if(FAILED(CreateStreamOnHGlobal(nullptr,TRUE,&stream))||image.Save(stream.Get(),encoder,nullptr)!=Ok)throw std::runtime_error("PNG 인코딩에 실패했습니다.");
-    STATSTG stat{};if(FAILED(stream->Stat(&stat,STATFLAG_NONAME))||stat.cbSize.QuadPart>128*1024*1024)throw std::runtime_error("PNG 데이터가 너무 큽니다.");
-    LARGE_INTEGER start{};if(FAILED(stream->Seek(start,STREAM_SEEK_SET,nullptr)))throw std::runtime_error("PNG 데이터를 읽을 수 없습니다.");
+    if(FAILED(CreateStreamOnHGlobal(nullptr,TRUE,&stream))||image.Save(stream.Get(),encoder,parameters)!=Ok)throw std::runtime_error("그림 인코딩에 실패했습니다.");
+    STATSTG stat{};if(FAILED(stream->Stat(&stat,STATFLAG_NONAME))||stat.cbSize.QuadPart>128*1024*1024)throw std::runtime_error("그림 데이터가 너무 큽니다.");
+    LARGE_INTEGER start{};if(FAILED(stream->Seek(start,STREAM_SEEK_SET,nullptr)))throw std::runtime_error("그림 데이터를 읽을 수 없습니다.");
     std::string bytes(size_t(stat.cbSize.QuadPart),'\0');ULONG read=0;
-    if(FAILED(stream->Read(bytes.data(),ULONG(bytes.size()),&read))||read!=bytes.size())throw std::runtime_error("PNG 데이터를 읽을 수 없습니다.");
+    if(FAILED(stream->Read(bytes.data(),ULONG(bytes.size()),&read))||read!=bytes.size())throw std::runtime_error("그림 데이터를 읽을 수 없습니다.");
     return bytes;
 }
+}
+std::string encodePng(Bitmap& image){return encodeBitmap(image,L"image/png");}
 void writePreview(const std::wstring& path,const Document& d,bool transparent){
     auto image=drawingBitmap(d,transparent);storage::writeAtomic(path,encodePng(*image));
+}
+void writeTiff(const std::wstring& path,const Document& d){
+    auto image=drawingBitmap(d,false,highResolutionDpi);
+    ULONG compression=EncoderValueCompressionLZW;
+    EncoderParameters parameters{1, {{EncoderCompression,1,EncoderParameterValueTypeLong,&compression}}};
+    storage::writeAtomic(path,encodeBitmap(*image,L"image/tiff",&parameters));
 }
 
 } // namespace yd::editor

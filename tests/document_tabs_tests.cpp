@@ -385,11 +385,22 @@ static void pngExportChecks(HWND hwnd){
         "independent structure editor displays PNG copy next to Apply in the top header");
     const auto copyPoint=MAKELPARAM(int(copyIcon->box.X+copyIcon->box.Width/2),int(copyIcon->box.Y+copyIcon->box.Height/2));
     selection.clear();
+    auto highResolution=drawingBitmap(doc,true,highResolutionDpi);
+    check(highResolution->GetWidth()>3*bitmap->GetWidth(),"high-resolution export rasterizes at higher pixel dimensions");
     SendMessageW(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,copyPoint);
-    check(clipboardPng()==encodePng(*bitmap),"independent structure editor icon copies the complete structure");
+    check(clipboardPng()==encodePng(*highResolution),"independent structure editor icon copies the complete structure at high resolution");
     selection={first.id};
+    auto highResolutionSelection=drawingBitmap(selectedDocument(),true,highResolutionDpi);
     SendMessageW(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,copyPoint);
-    check(clipboardPng()==encodePng(*selected),"independent structure editor icon copies only selected items");
+    check(clipboardPng()==encodePng(*highResolutionSelection),"independent structure editor icon copies only selected items at high resolution");
+    writeTiff(L"structure-600dpi.tif",selectedDocument());
+    Bitmap tiff(L"structure-600dpi.tif");
+    GUID format{};
+    check(tiff.GetRawFormat(&format)==Ok&&IsEqualGUID(format,ImageFormatTIFF)&&tiff.GetWidth()==highResolutionSelection->GetWidth()&&
+        tiff.GetHeight()==highResolutionSelection->GetHeight()&&std::abs(tiff.GetHorizontalResolution()-600)<1&&
+        std::abs(tiff.GetVerticalResolution()-600)<1,"Structure TIFF has the selected content dimensions and 600 DPI metadata");
+    tiff.GetPixel(0,0,&corner);
+    check(corner.GetValue()==Color(255,255,255,255).GetValue(),"Structure TIFF has an opaque white background");
     isolatedStructureEditing=false;
     check(toNative(doc)==before&&!dirty,"PNG export and copy never modify the source document");
     auto menu=GetSubMenu(GetMenu(hwnd),0);wchar_t label[128]{};check(GetMenuStringW(menu,exportPngCommand,label,128,MF_BYCOMMAND)>0,"file menu exposes PNG picture export");

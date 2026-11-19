@@ -17,7 +17,8 @@ Document selectedDocument(){auto chosen=selection;for(int id:selection)if(auto b
 UINT clipboardFormat(){return RegisterClipboardFormatW(L"YoungDraw.Project.v2");}
 void copy(){if(selection.empty())return;if(FAILED(office::copy(selectedDocument())))throw std::runtime_error("클립보드 복사에 실패했습니다. 잠시 후 다시 시도하세요.");status=L"복사했습니다. Word·Excel에 붙여넣거나 YoungDraw에서 편집할 수 있습니다.";}
 void copyPng(){
-    auto image=drawingBitmap(selection.empty()?doc:selectedDocument(),true);const auto bytes=encodePng(*image);
+    auto image=drawingBitmap(selection.empty()?doc:selectedDocument(),true,isolatedStructureEditing?highResolutionDpi:0);
+    const auto bytes=encodePng(*image);
     const UINT png=RegisterClipboardFormatW(L"PNG"),mime=RegisterClipboardFormatW(L"image/png");
     if(!png||!mime)throw std::runtime_error("PNG 클립보드 형식을 등록할 수 없습니다.");
     auto allocate=[&](){HGLOBAL handle=GlobalAlloc(GMEM_MOVEABLE,bytes.size());if(!handle)throw std::bad_alloc();auto* data=GlobalLock(handle);if(!data){GlobalFree(handle);throw std::bad_alloc();}memcpy(data,bytes.data(),bytes.size());GlobalUnlock(handle);return handle;};
