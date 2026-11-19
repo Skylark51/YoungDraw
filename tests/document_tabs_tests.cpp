@@ -375,6 +375,19 @@ static void pngExportChecks(HWND hwnd){
     auto clipboardPng=[&](){check(OpenClipboard(hwnd)!=0,"open PNG clipboard for verification");auto bytes=clipboardMemoryBytes(GetClipboardData(RegisterClipboardFormatW(L"PNG")));auto alias=clipboardMemoryBytes(GetClipboardData(RegisterClipboardFormatW(L"image/png")));CloseClipboard();check(bytes==alias&&bytes.size()>8&&bytes.substr(0,8)==std::string("\x89PNG\r\n\x1a\n",8),"clipboard carries real PNG bytes in both native and MIME formats");return bytes;};
     std::cerr<<"PNG file alpha verified; copying entire document\n";SendMessageW(hwnd,WM_COMMAND,copyPngCommand,0);std::cerr<<"PNG document copy returned\n";check(clipboardPng()==encodePng(*bitmap),"PNG copy without selection copies the whole document");
     selection={first.id};auto selected=drawingBitmap(selectedDocument(),true);check(selected->GetWidth()<bitmap->GetWidth(),"selected image bounds omit unselected objects");command(copyPngCommand);check(clipboardPng()==encodePng(*selected),"PNG copy uses only the selection when present");
+    isolatedStructureEditing=true;
+    Bitmap toolbar(ww,wh,PixelFormat32bppARGB);
+    {Graphics graphics(&toolbar);HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);}
+    const auto copyIcon=std::find_if(hits.begin(),hits.end(),[](const auto& hit){return hit.id==copyPngCommand;});
+    check(copyIcon!=hits.end()&&copyIcon->box.Y==18&&copyIcon->box.Width==44,"independent structure editor displays a complete PNG copy icon in its toolbar");
+    const auto copyPoint=MAKELPARAM(int(copyIcon->box.X+22),int(copyIcon->box.Y+22));
+    selection.clear();
+    SendMessageW(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,copyPoint);
+    check(clipboardPng()==encodePng(*bitmap),"independent structure editor icon copies the complete structure");
+    selection={first.id};
+    SendMessageW(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,copyPoint);
+    check(clipboardPng()==encodePng(*selected),"independent structure editor icon copies only selected items");
+    isolatedStructureEditing=false;
     check(toNative(doc)==before&&!dirty,"PNG export and copy never modify the source document");
     auto menu=GetSubMenu(GetMenu(hwnd),0);wchar_t label[128]{};check(GetMenuStringW(menu,exportPngCommand,label,128,MF_BYCOMMAND)>0,"file menu exposes PNG picture export");
     Document wavePreview;auto graph=reactionProfilePlot();graph.id=wavePreview.nextId++;graph.states[1].breakAfter=true;graph.states[1].breakStyle=1;graph.states[1].breakScale=.1;graph.inkScale=1.5;graph.series[0].width=4;graph.series[0].name="Reaction pathway";graph.legendFontSize=20;wavePreview.plots={graph};writePreview(L"wave-legend-preview.png",wavePreview,true);

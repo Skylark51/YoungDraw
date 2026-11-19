@@ -120,7 +120,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  float toolbarX=12;
  loadFavorites();
  const int toolbarWidth=isolatedStructureEditing?ww-308:ww;
- topLimit=std::max(0,(isolatedStructureEditing?880:1164+int(favorites.size())*48)-toolbarWidth);
+ topLimit=std::max(0,(isolatedStructureEditing?940:1164)+int(favorites.size())*48-toolbarWidth);
  topOffset=std::min(topOffset,topLimit);
  const auto toolbarClip=RectF(0,0,float(toolbarWidth),63);
  auto toolbarState=g.Save();g.SetClip(toolbarClip);g.TranslateTransform(float(-topOffset),0);
@@ -137,7 +137,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
      }
  };
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
- if(isolatedStructureEditing)group({102});
+ if(isolatedStructureEditing)group({102,copyPngCommand});
  else {
      group({100,101,102});
      separator();
