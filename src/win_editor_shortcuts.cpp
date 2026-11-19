@@ -38,7 +38,7 @@ bool adjustSelectedStrokeWidths(bool increase){
         edited=true;
     }
     for(auto& object:doc.objects){
-        if((object.kind!=ObjectKind::Ellipse&&object.kind!=ObjectKind::Curve)||
+        if((object.kind!=ObjectKind::Line&&object.kind!=ObjectKind::Ellipse&&object.kind!=ObjectKind::Curve)||
            object.filled||!contains(ids,object.id))continue;
         found=true;
         const double nextWidth=adjusted(object.width);
@@ -57,8 +57,8 @@ void hotkey(char c){
  if(snapPlot)return;
  if(!mechanismConnectionDrag&&(c=='+'||c=='='||c=='-'||c=='_')&&adjustSelectedPlotWeight(c=='+'||c=='='))return;
  // The main minus key produces '_' with Shift, while the keypad produces '-'.
- if((c=='+'||c=='-'||c=='_')&&(GetKeyState(VK_SHIFT)&0x8000)&&
-    !mechanismConnectionDrag&&adjustSelectedStrokeWidths(c=='+'))return;
+ if((c=='+'||c=='='||c=='-'||c=='_')&&(GetKeyState(VK_SHIFT)&0x8000)&&
+    !mechanismConnectionDrag&&adjustSelectedStrokeWidths(c=='+'||c=='='))return;
  // Zero clears atom annotations and must never fall through to atom sprouting.
  if(c=='0'){
     int target=doc.atom(hoverAtom)?hoverAtom:selection.size()==1&&doc.atom(selection.front())?selection.front():0;
@@ -159,11 +159,11 @@ void showHelp(){
     entries.push_back({L"편집 · 실행 취소와 다시 실행",
         L"Ctrl+Z 실행 취소 / Ctrl+Shift+Z 다시 실행. Ctrl+Y는 보기 → 단축키 호환에서 작업 반복 또는 다시 실행으로 지정합니다."});
     entries.push_back({L"구조 · 정리, 크기, 회전",
-        L"마우스 회전 버튼을 켜고 구조를 드래그합니다. Shift: 15° 단위. Ctrl+Shift+K 구조 정리 / Ctrl+K 크기 / Ctrl+R 각도 입력 / Ctrl+G 그룹 / Ctrl+Shift+G 그룹 해제. 결합·타원·곡선을 선택하고 Shift와 + 또는 - 키를 눌러 선 두께를 조정합니다."});
+        L"직접 회전 버튼을 켜고 구조를 드래그합니다. Shift: 15° 단위. Ctrl+Shift+K 구조 정리 / Ctrl+K 크기 / Ctrl+R 각도 입력 / Ctrl+G 그룹 / Ctrl+Shift+G 그룹 해제. 결합·선·화살표·타원을 선택하고 Shift와 + 또는 - 키를 눌러 선 굵기를 조정합니다."});
     entries.push_back({L"배치 · 정렬, 이동, 반전",
         L"Ctrl+Shift+Alt+L/C/R 가로 정렬, T/M/B 세로 정렬, H/V 간격 배분. Ctrl+Shift+H/V 반전. 방향키 1 pt, Shift+방향키 10 pt, Alt+방향키 회전, Ctrl+방향키 반응 복제."});
     entries.push_back({L"그리기 · 도구, 첨자, 클립보드",
-        L"Del 선택 항목 또는 포인터 아래의 원자·결합·그리기 항목 삭제. Space 선택 도구, Shift+G 오비탈, F9/F10 아래·위첨자, Ctrl+D CDXML 복사, Ctrl+Shift+X 반응 배치. Ctrl+우클릭 드래그로 화면을 이동합니다."});
+        L"Del 선택 항목 또는 포인터 아래의 원자·결합·그리기 항목 삭제. Space 선택 도구, Shift+G 오비탈, F9/F10 아래·위첨자, Ctrl+D CDXML 복사, Ctrl+Shift+X 반응 배치. 선택 도구로 화살표를 선택한 뒤 양끝 원을 드래그해 길이와 방향을 조정합니다. Ctrl+우클릭 드래그로 화면을 이동합니다."});
     entries.push_back({L"작업 공간 · 스크롤, 도구 고정, 명령 검색",
         L"작은 창에서는 도구 영역에 마우스를 두고 휠을 돌립니다. 그리기 도구를 우클릭해 상단에 고정합니다. Ctrl+Shift+F를 누르고 명령을 검색해 Enter로 실행합니다."});
     entries.push_back({L"메커니즘 · 에너지 직접 편집과 이동",

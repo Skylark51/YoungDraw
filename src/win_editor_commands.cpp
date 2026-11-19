@@ -91,7 +91,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
     cancel();pruneLockedSelection();
     tool=tool==Rotate?Select:Rotate;
     targetContainer=0;
-    status=tool==Rotate?L"마우스 회전 · 구조에서 드래그 · Shift: 15° 단위 · Space: 선택 도구":L"선택·이동";
+    status=tool==Rotate?L"직접 회전 · 구조에서 드래그 · Shift: 15° 단위 · Space: 선택 도구":L"선택·이동";
     redraw();return;
  }
  if(id==198||id==199){groupSelected(id==199);return;}

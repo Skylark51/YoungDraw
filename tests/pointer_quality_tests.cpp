@@ -214,6 +214,33 @@ int main(int argc,char** argv){
         auto pickerBefore=toNative(doc);SetTimer(hwnd,990,10,driveGraphPicker);auto choice=ui::graphChoice(hwnd);
         check(pickerDriven&&choice&&choice->mode==3&&!choice->freeEnergy,"icon selection dialog returns selected shape and energy quantity");
         pickerDriven=false;pickerCancel=true;SetTimer(hwnd,990,10,driveGraphPicker);check(!ui::graphChoice(hwnd)&&pickerDriven&&toNative(doc)==pickerBefore,"canceling graph selection does not modify the document");
+        {
+            doc={};history.clear();zoom=2;origin={300,200};tool=Select;selection.clear();
+            Object arrow;arrow.id=doc.nextId++;arrow.head=1;arrow.points={{50,50},{110,50}};
+            doc.objects.push_back(arrow);
+            const auto original=toNative(doc);
+            const auto shaft=screen({80,50});
+            mouseDown(shaft);mouseUp(shaft);
+            check(selection==std::vector<int>{arrow.id},"click selects the straight arrow on the canvas");
+            BYTE keys[256]{},shifted[256]{};GetKeyboardState(keys);
+            memcpy(shifted,keys,sizeof(keys));shifted[VK_SHIFT]=0x80;
+            SetKeyboardState(shifted);
+            SendMessageW(hwnd,WM_CHAR,'+',0);
+            check(doc.objects[0].width>arrow.width,"Shift+plus increases straight arrow stroke width");
+            SendMessageW(hwnd,WM_CHAR,'_',0);
+            SetKeyboardState(keys);
+            check(std::abs(doc.objects[0].width-arrow.width)<1e-9,"Shift+minus decreases straight arrow stroke width");
+            check(history.undo(doc)&&doc.objects[0].width>arrow.width&&history.undo(doc)&&toNative(doc)==original,
+                  "both arrow width edits can be undone");
+            const auto tip=screen(arrow.points.back());
+            mouseDown(tip);mouseUp(tip+Vec{40,0});
+            check((doc.objects[0].points.front()-arrow.points.front()).length()<1e-9&&
+                  (doc.objects[0].points.back()-arrow.points.back()-Vec{20,0}).length()<1e-9,
+                  "dragging the straight arrow tip lengthens the arrow with the tail fixed");
+            check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"arrow length drag is a single reversible edit");
+            mouseDown(tip);mouse=tip+Vec{-40,0};updateDrag();cancel();
+            check(toNative(doc)==original&&!history.undo(doc),"cancelling an arrow handle drag restores its length");
+        }
         doc={};auto graph=newEnergyPlot(0,false);graph.id=doc.nextId++;graph.p={100,100};doc.plots={graph};history.clear();zoom=1;origin={200,150};tool=Select;selection={graph.id};
         auto cleanGraph=toNative(doc);pendingEnergyGap=PendingEnergyGap{graph.id,0,1,0,""};cancel();
         check(!pendingEnergyGap&&toNative(doc)==cleanGraph,"canceling gap placement leaves the graph unchanged");

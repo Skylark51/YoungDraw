@@ -139,17 +139,20 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
      }
  };
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
- if(isolatedStructureEditing)group({102,rotateToolCommand,arrowColorCommand,155,156});
+ if(isolatedStructureEditing)group({102,arrowColorCommand,155,156});
  else {
      group({100,101,102});
      separator();
      group({185});
+     separator();group({104,105});separator();
+     group({107,125,arrowColorCommand,155,156});
  }
- separator();group({104,105});separator();
- if(isolatedStructureEditing)group({107,125});
- else group({107,125,rotateToolCommand,arrowColorCommand,155,156});
- separator();
- group({170,171,172,173,174});separator();group({160,161,162,163,164});
+ separator();group({rotateToolCommand,162,163,164,160,161});
+ if(isolatedStructureEditing){
+     separator();group({104,105});
+     separator();group({107,125});
+ }
+ separator();group({170,171,172,173,174});
  if(!isolatedStructureEditing){separator();group({bondAnimationCommand,copyPngCommand});}
  for(int id:favorites)group({id});
  g.Restore(toolbarState);
@@ -253,7 +256,31 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
     }
  }
  if(!inlineEdit)for(int id:selection){auto it=sc.objectBounds.find(id);if(it!=sc.objectBounds.end()){auto r=it->second;Vec p=screen({r.x,r.y});Pen pen(Color(150,0,135,120),1.5);pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,float(p.x-4),float(p.y-4),float(r.w*zoom+8),float(r.h*zoom+8));}else if(auto a=doc.atom(id)){Vec p=screen(a->p);Pen pen(accent,1.5);g.DrawRectangle(&pen,float(p.x-atomPickRadius),float(p.y-atomPickRadius),float(atomPickRadius*2),float(atomPickRadius*2));}}
- if(tool==Select&&selection.size()==1){auto found=sc.arrowPaths.find(selection.front());if(found!=sc.arrowPaths.end()&&found->second.size()==4){const auto& path=found->second;Pen guidePen(Color(170,0,135,120),1);guidePen.SetDashStyle(DashStyleDash);for(int i:{0,2}){Vec a=screen(path[i]),b=screen(path[i+1]);g.DrawLine(&guidePen,float(a.x),float(a.y),float(b.x),float(b.y));}Pen outline(accent,1.5);SolidBrush body(white),control(accent);for(int i=0;i<4;i++){Vec p=screen(path[i]);g.FillEllipse(i==1||i==2?&control:&body,float(p.x-5),float(p.y-5),10.f,10.f);g.DrawEllipse(&outline,float(p.x-5),float(p.y-5),10.f,10.f);}}}
+ if(tool==Select&&selection.size()==1&&!snapPlot&&!inlineEdit&&!doc.isLocked(selection.front())){
+    const auto found=sc.arrowPaths.find(selection.front());
+    if(found!=sc.arrowPaths.end()&&found->second.size()>=2){
+        const auto& path=found->second;
+        Pen outline(accent,1.5f);
+        SolidBrush body(white),control(accent);
+        auto handle=[&](Vec point,SolidBrush& brush){
+            const auto at=screen(point);
+            g.FillEllipse(&brush,float(at.x-5),float(at.y-5),10.f,10.f);
+            g.DrawEllipse(&outline,float(at.x-5),float(at.y-5),10.f,10.f);
+        };
+        if(path.size()==4){
+            Pen guidePen(Color(170,0,135,120),1);
+            guidePen.SetDashStyle(DashStyleDash);
+            for(int i:{0,2}){
+                const auto a=screen(path[i]),b=screen(path[i+1]);
+                g.DrawLine(&guidePen,float(a.x),float(a.y),float(b.x),float(b.y));
+            }
+            handle(path[1],control);
+            handle(path[2],control);
+        }
+        handle(path.front(),body);
+        handle(path.back(),body);
+    }
+ }
  if(auto* hovered=doc.atom(hoverAtom)){Vec p=screen(hovered->p);Pen pen(accent,1);const float radius=float(tool==Benzene?benzenePickRadius:atomPickRadius);g.DrawRectangle(&pen,float(p.x)-radius,float(p.y)-radius,radius*2,radius*2);}if(boxing){Pen p(accent,1);p.SetDashStyle(DashStyleDash);g.DrawRectangle(&p,float(std::min(down.x,mouse.x)),float(std::min(down.y,mouse.y)),float(std::abs(down.x-mouse.x)),float(std::abs(down.y-mouse.y)));}if(drawing){if(tool==Orbital){auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,makeScene(draftOrbital(mouse),measure),false,true);g.Restore(transform);}else if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance||tool==Interaction){Document preview=doc;preview.objects.push_back(draftArrow(mouse));auto all=makeScene(preview,measure);Scene arrow;for(auto& item:all.items)if(item.owner==-1)arrow.items.push_back(item);auto transform=g.Save();g.TranslateTransform(float(origin.x),float(origin.y));g.ScaleTransform(float(zoom),float(zoom));render(g,arrow,false,true);g.Restore(transform);}else{Pen p(accent,1.5);p.SetDashStyle(DashStyleDash);g.DrawLine(&p,float(down.x),float(down.y),float(mouse.x),float(mouse.y));}}g.Restore(state);
  float rx=float(ww-right);fill(g,{rx,float(top),float(right),float(wh-top-bottom)},palette.panel);const RectF rightClip(rx,89,float(right),float(std::max(0,wh-bottom-89)));
  rightOffset=std::min(rightOffset,std::max(0,(showLayers?737:570)-(wh-bottom)));

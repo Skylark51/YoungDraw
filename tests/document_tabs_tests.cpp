@@ -728,8 +728,10 @@ int main(int argc,char** argv){
             check(hit(155).X==hit(arrowColorCommand).X+48,"arrow palette is immediately left of atom palette");
             check(hit(156).X==hit(155).X+48,"text palette is immediately right of atom palette");
             check(present(copyPngCommand)&&hit(copyPngCommand).X==hit(bondAnimationCommand).X+48&&!helpText(copyPngCommand).empty(),"transparent PNG copy icon appears next to GIF in the top toolbar");
-            check(hit(bondAnimationCommand).X==hit(164).X+64&&hit(bondAnimationCommand).Width==hit(164).Width&&
-                  hit(bondAnimationCommand).Height==hit(164).Height,"GIF icon matches the rotation controls after its separator");
+            check(hit(162).X==hit(rotateToolCommand).X+48&&hit(163).X==hit(162).X+48&&
+                  hit(164).X==hit(163).X+48,"direct, 90-degree and numeric rotation share one toolbar group");
+            check(hit(bondAnimationCommand).Width==hit(164).Width&&hit(bondAnimationCommand).Height==hit(164).Height,
+                  "GIF and rotation controls use the same icon size");
             const int fullWidth=ww;
             ww=740;repaint();
             check(hit(rotateToolCommand).Width==44&&hit(arrowColorCommand).Width==44,
