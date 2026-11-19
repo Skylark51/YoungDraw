@@ -8,6 +8,7 @@
 #include "win_editor_state.h"
 #include "win_editor_structure.h"
 #include "win_editor_text.h"
+#include "cdxml.h"
 #include "mechanism_data.h"
 #include "plot_data.h"
 #include "win_ui.h"
@@ -16,6 +17,11 @@
 namespace yd::editor {
 
 static std::vector<int> dragSelection;
+struct RotationDrag {
+    Vec pivot;
+    std::vector<int> ids;
+};
+static std::optional<RotationDrag> rotationDrag;
 static std::optional<InlineTarget> energyDrag;
 static std::optional<CrossingCaption> crossingDrag,gapDrag;
 struct PlotLevelDrag { int owner,state,path; PlotDragScale scale; bool horizontal; };
@@ -194,6 +200,49 @@ Vec sproutPoint(int id){return bondEndpoint(doc,id,doc.atom(id)->p,kind());}
 Vec endpoint(Vec p){Vec a=startAtom?doc.atom(startAtom)->p:world(down);int target=atomHit(world(p),8);if(target&&target!=startAtom)return doc.atom(target)->p;if((p-down).length()<5)return startAtom?bondEndpoint(doc,startAtom,doc.atom(startAtom)->p,kind(),element):a+Vec{std::cos(-pi/6),std::sin(-pi/6)}*defaultBondLength(doc,0,kind(),element);if(startAtom&&!(GetKeyState(VK_MENU)&0x8000))return bondEndpoint(doc,startAtom,world(p),kind(),element);return snapped(a,world(p),defaultBondLength(doc,startAtom,kind(),element),(GetKeyState(VK_MENU)&0x8000)!=0);}
 int objectAt(Vec p){auto sc=scene();for(auto it=doc.objects.rbegin();it!=doc.objects.rend();++it){if(doc.isLocked(it->id))continue;auto box=sc.objectBounds.find(it->id);if(box==sc.objectBounds.end())continue;auto b=box->second;double t=5/zoom;if(p.x<b.x-t||p.x>b.x+b.w+t||p.y<b.y-t||p.y>b.y+b.h+t)continue;if(hitObject(sc,it->id,p,t))return it->id;}
  for(auto& r:doc.reactions){auto b=sc.objectBounds[r.id];if(p.x>=b.x-5&&p.x<=b.x+b.w+5&&p.y>=b.y-5&&p.y<=b.y+b.h+5)return r.id;}for(auto& plot:doc.plots){if(doc.isLocked(plot.id))continue;auto b=sc.objectBounds[plot.id];if(p.x>=b.x-5&&p.x<=b.x+b.w+5&&p.y>=b.y-5&&p.y<=b.y+b.h+5)return plot.id;}return 0;}
+int drawingItemAt(Vec p){
+    const Vec at=world(p);
+    int id=atomHit(at,tool==Benzene?benzenePickRadius:atomPickRadius);
+    if(!id)id=doc.bondAt(at,5/zoom);
+    return id?id:objectAt(at);
+}
+
+static void beginRotation(Vec p){
+    auto ids=selection;
+    const int hit=drawingItemAt(p);
+    if(hit&&!contains(ids,hit))ids=groupedSelection({hit});
+    if(ids.empty())return;
+    try{
+        dragBefore=dragBase=doc;
+        Vec pivot;
+        selection=transformStructures(dragBase,ids,0,false,false,&pivot);
+        rotationDrag=RotationDrag{pivot,std::move(ids)};
+        dragging=true;
+        moved=copyDrag=false;
+        SetCapture(win);
+    }catch(const std::exception& e){
+        status=ui::wide(e.what());
+    }
+    redraw();
+}
+
+static void updateRotation(){
+    const Vec pivot=screen(rotationDrag->pivot);
+    const Vec start=down-pivot,current=mouse-pivot;
+    double degrees;
+    if(start.length()<6){
+        // At the pivot there is no starting angle. Use horizontal movement.
+        degrees=mouse.x-down.x;
+    }else{
+        if(current.length()<2)return;
+        degrees=std::atan2(start.x*current.y-start.y*current.x,start.x*current.x+start.y*current.y)*180/pi;
+    }
+    if(GetKeyState(VK_SHIFT)&0x8000)degrees=std::round(degrees/15)*15;
+    doc=dragBase;
+    transformStructures(doc,rotationDrag->ids,degrees);
+    status=L"회전 "+ui::wide(number(degrees))+L"° · Shift: 15° 단위 · Esc: 취소";
+}
+
 bool pickSlot(Vec p){if(!guides)return false;for(auto& r:doc.reactions)for(size_t i=0;i<r.slots.size();i++){Vec c=reactionSlot(r,i);if(std::abs(p.x-c.x)<r.slotWidth/2&&std::abs(p.y-c.y)<r.slotHeight/2){targetContainer=r.id;targetSlot=i;targetAbove=false;sidebarPage=0;selection={r.id};status=L"구조 삽입 영역 선택: Ctrl+V로 복사한 구조를 삽입합니다.";redraw();return true;}}
  for(auto& plot:doc.plots)if(!doc.isLocked(plot.id))for(size_t i=0;i<plot.states.size();i++)for(bool above:{false,true}){Vec c=plotAnchor(plot,i,above);if(std::abs(p.x-c.x)<24&&std::abs(p.y-c.y)<27.5){targetContainer=plot.id;targetSlot=i;targetAbove=above;sidebarPage=1;selection={plot.id};status=L"그래프 삽입 영역 선택: Ctrl+V로 복사한 구조를 삽입합니다.";redraw();return true;}}return false;}
 bool beginCurveHandle(Vec p){
@@ -206,7 +255,9 @@ bool beginCurveHandle(Vec p){
 }
 void updateDrag(){
     if(!dragging)return;Vec delta=(mouse-down)*(1/zoom);if(GetKeyState(VK_SHIFT)&0x8000)delta=std::abs(delta.x)>std::abs(delta.y)?Vec{delta.x,0}:Vec{0,delta.y};
-    if((mouse-down).length()<=2&&!moved)return;moved=true;if(energyDrag)return;doc=dragBase;
+    if((mouse-down).length()<=2&&!moved)return;moved=true;
+    if(rotationDrag){updateRotation();return;}
+    if(energyDrag)return;doc=dragBase;
     if(plotAxisDrag){
         const auto& a=*plotAxisDrag;
         const double x=a.horizontal?std::clamp(a.xLength+delta.x,std::max(100.,a.xLength+180-a.width),std::min(4000.,a.xLength+4000-a.width)):a.xLength;
@@ -231,7 +282,7 @@ void updateDrag(){
     if(curveHandle>=0){for(auto& o:doc.objects)if(o.id==curveOwner){o.points[size_t(curveHandle)]=o.points[size_t(curveHandle)]+delta;}return;}
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
-void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(!dragSelection.empty())selection=dragSelection;}dragSelection.clear();energyDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
+void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(rotationDrag||!dragSelection.empty())selection=dragSelection;}rotationDrag.reset();dragSelection.clear();energyDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
 void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!finishInline(true))return;for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;SetFocus(win);if(canvas(p)){
     const Vec at=world(p);int hit=atomHit(at);if(!hit)hit=doc.bondAt(at,5/zoom);if(!hit)hit=objectAt(at);
     if(plot(hit)){sidebarPage=1;showLayers=false;}
@@ -241,6 +292,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&
         for(const auto& graph:doc.plots)for(const auto& state:graph.states)if(contains(state.above,hit)||contains(state.below,hit)){sidebarPage=1;showLayers=false;}
     }
 }if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();
+ if(tool==Rotate){beginRotation(p);return;}
  if(tool==Erase){boxing=true;SetCapture(win);status=L"지우개 · 드래그: 사각형 범위 일괄 삭제 · 클릭: 한 항목 삭제 · Esc: 취소";redraw();return;}
  if(placeEnergyGap(p))return;
  if(tool==Select&&!(GetKeyState(VK_MENU)&0x8000)&&!mechanismConnecting&&!mechanismConnectionDrag&&!isolatedStructureEditing){
@@ -327,8 +379,7 @@ static void finishErase(Vec p){
             selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;selection={hit->first};targetContainer=0;
             deleteSelectedCycleArrow();redraw();return;
         }
-        const Vec at=world(down);
-        int id=atomHit(at);if(!id)id=doc.bondAt(at,5/zoom);if(!id)id=objectAt(at);
+        const int id=drawingItemAt(down);
         if(id&&!doc.isLocked(id))ids.push_back(id);
     }
     if(!ids.empty()){
@@ -352,6 +403,12 @@ void mouseUp(Vec p){if(tool==Erase&&boxing){finishErase(p);return;}if(mechanismC
  if(plotLevelDrag&&plotLevelDrag->horizontal&&moved)status=L"준위의 가로 위치를 변경했습니다. Ctrl+Z: 되돌리기";
  if(plotAxisDrag&&moved)status=L"축 길이와 연결된 위치를 변경했습니다. Ctrl+Z: 되돌리기";
  if(stagePositionDrag&&moved)status=L"메커니즘 단계의 위치를 변경했습니다. Ctrl+Z: 되돌리기";
+ if(rotationDrag){
+    moved=moved&&toNative(doc)!=toNative(dragBefore);
+    rotationDrag.reset();
+    status=L"마우스 회전 · Shift: 15° 단위 · Space: 선택 도구";
+    if(moved)status+=L" · Ctrl+Z: 되돌리기";
+ }
  plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();dragging=false;if(moved){history.checkpoint(dragBefore);changed();}else doc=dragBefore;curveHandle=-1;annotationDrag=0;ReleaseCapture();}if(boxing){boxing=false;ReleaseCapture();Vec a=world(down),b=world(p);double l=std::min(a.x,b.x),t=std::min(a.y,b.y),r=std::max(a.x,b.x),z=std::max(a.y,b.y);for(auto& atom:doc.atoms)if(atom.p.x>=l&&atom.p.x<=r&&atom.p.y>=t&&atom.p.y<=z&&!contains(selection,atom.id))selection.push_back(atom.id);auto sc=scene();for(auto& box:sc.objectBounds)if(!doc.atom(box.first)&&!doc.bond(box.first)&&!doc.isLocked(box.first)){auto q=box.second;if(q.x>=l&&q.y>=t&&q.x+q.w<=r&&q.y+q.h<=z&&!contains(selection,box.first))selection.push_back(box.first);}selection=groupedSelection(selection);redraw();}
  if(drawing){if(tool==Orbital){auto fragment=draftOrbital(p);drawing=false;ReleaseCapture();history.checkpoint(doc);int first=doc.nextId;doc.append(fragment);selection.clear();for(auto& o:doc.objects)if(o.id>=first)selection.push_back(o.id);changed();return;}if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance||tool==Interaction){drawing=false;ReleaseCapture();if((p-down).length()<5)return;Object o=draftArrow(p);history.checkpoint(doc);o.id=doc.nextId++;doc.objects.push_back(o);selection={o.id};changed();return;}
  Vec end=endpoint(p),begin=startAtom?doc.atom(startAtom)->p:world(down);int target=atomHit(end,8);drawing=false;ReleaseCapture();if(target==startAtom&&startAtom)return;if((end-begin).length()<1)return;history.checkpoint(doc);int a=startAtom?startAtom:doc.addAtom(begin),b=target?target:doc.addAtom(end,element);if(!target)doc.atom(b)->drawingScale=doc.atom(a)->drawingScale;doc.addBond(a,b,kind());selection={b};changed();}redraw();}

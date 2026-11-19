@@ -721,15 +721,17 @@ int main(int argc,char** argv){
             check(GetMenuState(GetSubMenu(layoutMenu,4),190,MF_BYCOMMAND)!=UINT(-1)&&GetMenuState(GetSubMenu(layoutMenu,3),190,MF_BYCOMMAND)==UINT(-1),"alignment commands belong only to object alignment submenu");
             for(int id:{121,127,140,143,144,145,146,147,149,169})check(!present(id),"mechanism tools are consolidated into independent editor");
             for(auto& action:hits)check(!helpText(action.id).empty(),"every visible main button has help");
-            for(int id:{100,101,102,104,105,107,125,155,156,170,171,172,173,174,160,161,162,163,164}){
+            for(int id:{100,101,102,104,105,107,125,arrowColorCommand,155,156,170,171,172,173,174,160,161,162,163,164,rotateToolCommand}){
                 check(present(id)&&hit(id).Y==hit(100).Y&&hit(id).Width==44&&hit(id).GetBottom()<89,"icon toolbar fits one row above document tabs");
                 check(!helpText(id).empty(),"each toolbar icon has Korean help");
             }
+            check(hit(155).X==hit(arrowColorCommand).X+48,"arrow palette is immediately left of atom palette");
             check(hit(156).X==hit(155).X+48,"text palette is immediately right of atom palette");
             check(present(copyPngCommand)&&hit(copyPngCommand).X==hit(bondAnimationCommand).X+48&&!helpText(copyPngCommand).empty(),"transparent PNG copy icon appears next to GIF in the top toolbar");
-            check(hit(bondAnimationCommand).X==hit(164).X+64&&hit(bondAnimationCommand).Width==hit(164).Width&&
-                  hit(bondAnimationCommand).Height==hit(164).Height,"GIF icon matches the rotation controls after its separator");
-            check(hit(164).GetRight()<1200,"all toolbar groups fit minimum window width");
+            check(hit(rotateToolCommand).X==hit(164).X+48,"mouse rotation is next to numeric rotation");
+            check(hit(bondAnimationCommand).X==hit(rotateToolCommand).X+64&&hit(bondAnimationCommand).Width==hit(rotateToolCommand).Width&&
+                  hit(bondAnimationCommand).Height==hit(rotateToolCommand).Height,"GIF icon matches the rotation controls after its separator");
+            check(hit(rotateToolCommand).GetRight()<1200,"rotation controls fit minimum window width");
             check(present(218)&&present(219)&&hit(150).GetBottom()<=wh-bottom,"orbital tools and style button fit the client height");
             auto before=toNative(doc);command(183);repaint();
             check(present(plotManagerCommand)&&present(130)&&!helpText(plotManagerCommand).empty(),"graph sidebar exposes the manager and new graph entry");

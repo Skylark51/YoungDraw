@@ -159,11 +159,11 @@ void showHelp(){
     entries.push_back({L"편집 · 실행 취소와 다시 실행",
         L"Ctrl+Z 실행 취소 / Ctrl+Shift+Z 다시 실행. Ctrl+Y는 보기 → 단축키 호환에서 작업 반복 또는 다시 실행으로 지정합니다."});
     entries.push_back({L"구조 · 정리, 크기, 회전",
-        L"예: 구조를 선택하고 Ctrl+Shift+K로 정리합니다. Ctrl+K 크기 / Ctrl+R 회전 / Ctrl+G 그룹 / Ctrl+Shift+G 그룹 해제. 결합·타원·곡선을 선택하고 Shift와 + 또는 - 키를 눌러 선 두께를 조정합니다."});
+        L"마우스 회전 버튼을 켜고 구조를 드래그합니다. Shift: 15° 단위. Ctrl+Shift+K 구조 정리 / Ctrl+K 크기 / Ctrl+R 각도 입력 / Ctrl+G 그룹 / Ctrl+Shift+G 그룹 해제. 결합·타원·곡선을 선택하고 Shift와 + 또는 - 키를 눌러 선 두께를 조정합니다."});
     entries.push_back({L"배치 · 정렬, 이동, 반전",
         L"Ctrl+Shift+Alt+L/C/R 가로 정렬, T/M/B 세로 정렬, H/V 간격 배분. Ctrl+Shift+H/V 반전. 방향키 1 pt, Shift+방향키 10 pt, Alt+방향키 회전, Ctrl+방향키 반응 복제."});
     entries.push_back({L"그리기 · 도구, 첨자, 클립보드",
-        L"Space 선택 도구, Shift+G 오비탈, F9/F10 아래·위첨자, Ctrl+D CDXML 복사, Ctrl+Shift+X 반응 배치. Ctrl+우클릭 드래그로 화면을 이동합니다."});
+        L"Del 선택 항목 또는 포인터 아래의 원자·결합·그리기 항목 삭제. Space 선택 도구, Shift+G 오비탈, F9/F10 아래·위첨자, Ctrl+D CDXML 복사, Ctrl+Shift+X 반응 배치. Ctrl+우클릭 드래그로 화면을 이동합니다."});
     entries.push_back({L"작업 공간 · 스크롤, 도구 고정, 명령 검색",
         L"작은 창에서는 도구 영역에 마우스를 두고 휠을 돌립니다. 그리기 도구를 우클릭해 상단에 고정합니다. Ctrl+Shift+F를 누르고 명령을 검색해 Enter로 실행합니다."});
     entries.push_back({L"메커니즘 · 에너지 직접 편집과 이동",
@@ -234,7 +234,28 @@ void key(WPARAM k){
     }
     if(k==VK_LEFT||k==VK_RIGHT||k==VK_UP||k==VK_DOWN){double step=shift?10:1;nudgeSelection({k==VK_LEFT?-step:k==VK_RIGHT?step:0,k==VK_UP?-step:k==VK_DOWN?step:0});redraw();return;}
     if(k==VK_ESCAPE){selectedCycleOwner=0;selectedCycleArrow=-1;tool=Select;selection.clear();targetContainer=0;}
-    if(k==VK_DELETE||k==VK_BACK){if(deleteSelectedMechanismStage())return;if(deleteSelectedCycleArrow())return;if(!selection.empty()){history.checkpoint(doc);doc.erase(selection);selection.clear();changed();}}
+    if(k==VK_DELETE||k==VK_BACK){
+        if(k==VK_DELETE&&canvas(mouse)&&(selection.empty()||(tool!=Select&&tool!=Rotate))){
+            const int hit=drawingItemAt(mouse);
+            if(hit&&!doc.isLocked(hit)&&!reaction(hit)&&!plot(hit)&&!contains(selection,hit)){
+                selection={hit};
+                targetContainer=0;
+                selectedCycleOwner=0;
+                selectedCycleArrow=-1;
+            }
+        }
+        if(deleteSelectedMechanismStage()||deleteSelectedCycleArrow())return;
+        if(!selection.empty()){
+            history.checkpoint(doc);
+            doc.erase(selection);
+            selection.clear();
+            targetContainer=0;
+            selectedCycleOwner=0;
+            selectedCycleArrow=-1;
+            changed();
+        }
+        return;
+    }
     if(k==VK_F1)showHelp();
     if(k==VK_RETURN){if(hoverAtom){selection={hoverAtom};editObject(hoverAtom);}else edit();}redraw();
 }

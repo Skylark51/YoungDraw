@@ -28,5 +28,6 @@ void resizeSelected();
 void pasteClipboard();
 void fillTarget(bool file);
 void atomColorPalette();
+void arrowColorPalette();
 
 } // namespace yd::editor

@@ -214,7 +214,7 @@ std::vector<int> addOrbital(Document& d,Vec center,Vec tip,OrbitalKind kind=Orbi
 int delocalizeBonds(Document& d,const std::vector<int>& selection);
 // Positive angles turn clockwise in canvas coordinates. Molecules remain rigid.
 std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,double factor,std::optional<Vec> center=std::nullopt);
-std::vector<int> transformStructures(Document& d,const std::vector<int>& selection,double degrees,bool flipX=false,bool flipY=false);
+std::vector<int> transformStructures(Document& d,const std::vector<int>& selection,double degrees,bool flipX=false,bool flipY=false,Vec* pivot=nullptr);
 enum class AlignMode { Left, CenterX, Right, Top, MiddleY, Bottom, DistributeHorizontal, DistributeVertical };
 bool alignObjects(Document& d,const std::vector<int>& selection,AlignMode mode);
 bool toggleAromaticDisplay(Document& d,const std::vector<int>& selection);

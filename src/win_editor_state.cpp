@@ -21,6 +21,7 @@ int ww=1360,wh=880;double zoom=4;Vec origin{300,200},mouse,down,panOrigin;
 Tool tool=Select;
 int curveHandle=-1,curveOwner=0,annotationDrag=0;
 bool rightPanning=false;
+std::string arrowColor="#ff0000";
 bool drawing=false,dragging=false,boxing=false,panning=false,moved=false,copyDrag=false,guides=true;
 // Invalidate the cached scene for document edits, and retain it for overlays.
 std::optional<Scene> canvasSceneCache;

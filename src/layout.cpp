@@ -58,7 +58,7 @@ std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,d
     for(auto& o:d.objects)if(ids.count(o.id)){for(auto& p:o.points)p=anchor+(p-anchor)*factor;if(o.kind!=ObjectKind::Image){o.width*=factor;if(o.cross.enabled){o.cross.width*=factor;o.cross.size*=factor;}}if(o.kind==ObjectKind::Text){o.fontSize*=factor;for(auto& run:o.runs)run.size*=factor;}}
     return {ids.begin(),ids.end()};
 }
-std::vector<int> transformStructures(Document& d,const std::vector<int>& selection,double degrees,bool flipX,bool flipY){
+std::vector<int> transformStructures(Document& d,const std::vector<int>& selection,double degrees,bool flipX,bool flipY,Vec* pivot){
     if(selection.empty())throw std::runtime_error("회전·반전할 구조를 먼저 선택하세요.");
     if(!std::isfinite(degrees)||std::abs(degrees)>36000)throw std::runtime_error("회전 각도는 -36000~36000도 범위로 입력하세요.");
     auto ids=editableExpansion(d,selection);
@@ -73,7 +73,9 @@ std::vector<int> transformStructures(Document& d,const std::vector<int>& selecti
     for(auto& a:d.atoms)if(ids.count(a.id))bound(a.p);
     for(auto& o:d.objects)if(ids.count(o.id))for(Vec p:o.points)bound(p);
     if(r<l)throw std::runtime_error("회전할 원자·결합·텍스트·화살표를 선택하세요.");
-    Vec center=sum*(1./count);double angle=std::remainder(degrees,360.)*pi/180,c=std::cos(angle),s=std::sin(angle);
+    Vec center=sum*(1./count);
+    if(pivot)*pivot=center;
+    double angle=std::remainder(degrees,360.)*pi/180,c=std::cos(angle),s=std::sin(angle);
     auto transform=[&](Vec p){Vec v=p-center;if(flipX)v.x=-v.x;if(flipY)v.y=-v.y;return center+Vec{c*v.x-s*v.y,s*v.x+c*v.y};};
     if(!flipX&&!flipY&&std::abs(std::remainder(degrees,360.))<1e-12)return {ids.begin(),ids.end()};
     // Freeze selected curves before moving their anchors, including arrows

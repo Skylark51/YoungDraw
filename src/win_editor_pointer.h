@@ -7,6 +7,7 @@ namespace yd::editor {
 Vec sproutPoint(int id);
 Vec endpoint(Vec p);
 int objectAt(Vec p);
+int drawingItemAt(Vec p);
 bool pickSlot(Vec p);
 void updateDrag();
 void cancel();

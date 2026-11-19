@@ -4,7 +4,7 @@
 
 namespace yd::editor {
 
-enum Tool{Select,Single,Double,Triple,Wedge,Hash,Ring5,Ring6,Benzene,Erase,Arrow,Curve,Fishhook,Text,ImageTool,Straight,Resonance,Delocalized,Orbital,Interaction,DottedBond};
+enum Tool{Select,Single,Double,Triple,Wedge,Hash,Ring5,Ring6,Benzene,Erase,Arrow,Curve,Fishhook,Text,ImageTool,Straight,Resonance,Delocalized,Orbital,Interaction,DottedBond,Rotate};
 
 // Active document and selection
 extern HWND win;
@@ -26,6 +26,7 @@ extern int right;
 extern double zoom;
 extern Vec origin, mouse, down, panOrigin, annotationStart;
 extern Tool tool;
+extern std::string arrowColor;
 extern int curveHandle, curveOwner, annotationDrag;
 extern bool rightPanning, drawing, dragging, boxing, panning, moved, copyDrag, guides;
 extern std::optional<Scene> canvasSceneCache;

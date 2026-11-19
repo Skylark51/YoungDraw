@@ -15,6 +15,7 @@
 #include "win_editor_commands.h"
 #include "win_editor_canvas.h"
 #include "win_editor_render.h"
+#include <commdlg.h>
 #include <iostream>
 #include <stdexcept>
 using namespace yd;
@@ -32,6 +33,85 @@ static void CALLBACK driveGraphPicker(HWND owner,UINT,UINT_PTR timer,DWORD){
 static void CALLBACK driveRotation(HWND owner,UINT,UINT_PTR timer,DWORD){
     HWND dialog=nullptr;while((dialog=FindWindowExW(nullptr,dialog,L"YoungDrawForm",L"선택 구조 회전")))if(GetWindow(dialog,GW_OWNER)==owner)break;
     if(!dialog)return;KillTimer(owner,timer);SetDlgItemTextW(dialog,100,L"37.5");PostMessageW(dialog,WM_COMMAND,IDOK,0);
+}
+static void CALLBACK driveArrowColor(HWND owner,UINT,UINT_PTR timer,DWORD){
+    HWND dialog=nullptr;
+    while((dialog=FindWindowExW(nullptr,dialog,L"#32770",nullptr)))if(GetWindow(dialog,GW_OWNER)==owner)break;
+    if(!dialog)return;
+    KillTimer(owner,timer);
+    SendMessageW(dialog,RegisterWindowMessageW(SETRGBSTRINGW),0,RGB(18,52,86));
+    PostMessageW(dialog,WM_COMMAND,IDOK,0);
+}
+static void editorToolRegression(HWND hwnd){
+    auto pointMessage=[&](UINT message,Vec p){
+        SendMessageW(hwnd,message,0,MAKELPARAM(int(p.x),int(p.y)));
+    };
+    doc={};selection.clear();history.clear();zoom=2;origin={400,300};
+    int keep=doc.addAtom({0,0}),remove=doc.addAtom({40,0});
+    doc.addBond(keep,remove);
+    changed();
+    const auto original=toNative(doc);
+    for(int toolCommand:{200,201,208,209,210,211,212,213,rotateToolCommand}){
+        tool=Select;
+        command(toolCommand);
+        if(tool!=Select&&tool!=Rotate)selection={keep};
+        pointMessage(WM_MOUSEMOVE,screen({40,0}));
+        SendMessageW(hwnd,WM_KEYDOWN,VK_DELETE,0);
+        check(!doc.atom(remove)&&doc.atom(keep),"Delete removes the pointed atom in every idle drawing mode");
+        check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"Delete is a single undo step");
+        changed();
+    }
+    selection.clear();
+    pointMessage(WM_MOUSEMOVE,screen({20,0}));
+    SendMessageW(hwnd,WM_KEYDOWN,VK_DELETE,0);
+    check(doc.bonds.empty()&&doc.atoms.size()==2&&history.undo(doc),"Delete also targets a bond");
+    changed();
+    pointMessage(WM_MOUSEMOVE,screen({40,0}));
+    SendMessageW(hwnd,WM_MOUSELEAVE,0,0);
+    SendMessageW(hwnd,WM_KEYDOWN,VK_DELETE,0);
+    check(doc.atom(remove)&&!history.undo(doc),"no hover deletion after the pointer leaves");
+
+    tool=Select;
+    SendMessageW(hwnd,WM_COMMAND,rotateToolCommand,0);
+    check(tool==Rotate,"rotation button activates the rotation tool");
+    const Vec start=screen({40,0}),finish=screen({20,20});
+    const Vec viewport=origin;
+    pointMessage(WM_LBUTTONDOWN,start);
+    pointMessage(WM_MOUSEMOVE,finish);
+    check((doc.atom(remove)->p-Vec{20,20}).length()<1e-8,"rotation follows pointer angle during drag");
+    SendMessageW(hwnd,WM_KEYDOWN,VK_ESCAPE,0);
+    pointMessage(WM_LBUTTONUP,finish);
+    check(toNative(doc)==original&&selection.empty()&&!dragging&&!history.undo(doc),"Escape rolls back the in-progress rotation");
+    pointMessage(WM_LBUTTONDOWN,start);
+    pointMessage(WM_LBUTTONUP,finish);
+    check((doc.atom(keep)->p-Vec{20,-20}).length()<1e-8&&zoom==2&&(origin-viewport).length()==0,"rotation moves the connected molecule about its center and keeps the viewport");
+    check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"mouse-up commits one undoable rotation");
+    SendMessageW(hwnd,WM_COMMAND,rotateToolCommand,0);
+    check(tool==Select,"rotation button toggles off");
+
+    doc={};selection.clear();history.clear();changed();
+    SetTimer(hwnd,988,10,driveArrowColor);
+    SendMessageW(hwnd,WM_COMMAND,arrowColorCommand,0);
+    KillTimer(hwnd,988);
+    check(arrowColor=="#123456"&&!history.undo(doc),"palette sets the color of new arrows without a document edit");
+    command(212);
+    const Vec from=screen({-50,40}),to=screen({30,65});
+    pointMessage(WM_LBUTTONDOWN,from);
+    pointMessage(WM_LBUTTONUP,to);
+    check(doc.objects.size()==1&&doc.objects[0].head==2&&doc.objects[0].color=="#123456","new fishhook uses the palette color");
+    doc.objects[0].color="#ff0000";
+    Object arrow;arrow.id=doc.nextId++;arrow.head=1;arrow.color="#ff0000";arrow.points={{0,90},{40,90}};
+    doc.objects.push_back(arrow);selection.push_back(arrow.id);
+    history.clear();
+    SetTimer(hwnd,988,10,driveArrowColor);
+    SendMessageW(hwnd,WM_COMMAND,arrowColorCommand,0);
+    KillTimer(hwnd,988);
+    check(doc.objects[0].color=="#123456"&&doc.objects[1].color=="#123456","palette recolors both selected arrowhead types");
+    const auto loaded=fromNative(toNative(doc));
+    check(loaded.objects[0].head==2&&loaded.objects[0].color=="#123456"&&loaded.objects[1].color=="#123456","arrow colors and fishhook survive native serialization");
+    check(history.undo(doc)&&doc.objects[0].color=="#ff0000"&&doc.objects[1].color=="#ff0000"&&!history.undo(doc),"batch arrow recolor is one undo step");
+    arrowColor="#ff0000";
+    selection.clear();tool=Select;
 }
 static void editingRegression(HWND hwnd){
     BYTE keys[256]{};SetKeyboardState(keys);showLayers=false;targetContainer=0;origin={400,300};zoom=2;
@@ -232,6 +312,7 @@ int main(int argc,char** argv){
             writePreview(L"energy-wave-after.png",doc);check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"wave compression is one reversible edit");
         }
         editingRegression(hwnd);
+        editorToolRegression(hwnd);
         DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();
         std::cout<<"PASS: hidden editor pointer, tab, save and zoom checks\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}

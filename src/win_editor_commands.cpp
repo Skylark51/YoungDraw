@@ -4,6 +4,7 @@
 #include "win_editor_commands.h"
 #include "win_editor_files.h"
 #include "win_editor_plot.h"
+#include "win_editor_pointer.h"
 #include "win_plot_manager.h"
 #include "win_editor_reaction.h"
 #include "win_editor_render.h"
@@ -85,6 +86,14 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  if(id==184){appearance::picker(win,[](){refreshAppearance();});status=std::wstring(L"작업실 · ")+appearance::palette().name+L" / 테마는 출력에 포함되지 않습니다.";redraw();return;}
  if(id==156){pruneLockedSelection();textColorPalette(colorTarget);return;}
  if(id==155){pruneLockedSelection();atomColorPalette();return;}
+ if(id==arrowColorCommand){pruneLockedSelection();arrowColorPalette();return;}
+ if(id==rotateToolCommand){
+    cancel();pruneLockedSelection();
+    tool=tool==Rotate?Select:Rotate;
+    targetContainer=0;
+    status=tool==Rotate?L"마우스 회전 · 구조에서 드래그 · Shift: 15° 단위 · Space: 선택 도구":L"선택·이동";
+    redraw();return;
+ }
  if(id==198||id==199){groupSelected(id==199);return;}
  if(id>=190&&id<=197){alignSelection(id);return;}
  if(id==110||id==125||id==126||(id>=160&&id<=165))repeatAction=[id](){command(id);};

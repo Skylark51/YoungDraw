@@ -374,16 +374,51 @@ void fillTarget(bool file){
     if(!fragment)throw std::runtime_error("구조 또는 GIF 파일을 복사한 뒤 붙여넣거나 구조·이미지 파일을 선택하세요.");
     insertStructureTarget(*fragment);
 }
+static std::optional<std::string> chooseDrawingColor(const std::string& color){
+    auto initial=rgb(color);static COLORREF custom[16]={};CHOOSECOLORW picker{};
+    picker.lStructSize=sizeof(picker);picker.hwndOwner=win;picker.lpCustColors=custom;picker.Flags=CC_FULLOPEN|CC_RGBINIT;picker.rgbResult=RGB(initial.GetR(),initial.GetG(),initial.GetB());
+    if(!ChooseColorW(&picker))return std::nullopt;
+    char value[8];sprintf_s(value,"#%02x%02x%02x",GetRValue(picker.rgbResult),GetGValue(picker.rgbResult),GetBValue(picker.rgbResult));
+    return std::string(value);
+}
+
 void atomColorPalette(){
     auto chosen=selectedDocument();if(chosen.atoms.empty()){status=L"색을 바꿀 원자를 먼저 선택하세요.";redraw();return;}
-    auto initial=rgb(chosen.atoms.front().color);static COLORREF custom[16]={};CHOOSECOLORW picker{};
-    picker.lStructSize=sizeof(picker);picker.hwndOwner=win;picker.lpCustColors=custom;picker.Flags=CC_FULLOPEN|CC_RGBINIT;picker.rgbResult=RGB(initial.GetR(),initial.GetG(),initial.GetB());
-    if(!ChooseColorW(&picker))return;
-    char value[8];sprintf_s(value,"#%02x%02x%02x",GetRValue(picker.rgbResult),GetGValue(picker.rgbResult),GetBValue(picker.rgbResult));
+    auto color=chooseDrawingColor(chosen.atoms.front().color);if(!color)return;
+    const auto& value=*color;
     bool different=false;for(auto& atom:chosen.atoms){different=different||atom.color!=value;for(auto& run:atom.labelRuns)different=different||run.color!=value;}if(!different)return;
     history.checkpoint(doc);
     for(auto& atom:chosen.atoms)if(auto* target=doc.atom(atom.id)){target->color=value;for(auto& run:target->labelRuns)run.color=value;}
     status=L"선택한 원자 "+std::to_wstring(chosen.atoms.size())+L"개의 색상을 변경했습니다. · Ctrl+Z: 되돌리기";changed();
+}
+
+void arrowColorPalette(){
+    const auto ids=groupedSelection(selection);
+    std::vector<int> arrows;
+    std::string initial=arrowColor;
+    for(const auto& object:doc.objects){
+        if((object.kind!=ObjectKind::Line&&object.kind!=ObjectKind::Curve)||!object.head||!contains(ids,object.id))continue;
+        if(arrows.empty())initial=object.color;
+        arrows.push_back(object.id);
+    }
+    auto color=chooseDrawingColor(initial);
+    if(!color)return;
+    if(arrows.empty()){
+        arrowColor=*color;
+        status=L"새 화살표의 색상을 설정했습니다.";
+        redraw();
+        return;
+    }
+    bool edited=false;
+    for(auto& object:doc.objects)if(contains(arrows,object.id)&&object.color!=*color){
+        if(!edited)history.checkpoint(doc);
+        object.color=*color;
+        edited=true;
+    }
+    if(edited){
+        status=L"선택한 화살표의 색상을 변경했습니다. Ctrl+Z: 되돌리기";
+        changed();
+    }
 }
 
 } // namespace yd::editor
