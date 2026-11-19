@@ -29,7 +29,7 @@ Vec annotationStart;
 bool contains(const std::vector<int>& v,int id){return std::find(v.begin(),v.end(),id)!=v.end();}
 void redraw(){canvasSceneCache.reset();InvalidateRect(win,nullptr,FALSE);refreshPlotManager();}
 void repaintOnly(const RECT* region){InvalidateRect(win,region,FALSE);}
-void title(){std::wstring s=(isolatedStructureEditing?L"단계 구조 편집 | ":L"YoungDraw 0.4 | ")+(filePath.empty()?L"제목 없음":fs::path(filePath).filename().wstring())+(officeDocument&&office::editing()?L" [Office 개체 편집]":L"")+(dirty?L" *":L"");SetWindowTextW(win,s.c_str());refreshDocumentTabs();}
+void title(){std::wstring s=(isolatedStructureEditing?L"YoungDraw " YOUNGDRAW_VERSION L" | 단계 구조 편집 | ":L"YoungDraw " YOUNGDRAW_VERSION L" | ")+(filePath.empty()?L"제목 없음":fs::path(filePath).filename().wstring())+(officeDocument&&office::editing()?L" [Office 개체 편집]":L"")+(dirty?L" *":L"");SetWindowTextW(win,s.c_str());refreshDocumentTabs();}
 void pruneLockedSelection(){selection.erase(std::remove_if(selection.begin(),selection.end(),[](int id){return doc.isLocked(id);}),selection.end());if(doc.isLocked(targetContainer))targetContainer=0;}
 void changed(){if(!doc.atom(hoverAtom))hoverAtom=0;if(!doc.bond(hoverBond))hoverBond=0;pruneLockedSelection();dirty=true;title();redraw();}
 Vec world(Vec p){return (p-origin)*(1/zoom);}

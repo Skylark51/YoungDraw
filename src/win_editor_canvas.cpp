@@ -139,14 +139,17 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
      }
  };
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
- if(isolatedStructureEditing)group({102});
+ if(isolatedStructureEditing)group({102,rotateToolCommand,arrowColorCommand,155,156});
  else {
      group({100,101,102});
      separator();
      group({185});
  }
- separator();group({104,105});separator();group({107,125,arrowColorCommand,155,156});separator();
- group({170,171,172,173,174});separator();group({160,161,162,163,164,rotateToolCommand});
+ separator();group({104,105});separator();
+ if(isolatedStructureEditing)group({107,125});
+ else group({107,125,rotateToolCommand,arrowColorCommand,155,156});
+ separator();
+ group({170,171,172,173,174});separator();group({160,161,162,163,164});
  if(!isolatedStructureEditing){separator();group({bondAnimationCommand,copyPngCommand});}
  for(int id:favorites)group({id});
  g.Restore(toolbarState);

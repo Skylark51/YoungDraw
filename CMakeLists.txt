@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(YoungDraw VERSION 0.4.0 LANGUAGES CXX)
+project(YoungDraw VERSION 0.4.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
@@ -45,6 +45,7 @@ if(WIN32)
     src/win_gallery.cpp
     src/office.cpp
     src/win_theme.cpp)
+  set_property(SOURCE src/win_editor_state.cpp APPEND PROPERTY COMPILE_DEFINITIONS "YOUNGDRAW_VERSION=L\"${PROJECT_VERSION}\"")
   target_link_libraries(youngdraw_editor PUBLIC youngdraw_storage youngdraw_cdxml
     gdiplus comdlg32 shell32 comctl32 oleaut32 uuid advapi32 dwmapi uxtheme)
   add_executable(YoungDraw WIN32 src/winmain.cpp resources/youngdraw.rc)

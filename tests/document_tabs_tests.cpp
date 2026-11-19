@@ -728,10 +728,18 @@ int main(int argc,char** argv){
             check(hit(155).X==hit(arrowColorCommand).X+48,"arrow palette is immediately left of atom palette");
             check(hit(156).X==hit(155).X+48,"text palette is immediately right of atom palette");
             check(present(copyPngCommand)&&hit(copyPngCommand).X==hit(bondAnimationCommand).X+48&&!helpText(copyPngCommand).empty(),"transparent PNG copy icon appears next to GIF in the top toolbar");
-            check(hit(rotateToolCommand).X==hit(164).X+48,"mouse rotation is next to numeric rotation");
-            check(hit(bondAnimationCommand).X==hit(rotateToolCommand).X+64&&hit(bondAnimationCommand).Width==hit(rotateToolCommand).Width&&
-                  hit(bondAnimationCommand).Height==hit(rotateToolCommand).Height,"GIF icon matches the rotation controls after its separator");
-            check(hit(rotateToolCommand).GetRight()<1200,"rotation controls fit minimum window width");
+            check(hit(bondAnimationCommand).X==hit(164).X+64&&hit(bondAnimationCommand).Width==hit(164).Width&&
+                  hit(bondAnimationCommand).Height==hit(164).Height,"GIF icon matches the rotation controls after its separator");
+            const int fullWidth=ww;
+            ww=740;repaint();
+            check(hit(rotateToolCommand).Width==44&&hit(arrowColorCommand).Width==44,
+                  "mouse rotation and arrow color are fully visible at the minimum window width");
+            isolatedStructureEditing=true;repaint();
+            check(hit(rotateToolCommand).Width==44&&hit(arrowColorCommand).Width==44&&
+                  hit(155).X==hit(arrowColorCommand).X+48,
+                  "narrow stage editing keeps mouse rotation and the adjacent color palettes visible");
+            isolatedStructureEditing=false;
+            ww=fullWidth;repaint();
             check(present(218)&&present(219)&&hit(150).GetBottom()<=wh-bottom,"orbital tools and style button fit the client height");
             auto before=toNative(doc);command(183);repaint();
             check(present(plotManagerCommand)&&present(130)&&!helpText(plotManagerCommand).empty(),"graph sidebar exposes the manager and new graph entry");
