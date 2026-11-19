@@ -379,8 +379,11 @@ static void pngExportChecks(HWND hwnd){
     Bitmap toolbar(ww,wh,PixelFormat32bppARGB);
     {Graphics graphics(&toolbar);HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);}
     const auto copyIcon=std::find_if(hits.begin(),hits.end(),[](const auto& hit){return hit.id==copyPngCommand;});
-    check(copyIcon!=hits.end()&&copyIcon->box.Y==18&&copyIcon->box.Width==44,"independent structure editor displays a complete PNG copy icon in its toolbar");
-    const auto copyPoint=MAKELPARAM(int(copyIcon->box.X+22),int(copyIcon->box.Y+22));
+    const auto applyButton=std::find_if(hits.begin(),hits.end(),[](const auto& hit){return hit.id==186;});
+    check(copyIcon!=hits.end()&&applyButton!=hits.end()&&copyIcon->box.Y==applyButton->box.Y&&
+        copyIcon->box.Height==applyButton->box.Height&&applyButton->box.X-copyIcon->box.GetRight()==8,
+        "independent structure editor displays PNG copy next to Apply in the top header");
+    const auto copyPoint=MAKELPARAM(int(copyIcon->box.X+copyIcon->box.Width/2),int(copyIcon->box.Y+copyIcon->box.Height/2));
     selection.clear();
     SendMessageW(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,copyPoint);
     check(clipboardPng()==encodePng(*bitmap),"independent structure editor icon copies the complete structure");

@@ -174,7 +174,7 @@ void button(Graphics& g,int id,std::wstring label,RectF r,bool active){
     appearance::rounded(g,r,6,active?accent:r.Contains(float(mouse.x),float(mouse.y))?appearance::palette().hover:appearance::palette().raised);
     const auto color=active?appearance::palette().onAccent:ink;
     // Narrow paired buttons need their full width for readable Korean labels.
-    const bool pictogram=id>=110&&id<=150&&r.Width>=170;
+    const bool pictogram=id==copyPngCommand||(id>=110&&id<=150&&r.Width>=170);
     if(pictogram)icon(g,id,{r.X+8,r.Y+(r.Height-22)/2,22,22},color);
     RectF caption{r.X+(pictogram?36.f:6.f),r.Y,r.Width-(pictogram?42.f:12.f),r.Height};
     ui::drawLabel(g,label,caption,14.f,color,active,true);

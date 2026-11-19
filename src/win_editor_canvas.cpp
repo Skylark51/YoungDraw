@@ -119,8 +119,9 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  // One icon row beneath the native Korean menu; the same hit rectangles drive tooltips and commands.
  float toolbarX=12;
  loadFavorites();
- const int toolbarWidth=isolatedStructureEditing?ww-308:ww;
- topLimit=std::max(0,(isolatedStructureEditing?940:1164)+int(favorites.size())*48-toolbarWidth);
+ constexpr int structureHeaderWidth=418;
+ const int toolbarWidth=isolatedStructureEditing?ww-structureHeaderWidth:ww;
+ topLimit=std::max(0,(isolatedStructureEditing?892:1164)+int(favorites.size())*48-toolbarWidth);
  topOffset=std::min(topOffset,topLimit);
  const auto toolbarClip=RectF(0,0,float(toolbarWidth),63);
  auto toolbarState=g.Save();g.SetClip(toolbarClip);g.TranslateTransform(float(-topOffset),0);
@@ -137,7 +138,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
      }
  };
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
- if(isolatedStructureEditing)group({102,copyPngCommand});
+ if(isolatedStructureEditing)group({102});
  else {
      group({100,101,102});
      separator();
@@ -150,6 +151,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  g.Restore(toolbarState);
  clipHits(topHits,toolbarClip,float(-topOffset),0);
  if(isolatedStructureEditing){
+     button(g,copyPngCommand,L"그림복사",{float(ww-structureHeaderWidth+8),23,102,34});
      button(g,186,L"적용 · Ctrl+S",{float(ww-300),23,140,34});
      button(g,187,L"취소",{float(ww-152),23,136,34});
  }else{
