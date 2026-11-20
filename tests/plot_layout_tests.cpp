@@ -71,12 +71,16 @@ int main(){try{
         Document d;auto p=sample();p.width=300;p.tickFontSize=24;
         p.series[0].name=std::string(65,'W');d.plots={p};
         const auto picture=makeScene(d,measure);
-        const auto axisEnd=picture.plotAxes.at(p.id).xEnd;
-        const auto start=std::find_if(picture.items.begin(),picture.items.end(),[](const auto& item){
-            return item.textRole==7&&item.type==Primitive::Line;
-        });
-        check(start!=picture.items.end()&&std::abs(start->points.front().x-axisEnd.x-8)<1e-8,
-            "default legend starts beside the x-axis tip even for a long label");
+        const auto axes=picture.plotAxes.at(p.id);
+        double top=1e20;int labels=0;
+        for(const auto& item:picture.items)if(item.textRole==7&&item.type==Primitive::Text){
+            const auto box=bounds(item);
+            top=std::min(top,box.y);++labels;
+            check(box.x>=axes.origin.x&&std::abs(box.x+box.w-axes.xEnd.x)<1e-8,
+                "wrapped legend rows align inside the right axis boundary");
+        }
+        check(labels==2&&std::abs(top-axes.yEnd.y)<1e-8,
+            "the top of the default legend aligns with the y-axis tip");
     }
     {
         check(EnergyPlot{}.unit=="kcal mol^{-1}","new graphs default to inverse mole units");

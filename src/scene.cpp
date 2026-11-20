@@ -790,9 +790,12 @@ Scene makeScene(const Document& d,const Measure& measure){
         std::vector<size_t> legendPaths;
         for(size_t k=0;k<paths.size();k++){
             bool hasData=false;for(size_t i=0;i<plot.states.size();i++)if(paths[k].hasValue(i)){hasData=true;break;}
-            if(hasData){legendPaths.push_back(k);if(plot.legendFontSize==0)legendFont=std::min(legendFont,std::max(4.,(w*.92-29)/std::max(1.,legendWidth(paths[k].name,1))));}
+            if(hasData){
+                legendPaths.push_back(k);
+                legendFont=std::min(legendFont,std::max(1.,(w-29)/std::max(1.,legendWidth(paths[k].name,1))));
+            }
         }
-        // The legend starts just beyond the x-axis arrow and stays clear of the plotted data.
+        // Align each legend row with the upper-right corner of the two axes.
         // The default title duplicates the x caption; retain its saved value without printing twice.
         bool showTitle=!plot.title.empty()&&plot.title!=plot.xLabel;
         const bool autoLegend=legendPaths.size()>1||(!legendPaths.empty()&&paths[legendPaths[0]].name!="Path 1");
@@ -804,9 +807,8 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(rows.empty()||(!rows.back().paths.empty()&&rows.back().width+itemGap+itemWidth>w*.92))rows.push_back({});
             auto& row=rows.back();if(!row.paths.empty())row.width+=itemGap;row.width+=itemWidth;row.paths.push_back(k);
         }
-        double legendHeight=rows.empty()?0:rows.size()*rowHeight+(rows.size()-1)*rowGap;
-        const double legendLeft=axes.xEnd.x+8+plot.legendOffset.x;
-        const double legendTop=axes.xEnd.y-legendHeight/2+plot.legendOffset.y;
+        const double legendRight=axes.xEnd.x+plot.legendOffset.x;
+        const double legendTop=axes.yEnd.y+plot.legendOffset.y;
         if(showTitle){
             double titleY=topY-18-titleFont*1.3-7;
             Rect titleBox{x0+w/2-widthOf(plot.title,titleFont)/2,titleY,widthOf(plot.title,titleFont),titleFont*1.3};
@@ -814,7 +816,8 @@ Scene makeScene(const Document& d,const Measure& measure){
             plotText(plot.title,{x0+w/2,titleBox.y},titleFont,"#000000",true,4);
         }
         for(size_t r=0;r<rows.size();r++){
-            double cursor=legendLeft,y=legendTop+r*(rowHeight+rowGap);
+            double cursor=legendRight-rows[r].width,y=legendTop+r*(rowHeight+rowGap);
+            external.push_back({cursor,y,rows[r].width,rowHeight});
             for(size_t k:rows[r].paths){auto& path=paths[k];double cy=y+rowHeight/2;
                 Primitive sample;sample.owner=owner;sample.textRole=7;sample.textIndex=int(k);sample.width=path.width;sample.color=path.color;sample.dash=1;sample.points={{cursor,cy},{cursor+sampleWidth,cy}};s.items.push_back(sample);
                 plotText(path.name,{cursor+sampleWidth+swatchGap,y},legendFont,path.color,false,7,int(k));
