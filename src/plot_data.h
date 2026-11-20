@@ -18,6 +18,9 @@ void validateEnergyAnnotations(const EnergyPlot& plot);
 EnergyPlot publicationPlot(const EnergyPlot& original);
 // Mirror a pathway to the left of the first (shared) state; keep existing paths on the right.
 EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath=0,const std::string& leftName="Left branch");
+// Add a second path from one shared state, on the same reaction coordinate.
+EnergyPlot verticalBranchPlot(const EnergyPlot& original,size_t sourcePath,size_t fork,
+                              const std::string& name,double energyOffset);
 std::vector<MechanismStage> defaultMechanismStages();
 std::vector<MechanismStage> mechanismStageData(const std::vector<std::vector<std::string>>& cells);
 double plotStateFraction(const EnergyPlot& plot,size_t index);

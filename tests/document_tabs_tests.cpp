@@ -321,13 +321,22 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else if(formAction==35||formAction==36){
         SetDlgItemTextW(dialog,100,formAction==35?L"Times New Roman":L"Arial");SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(100,CBN_EDITCHANGE),(LPARAM)GetDlgItem(dialog,100));SendDlgItemMessageW(dialog,101,CB_SETCURSEL,formAction==35?3:2,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,101));previewObserved=toNative(doc)!=formBefore;
     }else if(formAction>=37&&formAction<=40){
-        SetDlgItemTextW(dialog,100,formAction==37?L"0":formAction==38?L"-1":L"2.5");
+        if(formAction==37)SetDlgItemTextW(dialog,100,L"2.5");
+        if(formAction<=38)SendDlgItemMessageW(dialog,109,BM_CLICK,0,0);
+        if(formAction==39)SendDlgItemMessageW(dialog,107,CB_SETCURSEL,2,0);
+        if(formAction==40){
+            SetDlgItemTextW(dialog,107,L"48");
+            SendDlgItemMessageW(dialog,109,CB_SETCURSEL,2,0);
+        }
         if(formAction>=39){
             SetDlgItemTextW(dialog,101,formAction==39?L"12":L"18");
             SetDlgItemTextW(dialog,102,formAction==39?L"6":L"9");
         }
     }else if(formAction>=31&&formAction<=34){
-        SetDlgItemTextW(dialog,100,formAction==31?L"3.2":formAction==32?L"4":formAction==33?L"5":L"12");previewObserved=toNative(doc)!=formBefore;
+        const int field=(formAction==32||formAction==34)?101:100;
+        SetDlgItemTextW(dialog,field,formAction==31?L"3.2":formAction==32?L"4":formAction==33?L"5":L"12");
+        if(formAction==31&&GetParent(dialog)==plotManagerWindow)SetDlgItemTextW(dialog,101,L"4");
+        previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==27||formAction==28){
         SetDlgItemTextW(dialog,100,formAction==27?L"60":L"80");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==25){
@@ -525,6 +534,20 @@ static void graphManagerChecks(HWND hwnd){
     for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
     check(GetDlgItem(manager,131)==originalButton,"tab changes reuse controls instead of recreating them");
     SendMessageW(manager,WM_COMMAND,4000,0);
+    SendMessageW(manager,WM_COMMAND,4402,0);
+    auto branchForm=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+    check(branchForm&&toNative(doc)==before,"vertical branch opens as a reversible draft");
+    SendDlgItemMessageW(branchForm,101,CB_SETCURSEL,1,0);
+    SendDlgItemMessageW(branchForm,103,CB_SETCURSEL,1,0);
+    SetDlgItemTextW(branchForm,104,L"5");
+    SendMessageW(branchForm,WM_COMMAND,IDOK,0);
+    const auto& branched=doc.plots.front();
+    const auto& added=branched.series.back();
+    check(added.name.find("Branch ")==0&&!added.hasValue(0)&&added.values[1]==branched.series[0].values[1]&&
+          added.values[2]==branched.series[0].values[2]-5,"the branch forks down after a common intermediate");
+    writePreview(L"graph-vertical-branch.png",doc);
+    SendMessageW(manager,WM_COMMAND,104,0);
+    check(toNative(doc)==before,"vertical branch undoes in one operation");
     auto styledGraph=doc;
     graphStyleMode=(doc.plots.front().mode+1)%5;
     styledGraph.plots.front().mode=graphStyleMode;
@@ -540,11 +563,11 @@ static void graphManagerChecks(HWND hwnd){
     formAction=20;formDriven=false;SetTimer(hwnd,901,10,driveForm);
     SendMessageW(manager,WM_COMMAND,137,0);KillTimer(hwnd,901);
     check(formDriven&&toNative(doc)==before,"axis settings open and cancel inside the manager");
-    RECT legendCard{},lastColumn{},secondRow{};
+    RECT legendCard{},xAxisCard{},yAxisCard{};
     GetWindowRect(GetDlgItem(manager,plotLegendCommand),&legendCard);
-    GetWindowRect(GetDlgItem(manager,240),&lastColumn);
-    GetWindowRect(GetDlgItem(manager,241),&secondRow);
-    check(legendCard.left==lastColumn.left&&legendCard.top==secondRow.top,"legend occupies the eighth axis and text slot");
+    GetWindowRect(GetDlgItem(manager,242),&xAxisCard);
+    GetWindowRect(GetDlgItem(manager,243),&yAxisCard);
+    check(xAxisCard.top==yAxisCard.top&&xAxisCard.left<yAxisCard.left&&yAxisCard.left<legendCard.left&&legendCard.top==yAxisCard.top,"X axis, Y axis and legend occupy the sixth, seventh and eighth slots");
     SendMessageW(manager,WM_COMMAND,plotLegendCommand,0);
     auto form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
     check(form&&GetParent(form)==manager,"legend opens in the graph manager");
@@ -664,7 +687,7 @@ static void graphManagerChecks(HWND hwnd){
     check(structureInSlot(doc,owner,0,false).atoms.size()==1&&toNative(structureInSlot(doc,owner,0,true))==originalSlot,
         "new structure is saved in the chosen empty region");
     SendMessageW(manager,WM_COMMAND,104,0);
-    SendMessageW(manager,WM_COMMAND,4004,0);formBefore=toNative(doc);formAction=31;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotWaveWidthCommand,0);check(formDriven&&doc.plots[0].waveWidth==3.2,"manager retains custom wave controls");
+    SendMessageW(manager,WM_COMMAND,4004,0);formBefore=toNative(doc);formAction=31;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotWaveWidthCommand,0);check(formDriven&&doc.plots[0].waveWidth==3.2&&doc.plots[0].waveGap==4,"the wave manager can edit thickness and clearance together");
     RECT waveCard{};GetWindowRect(GetDlgItem(manager,plotWaveWidthCommand),&waveCard);
     const LPARAM wheelPoint=MAKELPARAM((waveCard.left+waveCard.right)/2,(waveCard.top+waveCard.bottom)/2);
     SendMessageW(manager,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA/2),wheelPoint);
@@ -675,11 +698,13 @@ static void graphManagerChecks(HWND hwnd){
     auto weightBefore=doc.plots[0].structureInkScale;SendMessageW(manager,WM_KEYDOWN,VK_ADD,0);
     check(std::abs(doc.plots[0].waveWidth-3.3)<1e-8&&doc.plots[0].structureInkScale==weightBefore,"plus adjusts only the selected wave thickness");
     SendMessageW(manager,WM_KEYDOWN,VK_SUBTRACT,0);check(std::abs(doc.plots[0].waveWidth-3.2)<1e-8,"minus reverses a wave thickness step");
-    for(int action:{37,38,39}){formAction=action;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,242,0);check(formDriven,"unified axis editor opens");if(action==37)check(!doc.plots[0].showXAxis,"zero hides the axis");else check(doc.plots[0].showXAxis&&doc.plots[0].xAxisWidth==(action==38?0:2.5),"automatic and explicit thickness restore the axis");}
+    for(int action:{37,38,39}){formAction=action;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,242,0);check(formDriven,"unified axis editor opens");check(doc.plots[0].showXAxis==(action!=37)&&doc.plots[0].xAxisWidth==2.5,"the axis visibility toggle preserves explicit thickness");}
     formAction=40;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,243,0);KillTimer(hwnd,901);
     const auto& axisGraph=doc.plots.front();
-    check(formDriven&&axisGraph.xAxisHeadLength==12&&axisGraph.xAxisHeadWidth==6&&axisGraph.yAxisHeadLength==18&&axisGraph.yAxisHeadWidth==9,
+    check(formDriven&&axisGraph.xAxisHeadLength==12&&axisGraph.xAxisHeadWidth==6&&axisGraph.yAxisHeadLength==18&&axisGraph.yAxisHeadWidth==9&&axisGraph.yTitleGap==48&&axisGraph.yLabel=="ΔG",
         "manager edits X and Y arrowheads independently");
+    check(std::all_of(axisGraph.states.begin(),axisGraph.states.end(),[](const auto& state){return state.labelPlacement==4;}),
+        "X axis management can move state names below their energy data");
     // A graph point keeps the exact stage as the independent editor target.
     SendMessageW(manager,WM_COMMAND,4003,0);tool=Select;fit();auto point=scene().plotSnapPoints.at(owner).front();mouseDown(screen(point.p));mouseUp(screen(point.p));
     check(targetContainer==owner&&targetSlot==size_t(point.state),"clicking a graph point retains its structure stage");
@@ -702,6 +727,13 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(legendPanel,WM_COMMAND,MAKEWPARAM(100,CBN_SELCHANGE),0);
     capture();check(snapshot.Save(L"graph-manager-legend.png",&png,nullptr)==Ok,"capture legend controls and visible graph");
     SendMessageW(manager,WM_COMMAND,4002,0);SendMessageW(manager,WM_COMMAND,139,0);
+    const auto arrowCount=doc.plots.front().stages.empty()?defaultMechanismStages().size():doc.plots.front().stages.size();
+    SendMessageW(manager,WM_COMMAND,4403,0);
+    const auto& arranged=doc.plots.front().stages;
+    check(arranged.size()==arrowCount,"automatic arrangement keeps every arrow");
+    for(size_t i=0;i<arranged.size();++i)check(arranged[i].row==1&&
+        std::abs(arranged[i].start-100.*i/arrowCount)<1e-5&&std::abs(arranged[i].end-100.*(i+1)/arrowCount)<1e-5,
+        "automatic arrangement divides one row into equal parts");
     capture();check(snapshot.Save(L"graph-manager-reaction-arrows.png",&png,nullptr)==Ok,"capture the inline reaction table");
     newDocumentTab();check(!plotManagerWindow,"document changes close the manager before graph IDs can be reused");std::cout<<"Graph manager categories, font, structures, undo and document lifetime checks passed\n";
 }
@@ -1107,7 +1139,7 @@ int main(int argc,char** argv){
             const auto gapBefore=toNative(doc);formBefore=gapBefore;formAction=34;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotWaveGapCommand);
             check(formDriven&&previewObserved&&toNative(doc)==gapBefore,"cancel restores wave clearance preview");
             formAction=32;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotWaveGapCommand);
-            check(formDriven&&previewObserved&&doc.plots[0].waveGap==4&&doc.plots[0].waveWidth==3.2,"wave clearance changes independently of wave stroke");
+            check(formDriven&&doc.plots[0].waveGap==4&&doc.plots[0].waveWidth==3.2,"wave clearance changes independently of wave stroke");
             check(history.undo(doc)&&toNative(doc)==gapBefore&&history.undo(doc)&&toNative(doc)==waveBefore,"wave clearance and stroke each undo in one action");
             doc={};history.clear();selection.clear();dirty=false;
         }

@@ -70,10 +70,13 @@ int main(){try{
     {
         Document d;auto p=sample();p.width=300;p.tickFontSize=24;
         p.series[0].name=std::string(65,'W');d.plots={p};
-        for(const auto& item:makeScene(d,measure).items)if(item.type==Primitive::Text&&item.textRole==7){
-            auto box=bounds(item);
-            check(box.x>=p.p.x+50&&box.x+box.w<=p.p.x+p.width-4,"long legend includes swatch width when fitting inside graph");
-        }
+        const auto picture=makeScene(d,measure);
+        const auto axisEnd=picture.plotAxes.at(p.id).xEnd;
+        const auto start=std::find_if(picture.items.begin(),picture.items.end(),[](const auto& item){
+            return item.textRole==7&&item.type==Primitive::Line;
+        });
+        check(start!=picture.items.end()&&std::abs(start->points.front().x-axisEnd.x-8)<1e-8,
+            "default legend starts beside the x-axis tip even for a long label");
     }
     {
         check(EnergyPlot{}.unit=="kcal mol^{-1}","new graphs default to inverse mole units");
@@ -105,7 +108,7 @@ int main(){try{
             p.yMin=-10;p.yMax=50;p.series[0].values[1]=50;d.plots={p};
             auto scene=makeScene(d,measure);std::vector<Rect> header;double baseline=0;
             for(const auto& item:scene.items)if(item.type==Primitive::Text&&item.textRole==0&&
-                (item.text=="E"||item.text=="(kcal mol"||item.text=="–1"||item.text==")")){
+                (item.text=="E"||item.text==" / (kcal mol"||item.text=="–1"||item.text==")")){
                 header.push_back(bounds(item));if(item.text=="E")baseline=item.points[0].y;
                 if(item.text=="(kcal mol"||item.text==")")check(std::abs(item.points[0].y-baseline)<1e-6,"E and unit share a single baseline");
             }
@@ -411,6 +414,43 @@ int main(){try{
         graph=energyGridData(graph,{{"R","0","",""},{"TS","","","5"},{"P","","",""}});
         check(renderLegend()==std::map<int,std::string>{{0,"S = 0"},{2,"S = 2"}},"partially populated paths reappear in the legend");
     }
+    {
+        auto original=sample();
+        const auto raised=verticalBranchPlot(original,0,1,"Upper path",8);
+        const auto lowered=verticalBranchPlot(original,0,1,"Lower path",-6);
+        check(raised.states.size()==original.states.size()&&raised.series.size()==original.series.size()+1,
+            "vertical branching uses the same state coordinates");
+        check(raised.series[0].values==original.series[0].values&&!raised.series.back().hasValue(0)&&
+              raised.series.back().values[1]==original.series[0].values[1]&&
+              raised.series.back().values[2]==original.series[0].values[2]+8&&
+              lowered.series.back().values[2]==original.series[0].values[2]-6,"vertical paths share a common prefix and separate at the chosen state");
+        auto branchSource=original;branchSource.series.resize(1);Document branched;
+        branched.plots={verticalBranchPlot(branchSource,0,1,"Split path",-6)};
+        const auto scene=makeScene(branched,measure);
+        check(std::count_if(scene.items.begin(),scene.items.end(),[](const auto& item){
+            return item.type==Primitive::Text&&item.text=="37.2";
+        })==1,"the common branch state displays one energy label");
+#ifdef TEST_CDXML
+        check(fromCdxml(toCdxml(branched)).plots.front().series.back().sharedStart,"shared branch display survives saving");
+#endif
+    }
+    {
+        Document d;auto p=sample();p.series.resize(1);p.yLabel="ΔG";p.energySymbol="ΔG";
+        for(auto& state:p.states)state.labelPlacement=4;
+        d.plots={p};
+        const auto picture=makeScene(d,measure);
+        bool axisTitle=false;
+        for(const auto& item:picture.items)if(item.type==Primitive::Text){
+            if(item.rotation==-90&&item.text.find("ΔG / (kcal mol")!=std::string::npos)axisTitle=true;
+            if(item.textRole!=6)continue;
+            const auto data=std::find_if(picture.items.begin(),picture.items.end(),[&](const auto& value){
+                return value.type==Primitive::Text&&value.textRole==8&&value.textIndex==item.textIndex;
+            });
+            check(data!=picture.items.end()&&item.points[0].y>=data->points[0].y+data->fontSize*1.3,
+                "state names sit below their placed energy values");
+        }
+        check(axisTitle,"the centered vertical title uses a Greek symbol and quantity over unit");
+    }
     auto defaults=defaultMechanismStages();check(defaults.size()==3&&defaults[0].label=="Reactant"&&defaults[1].label=="Transition State"&&defaults[2].label=="Product","default mechanism stages");
     auto stageRows=mechanismStageData({{"Oxidation","5","45"},{"Reduction","40","95"},{"","",""}});
     check(stageRows.size()==2&&stageRows[1].start==40,"custom and overlapping ranges are preserved");
@@ -543,7 +583,7 @@ int main(){try{
         for(auto& item:scene.items)if(item.type==Primitive::Text){
             if(item.textRole==6)stateSize=item.fontSize;
             if(item.text==fitted.xLabel)xCaptionSize=item.fontSize;
-            if(item.rotation==-90&&item.text.rfind(fitted.yLabel+" ( ",0)==0)yCaptionSize=item.fontSize;
+            if(item.rotation==-90&&item.text.rfind(fitted.yLabel+" / (",0)==0)yCaptionSize=item.fontSize;
             if(item.text=="0")tickSize=item.fontSize;
         }
         check(stateSize>0&&std::abs(xCaptionSize-stateSize)<1e-6&&std::abs(yCaptionSize-stateSize)<1e-6&&std::abs(tickSize-stateSize)<1e-6,"automatic axis captions match tick and state-name sizes");

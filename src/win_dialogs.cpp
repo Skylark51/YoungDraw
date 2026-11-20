@@ -335,7 +335,8 @@ struct Form {
 static std::vector<std::string> read(Form& f){
     std::vector<std::string> values;
     for(size_t i=0;i<f.edits.size();i++){
-        if(!f.fields[i].choices.empty()&&!f.fields[i].editableChoices)values.push_back(std::to_string(SendMessageW(f.edits[i],CB_GETCURSEL,0,0)));
+        if(f.fields[i].toggle)values.push_back(f.fields[i].value);
+        else if(!f.fields[i].choices.empty()&&!f.fields[i].editableChoices)values.push_back(std::to_string(SendMessageW(f.edits[i],CB_GETCURSEL,0,0)));
         else if(f.fields[i].editableChoices&&SendMessageW(f.edits[i],CB_GETCURSEL,0,0)!=CB_ERR){
             auto index=SendMessageW(f.edits[i],CB_GETCURSEL,0,0);int n=int(SendMessageW(f.edits[i],CB_GETLBTEXTLEN,index,0));std::wstring w(n+1,0);SendMessageW(f.edits[i],CB_GETLBTEXT,index,(LPARAM)w.data());w.resize(n);values.push_back(utf8(w));
         }
@@ -604,22 +605,25 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         for(size_t i=0;i<f->fields.size();i++){
             auto& field=f->fields[i];HWND label=CreateWindowW(L"STATIC",field.label.c_str(),WS_CHILD|WS_VISIBLE,16,y+4,210,labelHeight(field),hwnd,nullptr,nullptr,nullptr);SendMessageW(label,WM_SETFONT,(WPARAM)f->font,TRUE);
             int height=inputHeight(field);HWND edit;
-            if(!field.choices.empty()){
+            if(field.toggle){
+                edit=CreateWindowW(L"BUTTON",field.value=="1"?L"표시 중":L"숨김 상태",
+                    WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,230,y,430,29,hwnd,(HMENU)INT_PTR(100+i),nullptr,nullptr);
+            }else if(!field.choices.empty()){
                 edit=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|(field.editableChoices?CBS_DROPDOWN:CBS_DROPDOWNLIST)|WS_VSCROLL|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS,230,y,field.scripts?330:430,200,hwnd,(HMENU)(INT_PTR)(100+i),nullptr,nullptr);
                 themeCombo(edit);
                 for(auto& c:field.choices)SendMessageW(edit,CB_ADDSTRING,0,(LPARAM)c.c_str());
                 if(field.editableChoices)SetWindowTextW(edit,wide(field.value).c_str());else SendMessageW(edit,CB_SETCURSEL,std::stoi(field.value),0);
             }else edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",wide(field.value).c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|(field.multiline?ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_VSCROLL:ES_AUTOHSCROLL),230,y,field.scripts?330:field.color?385:field.stepButtons?330:430,height,hwnd,(HMENU)(INT_PTR)(100+i),nullptr,nullptr);
-            if((f->tab||f->embedded)&&field.choices.empty()){
+            if((f->tab||f->embedded)&&!field.toggle&&field.choices.empty()){
                 SetWindowSubclass(edit,formEditEdgeProc,2,0);
                 SendMessageW(edit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(6,6));
             }
             SendMessageW(edit,WM_SETFONT,(WPARAM)f->font,TRUE);
-            if(f->embedded&&field.choices.empty())appearance::nativeControl(edit);
+            if(f->embedded&&!field.toggle&&field.choices.empty())appearance::nativeControl(edit);
             SendMessageW(edit,EM_SETLIMITTEXT,100000,0);
             f->edits.push_back(edit);f->rows.push_back({label,edit});
             if(field.color){HWND b=CreateWindowW(L"BUTTON",L"…",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,621,y,39,29,hwnd,(HMENU)(INT_PTR)(500+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);f->rows.back().push_back(b);}
-            if(field.choices.empty()||field.editableChoices)SetWindowSubclass(editSurface(edit),scriptEditProc,1,reinterpret_cast<DWORD_PTR>(&field));
+            if(!field.toggle&&(field.choices.empty()||field.editableChoices))SetWindowSubclass(editSurface(edit),scriptEditProc,1,reinterpret_cast<DWORD_PTR>(&field));
             if(field.scripts)for(int k=0;k<3;k++){if(k==2&&!f->embedded)break;HWND b=CreateWindowW(L"BUTTON",k==2?L"𝑰":k?L"x₂":L"x²",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,565+k*48,y,44,29,hwnd,(HMENU)(INT_PTR)((k==2?1100:k?800:700)+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);f->rows.back().push_back(b);}
             if(field.stepButtons&&field.stepValue)for(int k=0;k<2;k++){
                 HWND b=CreateWindowW(L"BUTTON",k?L"+":L"−",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
@@ -671,8 +675,41 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_ERASEBKGND){RECT r;GetClientRect(hwnd,&r);FillRect((HDC)wp,&r,f->colors.panel);return 1;}
     if(msg==WM_CTLCOLORSTATIC||msg==WM_CTLCOLOREDIT||msg==WM_CTLCOLORLISTBOX)return f->colors.control(msg,(HDC)wp);
     if(msg==WM_MEASUREITEM){reinterpret_cast<MEASUREITEMSTRUCT*>(lp)->itemHeight=25;return TRUE;}
-    if(msg==WM_DRAWITEM){const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);f->colors.draw(item,item.CtlID==IDOK);return TRUE;}
+    if(msg==WM_DRAWITEM){
+        const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+        const size_t index=item.CtlID>=100?item.CtlID-100:f->fields.size();
+        if(index>=f->fields.size()||!f->fields[index].toggle){
+            f->colors.draw(item,item.CtlID==IDOK);return TRUE;
+        }
+        using namespace Gdiplus;
+        auto box=item.rcItem;
+        FillRect(item.hDC,&box,f->colors.panel);
+        const auto& palette=appearance::palette();
+        const bool shown=f->fields[index].value=="1";
+        const bool focused=(item.itemState&(ODS_FOCUS|ODS_SELECTED))!=0;
+        Graphics graphics(item.hDC);
+        graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+        const auto fill=shown?palette.accent:focused?palette.hover:palette.raised;
+        const auto ink=shown?palette.onAccent:palette.text;
+        appearance::rounded(graphics,{0,0,29,29},8,fill);
+        Pen pen(ink,1.5f);
+        GraphicsPath eye;
+        eye.AddBezier(6.f,14.5f,10.f,8.f,19.f,8.f,23.f,14.5f);
+        eye.AddBezier(23.f,14.5f,19.f,21.f,10.f,21.f,6.f,14.5f);
+        graphics.DrawPath(&pen,&eye);
+        graphics.DrawEllipse(&pen,12.f,12.f,5.f,5.f);
+        if(!shown)graphics.DrawLine(&pen,7.f,7.f,22.f,22.f);
+        ui::drawLabel(graphics,shown?L"표시 중":L"숨김 상태",{37,0,float(box.right-37),29},13,
+            focused?palette.accent:palette.text,false,false);
+        return TRUE;
+    }
     if(msg==WM_COMMAND){int id=LOWORD(wp);
+        if(id>=100&&size_t(id-100)<f->fields.size()&&f->fields[id-100].toggle&&HIWORD(wp)==BN_CLICKED){
+            auto& field=f->fields[id-100];
+            field.value=field.value=="1"?"0":"1";
+            SetWindowTextW(f->edits[id-100],field.value=="1"?L"표시 중":L"숨김 상태");
+            preview(*f);return 0;
+        }
         if((id>=900&&id<int(900+f->fields.size()))||(id>=1000&&id<int(1000+f->fields.size()))){
             const bool increase=id>=1000;
             const size_t index=size_t(id-(increase?1000:900));

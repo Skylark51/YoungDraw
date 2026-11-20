@@ -25,7 +25,7 @@ std::optional<yd::MechanismTemplate> mechanismChoice(HWND owner);
 struct SearchItem {std::wstring title,detail;};
 std::optional<size_t> search(HWND owner,const std::wstring& title,const std::vector<SearchItem>& entries,
     const wchar_t* action=L"열기",bool showDetails=false);
-struct Field {std::wstring label;std::string value;bool multiline=false;std::vector<std::wstring> choices;bool color=false;int rows=4;bool scripts=false;bool editableChoices=false;std::function<std::string(const std::string&,int)> stepValue={};bool stepWithSigns=false;bool stepButtons=false;};
+struct Field {std::wstring label;std::string value;bool multiline=false;std::vector<std::wstring> choices;bool color=false;int rows=4;bool scripts=false;bool editableChoices=false;std::function<std::string(const std::string&,int)> stepValue={};bool stepWithSigns=false;bool stepButtons=false;bool toggle=false;};
 std::vector<std::wstring> fontFamilies(HWND window);
 Field numericField(std::wstring label,double value,double minimum,double maximum,double increment);
 using Table = std::vector<std::vector<std::string>>;
@@ -35,6 +35,7 @@ using TableColumnEdit = std::function<std::optional<std::wstring>(HWND,size_t co
 std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview={},bool scripts=false,const std::wstring& hint=L"",bool stages=false,int scriptColumn=-1,const TableCellError& cellError={},const TableColumnEdit& columnEdit={});
 HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,const TableCellError& cellError={},const TableColumnEdit& columnEdit={});
 bool commitEmbeddedTable(HWND grid);
+void distributeEmbeddedStages(HWND grid);
 HWND embeddedStageTable(HWND parent,const Table& rows,const TablePreview& preview);
 std::optional<COLORREF> chooseColor(HWND parent,COLORREF initial);
 using Preview = std::function<std::wstring(const std::vector<std::string>&)>;

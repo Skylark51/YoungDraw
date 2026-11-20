@@ -13,7 +13,7 @@ void editPlot(int id);
 void relocatePlot(const EnergyPlot& before,const EnergyPlot& after);
 void addBilateralBranch(int id);
 void publicationLayout(int id);
-void plotSettings(int id);
+void plotSettings(int id,bool generalOnly=false);
 void editPlotFont(int id);
 void changePlotStyle(int id);
 void editPlotAxisLengths(int id);

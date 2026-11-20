@@ -361,7 +361,8 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         ListView_SetTextBkColor(g->list,colorRef(g->colors.palette.raised));
         ListView_SetTextColor(g->list,colorRef(g->colors.palette.text));
         SetWindowSubclass(g->list,listProc,1,(DWORD_PTR)g);
-        for(size_t c=0;c<=g->columns.size();c++){LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=c?std::max(120,870/int(g->columns.size())):45;auto name=c?g->columns[c-1]:L"행";col.pszText=name.data();ListView_InsertColumn(g->list,int(c),&col);}
+        constexpr int reactionWidths[]={35,152,86,86,64,64,84,82,65,65,72};
+        for(size_t c=0;c<=g->columns.size();c++){LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=g->reactionStages?reactionWidths[c]:(c?std::max(120,870/int(g->columns.size())):45);auto name=c?g->columns[c-1]:L"행";col.pszText=name.data();ListView_InsertColumn(g->list,int(c),&col);}
         g->error=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,16,480,940,48,hwnd,nullptr,nullptr,nullptr);SendMessageW(g->error,WM_SETFONT,(WPARAM)g->font,TRUE);
         const wchar_t* labels[]={g->stages||g->reactionStages?L"단계 추가":L"행 추가",g->stages||g->reactionStages?L"단계 삭제":L"행 삭제",L"적용",L"취소",g->stages||g->reactionStages?L"단계 복제":L"행 복제"};const int positions[]={16,356,526,696,186};
         for(int i=0;i<5;i++){HWND b=CreateWindowW(L"BUTTON",labels[i],WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,positions[i],540,155,34,hwnd,(HMENU)(INT_PTR)(20+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);if(i==2)g->apply=b;}
@@ -373,6 +374,11 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_SIZE&&g->embedded){
         RECT r{};GetClientRect(hwnd,&r);int w=r.right,h=r.bottom;
         MoveWindow(g->list,0,0,w,std::max(60,h-100),TRUE);
+        if(g->reactionStages){
+            int remaining=w-GetSystemMetrics(SM_CXVSCROLL);
+            for(int c=0;c<=int(g->columns.size());++c)if(c!=1)remaining-=ListView_GetColumnWidth(g->list,c);
+            ListView_SetColumnWidth(g->list,1,std::max(152,remaining));
+        }
         MoveWindow(g->error,0,std::max(60,h-96),w,44,TRUE);
         const int ids[]={20,24,21,27,28,25,26};
         const int count=g->reactionStages?7:5;
@@ -452,7 +458,29 @@ HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Ta
     return createEmbeddedTable(parent,columns,rows,preview,cellError,columnEdit,false);
 }
 HWND embeddedStageTable(HWND parent,const Table& rows,const TablePreview& preview){
-    return createEmbeddedTable(parent,{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 (pt)",L"굵기 (pt)",L"화살촉 (pt)"},rows,preview,{},{},true);
+    return createEmbeddedTable(parent,{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 pt",L"굵기 pt",L"화살촉 pt",L"배치 0/1",L"X 이동",L"Y 이동",L"줄 번호"},rows,preview,{},{},true);
+}
+void distributeEmbeddedStages(HWND grid){
+    auto* g=reinterpret_cast<Grid*>(GetWindowLongPtrW(grid,GWLP_USERDATA));
+    if(!g||!g->reactionStages)return;
+    commit(*g);
+    auto rows=g->rows;
+    std::vector<size_t> named;
+    for(size_t i=0;i<rows.size();++i)
+        if(rows[i][0].find_first_not_of(" \t\r\n")!=std::string::npos)named.push_back(i);
+    for(size_t i=0;i<named.size();++i){
+        auto& row=rows[named[i]];
+        row[1]=std::to_string(100.*i/named.size());
+        row[2]=std::to_string(100.*(i+1)/named.size());
+        row[7]=row[8]="0";
+        row[9]="1";
+    }
+    if(rows==g->rows)return;
+    checkpoint(*g);
+    g->rows=std::move(rows);
+    refresh(*g);
+    validate(*g);
+    selectCell(*g,g->row,g->col);
 }
 bool commitEmbeddedTable(HWND grid){auto* g=reinterpret_cast<Grid*>(GetWindowLongPtrW(grid,GWLP_USERDATA));if(!g)return true;commit(*g);return validate(*g);}
 std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,bool scripts,const std::wstring& hint,bool stages,int scriptColumn,const TableCellError& cellError,const TableColumnEdit& columnEdit){

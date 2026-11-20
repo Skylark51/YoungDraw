@@ -22,7 +22,7 @@ struct RotationDrag {
     std::vector<int> ids;
 };
 static std::optional<RotationDrag> rotationDrag;
-static std::optional<InlineTarget> energyDrag;
+static std::optional<InlineTarget> energyDrag,stageArrowDrag;
 static std::optional<CrossingCaption> crossingDrag,gapDrag;
 struct PlotLevelDrag { int owner,state,path; PlotDragScale scale; bool horizontal; };
 static std::optional<PlotLevelDrag> plotLevelDrag;
@@ -286,6 +286,12 @@ void updateDrag(){
         try{doc=resizedPlotAxes(dragBase,a.owner,x,y,measure);}catch(const std::exception&){doc=dragBase;}
         return;
     }
+    if(stageArrowDrag){
+        auto& stage=plot(stageArrowDrag->owner)->stages.at(size_t(stageArrowDrag->index));
+        const auto offset=stage.offset+delta;
+        stage.offset={std::clamp(offset.x,-4000.,4000.),std::clamp(offset.y,-4000.,4000.)};
+        return;
+    }
     if(plotLevelDrag){updatePlotLevel((mouse-down)*(1/zoom));return;}
     if(stagePositionDrag){updateStagePosition(delta);return;}
     if(gapDrag){
@@ -303,7 +309,7 @@ void updateDrag(){
     if(curveHandle>=0){for(auto& o:doc.objects)if(o.id==curveOwner){o.points[size_t(curveHandle)]=o.points[size_t(curveHandle)]+delta;}return;}
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
-void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(rotationDrag||!dragSelection.empty())selection=dragSelection;}rotationDrag.reset();dragSelection.clear();energyDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
+void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(rotationDrag||!dragSelection.empty())selection=dragSelection;}rotationDrag.reset();dragSelection.clear();energyDrag.reset();stageArrowDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
 void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!finishInline(true))return;for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;SetFocus(win);if(canvas(p)){
     const Vec at=world(p);int hit=atomHit(at);if(!hit)hit=doc.bondAt(at,5/zoom);if(!hit)hit=objectAt(at);
     if(plot(hit)){sidebarPage=1;showLayers=false;}
@@ -312,7 +318,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&
         for(const auto& r:doc.reactions)for(const auto& slot:r.slots)if(contains(slot.members,hit)){sidebarPage=0;showLayers=false;}
         for(const auto& graph:doc.plots)for(const auto& state:graph.states)if(contains(state.above,hit)||contains(state.below,hit)){sidebarPage=1;showLayers=false;}
     }
-}if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();
+}if(stageCopyOwner){toggleStageCopy(p);return;}down=mouse=p;dragSelection=selection;annotationDrag=0;energyDrag.reset();stageArrowDrag.reset();crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();
  if(tool==Rotate){beginRotation(p);return;}
  if(tool==Erase){boxing=true;SetCapture(win);status=L"지우개 · 드래그: 사각형 범위 일괄 삭제 · 클릭: 한 항목 삭제 · Esc: 취소";redraw();return;}
  if(placeEnergyGap(p))return;
@@ -416,7 +422,7 @@ static void finishErase(Vec p){
     }
     redraw();
 }
-void mouseUp(Vec p){if(tool==Erase&&boxing){finishErase(p);return;}if(mechanismConnectionDrag){finishMechanismConnection(p);return;}if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging&&energyDrag){dragging=false;if((p-down).length()>2)dropEnergy(world(p));energyDrag.reset();ReleaseCapture();redraw();return;}if(dragging){mouse=p;updateDrag();crossingDrag.reset();gapDrag.reset();
+void mouseUp(Vec p){if(tool==Erase&&boxing){finishErase(p);return;}if(mechanismConnectionDrag){finishMechanismConnection(p);return;}if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging&&energyDrag){dragging=false;if((p-down).length()>2)dropEnergy(world(p));energyDrag.reset();stageArrowDrag.reset();ReleaseCapture();redraw();return;}if(dragging){mouse=p;updateDrag();crossingDrag.reset();gapDrag.reset();
  if(plotLevelDrag&&!plotLevelDrag->horizontal&&moved){
     auto* graph=plot(plotLevelDrag->owner);
     for(const auto& original:dragBefore.plots)if(original.id==graph->id){graph->yMin=original.yMin;graph->yMax=original.yMax;break;}

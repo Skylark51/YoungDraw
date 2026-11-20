@@ -27,6 +27,7 @@ LRESULT CALLBACK dispatchProcedure(HWND h,UINT message,WPARAM wp,LPARAM lp){if(m
 LRESULT CALLBACK observe(int code,WPARAM wp,LPARAM lp){if(code>=0&&dispatcher){const auto& message=*reinterpret_cast<CWPRETSTRUCT*>(lp);if(message.message==WM_CREATE||message.message==WM_SETTEXT){wchar_t type[32]{};GetClassNameW(message.hwnd,type,32);if(message.message==WM_CREATE||!_wcsicmp(type,L"Button"))PostMessageW(dispatcher,attachMessage,reinterpret_cast<WPARAM>(message.hwnd),0);}}return CallNextHookEx(hook,code,wp,lp);}
 }
 std::wstring labelHelp(const std::wstring& source){std::wstring label;for(auto c:source)if(c!=L'&')label+=c;auto match=[&](const wchar_t* key){return label.find(key)!=std::wstring::npos;};
+    if(label==L"표시 중"||label==L"숨김 상태")return L"클릭하여 이 축을 표시하거나 숨깁니다. 굵기와 화살촉 설정은 유지됩니다.";
     if(label==L"...")return L"색상 선택창을 열어 옆 항목의 색을 바꿉니다.";
     if(match(L"x²")||match(L"x2"))return L"선택한 글자를 위첨자로 바꿉니다. 선택이 없으면 위첨자 입력 모드를 전환합니다.";
     if(match(L"x₂"))return L"선택한 글자를 아래첨자로 바꿉니다. 선택이 없으면 아래첨자 입력 모드를 전환합니다.";
@@ -59,6 +60,11 @@ std::wstring buttonHelpText(HWND button){auto root=GetAncestor(button,GA_ROOT);a
     }
     if(type==L"YoungDrawAnimationPreview"){const std::map<int,std::wstring> meanings={{101,L"애니메이션을 재생하거나 일시 정지합니다."},{102,L"첫 프레임부터 애니메이션을 다시 재생합니다."},{103,L"이전 구조 단계로 이동합니다."},{104,L"다음 구조 단계로 이동합니다."},{105,L"프레임 속도와 단계별 정지 시간을 설정합니다."},{106,L"각 단계의 구조명·단계명·에너지 자막을 표로 편집합니다."},{107,L"현재 단계의 구조를 다른 구조·이미지로 교체합니다."},{108,L"현재 애니메이션을 GIF 파일로 저장합니다."},{109,L"애니메이션 미리보기를 닫습니다."},{112,L"출력 크기·배경·반복과 애니메이션 출력 설정을 조정합니다."},{113,L"새 구조 단계를 애니메이션에 추가합니다."},{114,L"현재 애니메이션 단계를 삭제합니다."},{115,L"각 단계 사이의 전환 시간과 정지 시간을 따로 설정합니다."},{116,L"두 구조 사이에 중간 프레임을 설계하여 결합 변화를 조정합니다."}};auto found=meanings.find(id);if(found!=meanings.end())return found->second;}
     if(type==L"YoungDrawPlotManager"){
+        if(id==4403)return L"반응 화살표를 표에 있는 순서대로 한 줄에 놓고 가로 범위를 같은 길이로 나눕니다. 기존 이동값은 초기화합니다.";
+        if(id==4402)return L"원본 경로와 공통 상태를 선택해 위쪽 또는 아래쪽에 새 경로를 만듭니다. 적용 후 에너지 표에서 경로를 따로 편집할 수 있습니다.";
+        if(id==250)return L"한 창에서 물결 획의 굵기와 물결 주변 곡선의 여백을 각각 조절합니다.";
+        if(id==242)return L"X축의 길이, 굵기, 화살촉, 제목과 글자색을 관리합니다.";
+        if(id==243)return L"Y축의 길이, 굵기, 화살촉, 제목과 간격, 눈금, 범위, 에너지 단위를 관리합니다.";
         if(id>=4000&&id<4005){const wchar_t* meanings[]={L"상태·에너지 표, 경로 추가·스타일·색상 도구를 표시합니다.",L"축 범위·길이·제목과 그래프 글꼴·글자 크기 도구를 표시합니다.",L"반응 이름·화살표·TS·갭·교차점 도구를 표시합니다.",L"상태와 위·아래 영역을 선택해 해당 구조만 독립 편집합니다.",L"축·곡선·삽입 그림·물결의 굵기와 여백 도구를 표시합니다."};return meanings[id-4000];}
         if(id>=4300&&id<=4304){const wchar_t* meanings[]={L"선택한 상태의 구조만 별도 창에서 편집합니다. 다른 상태와 에너지 값은 유지됩니다.",L"클립보드의 구조나 이미지를 선택한 상태의 위·아래 영역에 넣습니다.",L"구조·이미지 파일을 선택한 상태의 위·아래 영역에 넣습니다.",L"선택한 상태에 삽입된 구조의 배율만 조절합니다.",L"선택한 구조 영역을 비웁니다. 실행 취소로 복원할 수 있습니다."};return meanings[id-4300];}
         auto help=yd::editor::helpText(id);if(!help.empty())return help;

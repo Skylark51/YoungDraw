@@ -566,7 +566,9 @@ Scene makeScene(const Document& d,const Measure& measure){
         double energyFont=plot.energyLabelFontSize>0?plot.energyLabelFontSize:tickFont;
         double valueFont=plot.valueFontSize>0?plot.valueFontSize:12.5*scale;
         auto widthOf=[&](const std::string& text,double size){return textWidth(measure,text,size,graphFont(text),faceFor(text));};
-        std::string yCaption=plot.yLabel+(displayUnit.empty()?"":" ( "+displayUnit+" )");
+        const std::string unitCaption=displayUnit.empty()?"":
+            (plot.yUnitParenthetical?" (":" / (")+displayUnit+")";
+        const std::string yCaption=plot.yLabel+unitCaption;
         // Requested sizes are upper bounds: shrink only when the physical graph cannot fit them.
         axisFont=std::min(axisFont,std::max(4.,(plot.width-114)/std::max(1.,widthOf(plot.xLabel,1))));
         tickFont=std::min(tickFont,std::max(4.,plot.height*.14));
@@ -576,7 +578,9 @@ Scene makeScene(const Document& d,const Measure& measure){
         double y0=plot.p.y+plot.height-std::max(40.,tickFont*1.3+axisFont*1.4+16);
         double axisY=y0;s.plotBaselines[owner]=axisY;
         struct StageLayout {std::string text;double font=0,height=0;int lane=0;};
-        std::vector<StageLayout> stageLayouts;std::vector<std::vector<size_t>> lanes;std::vector<double> laneHeights,laneOffsets;
+        std::vector<StageLayout> stageLayouts(plot.stages.size());
+        std::vector<std::vector<size_t>> lanes;
+        std::vector<double> laneAbove,laneBelow,laneOffsets;
         auto wrapStage=[&](const std::string& label,double font,double available){
             std::string wrapped,line;std::istringstream paragraphs(label);std::string paragraph;
             auto flush=[&](){if(!wrapped.empty())wrapped+='\n';wrapped+=line;line.clear();};
@@ -609,31 +613,60 @@ Scene makeScene(const Document& d,const Measure& measure){
         const auto stateX=[&](size_t i){return x0+50+(w-100)*plotStateFraction(plot,i);};
         auto stageRange=[&](const MechanismStage& stage){
             double a=x0+w*stage.start/100,b=x0+w*stage.end/100;
-            if(plot.states.size()>1){
+            if(stage.row==0&&plot.states.size()>1){
                 // Axis-edge ranges terminate at the outer level centers when they fit.
                 double left=stage.start==0?stateX(0):a;
                 double right=stage.end==100?stateX(plot.states.size()-1):b;
                 if(right-left>=w/100){a=left;b=right;}
             }
+            if(stage.row>0){
+                const double margin=std::min(3.,(b-a)*.1);
+                a+=margin;b-=margin;
+            }
             return std::pair{a,b};
         };
-        for(size_t i=0;i<plot.stages.size();i++){
+        // Reserve requested rows first, then pack the remaining captions by their visible ranges.
+        for(bool automatic:{false,true})for(size_t i=0;i<plot.stages.size();++i){
             const auto& stage=plot.stages[i];
-            const auto [a,b]=stageRange(stage);double span=b-a;
-            // Preserve readable type; use multiple lines instead of shrinking all stages to the longest label.
-            double font=stage.fontSize>0?stage.fontSize:tickFont;
-            font=std::min(font,span*.65); // Only physically tiny intervals constrain individual glyph size.
-            double available=std::max(1.,span-2*std::min(font*1.5,span*.16));
-            auto text=wrapStage(stage.label,font,available);double height=font*1.3*(1+std::count(text.begin(),text.end(),'\n'));
-            size_t lane=0;for(;lane<lanes.size();lane++){bool clear=true;for(auto j:lanes[lane])if(stage.start<plot.stages[j].end+1&&stage.end+1>plot.stages[j].start)clear=false;if(clear)break;}
-            if(lane==lanes.size()){lanes.push_back({});laneHeights.push_back(0);}lanes[lane].push_back(i);
-            laneHeights[lane]=std::max(laneHeights[lane],height+std::max(12.,font*.8));stageLayouts.push_back({text,font,height,int(lane)});
+            if((stage.row==0)!=automatic)continue;
+            const auto [a,b]=stageRange(stage);
+            const double span=b-a;
+            const double font=std::min(stage.fontSize>0?stage.fontSize:tickFont,span*.65);
+            const double available=stage.captionBelow?span:std::max(1.,span-2*std::min(font*1.5,span*.16));
+            auto text=wrapStage(stage.label,font,available);
+            const double height=font*1.3*(1+std::count(text.begin(),text.end(),'\n'));
+            size_t lane=automatic?0:size_t(stage.row-1);
+            if(automatic){
+                for(;lane<lanes.size();++lane){
+                    const bool overlap=std::any_of(lanes[lane].begin(),lanes[lane].end(),[&](size_t j){
+                        const auto& peer=plot.stages[j];
+                        const auto [left,right]=stageRange(peer);
+                        return a<right+4&&b+4>left;
+                    });
+                    if(!overlap)break;
+                }
+            }
+            if(lane>=lanes.size()){
+                lanes.resize(lane+1);
+                laneAbove.resize(lane+1);
+                laneBelow.resize(lane+1);
+            }
+            lanes[lane].push_back(i);
+            const double textGap=std::max(4.,font*.25);
+            const double headRoom=std::max({6.,font*.4,stage.arrowWidth/2,stage.arrowHeadSize*.4});
+            laneAbove[lane]=std::max(laneAbove[lane],stage.captionBelow?headRoom:height/2+headRoom);
+            laneBelow[lane]=std::max(laneBelow[lane],stage.captionBelow?textGap+height+headRoom:height/2+headRoom);
+            stageLayouts[i]={std::move(text),font,height,int(lane)};
         }
-        double stageBand=0;for(double height:laneHeights){laneOffsets.push_back(stageBand);stageBand+=height;}
+        double stageBand=0;
+        for(size_t i=0;i<lanes.size();++i){
+            laneOffsets.push_back(stageBand+laneAbove[i]);
+            stageBand+=lanes[i].empty()?18:laneAbove[i]+laneBelow[i];
+        }
         if(!plot.stages.empty())y0-=stageBand+8;
         double topY=plot.p.y+std::max(25.,valueFont*1.3+12),h=std::max(25.,y0-topY);topY=y0-h;s.plotDragScales.emplace(owner,PlotDragScale{(displayHigh-displayLow)/h,low,high});
         auto yAt=[&](double value){return y0-h*(displayEnergy(displayBands,value)-displayLow)/(displayHigh-displayLow);};
-        energyFont=std::min(energyFont,std::max(4.,(plot.energyAtTop?w*.95:h*.95)/std::max(1.,scriptWidth(plot.energyAtTop?(plot.energySymbol.empty()?"E":plot.energySymbol)+" ("+displayUnit+")":yCaption,1))));
+        energyFont=std::min(energyFont,std::max(4.,(plot.energyAtTop?w*.95:h*.95)/std::max(1.,scriptWidth(plot.energyAtTop?(plot.energySymbol.empty()?"E":plot.energySymbol)+unitCaption:yCaption,1))));
         auto plotText=[&](const std::string& text,Vec at,double size,const std::string& color="#000000",bool centered=false,int role=0,int index=-1){
             Primitive item;item.type=Primitive::Text;item.owner=owner;item.textRole=role;item.textIndex=index;item.text=text;item.fontSize=size;item.face=role==7&&plot.legendFace>=0?plot.legendFace:faceFor(text);item.color=color;
             item.font=graphFont(text,role==7);
@@ -657,19 +690,37 @@ Scene makeScene(const Document& d,const Measure& measure){
         const double yAxisStroke=plot.yAxisWidth>0?plot.yAxisWidth/inkFactor:plot.series.empty()?2.4:plot.series.front().width;
         if(plot.showYAxis)arrow(axes.origin,axes.yEnd,"#000000",yAxisStroke,1,
             plot.yAxisHeadLength>0?plot.yAxisHeadLength/5:std::max(automaticHeadScale,yAxisStroke*inkFactor*.6),plot.yAxisHeadWidth);
-        for(size_t i=0;i<plot.stages.size();i++){
-            const auto [a,b]=stageRange(plot.stages[i]);double c=(a+b)/2;
-            const auto& layout=stageLayouts[i];double font=layout.font;
-            double y=y0+8+laneOffsets[layout.lane]+laneHeights[layout.lane]/2;
-            double gap=widthOf(layout.text,font)/2+std::min(font*.35,(b-a)*.04),shaft=std::max(.01,(b-a)/2-gap);
+        for(size_t i=0;i<plot.stages.size();++i){
             const auto& stage=plot.stages[i];
-            double weight=stage.arrowWidth>0?stage.arrowWidth/inkFactor:std::max(.6,std::min(font*.085,shaft*.08));
+            auto [a,b]=stageRange(stage);
+            a+=stage.offset.x;
+            b+=stage.offset.x;
+            const double center=(a+b)/2;
+            const auto& layout=stageLayouts[i];
+            const double font=layout.font;
+            const double y=y0+8+laneOffsets[layout.lane]+stage.offset.y;
+            const double gap=stage.captionBelow?0:widthOf(layout.text,font)/2+std::min(font*.35,(b-a)*.04);
+            const double shaft=std::max(.01,(b-a)/2-gap);
+            const double weight=stage.arrowWidth>0?stage.arrowWidth/inkFactor:std::max(.6,std::min(font*.085,shaft*.08));
             const double automaticHead=std::min(font*.7,std::max({font*.20,shaft*.18,weight*inkFactor*3}));
-            const double headLength=std::min(stage.arrowHeadSize>0?stage.arrowHeadSize:automaticHead,shaft*.65);
-            double headScale=headLength/5;
-            arrow({c-gap,y},{a,y},plot.xColor,weight,1,headScale);
-            arrow({c+gap,y},{b,y},plot.xColor,weight,1,headScale);
-            plotText(layout.text,{c,y-layout.height/2},font,plot.xColor,true,12,int(i));
+            const double headLength=std::min(stage.arrowHeadSize>0?stage.arrowHeadSize:automaticHead,shaft*.625);
+            if(stage.captionBelow){
+                Primitive line;
+                line.owner=owner;line.color=plot.xColor;line.width=weight;
+                line.points={{a+headLength*.96,y},{b-headLength*.96,y}};
+                s.items.push_back(line);
+                line.type=Primitive::Polygon;
+                const double side=headLength*.4;
+                line.points={{a,y},{a+headLength,y+side},{a+headLength,y-side}};
+                s.items.push_back(line);
+                line.points={{b,y},{b-headLength,y-side},{b-headLength,y+side}};
+                s.items.push_back(line);
+            }else{
+                arrow({center-gap,y},{a,y},plot.xColor,weight,1,headLength/5);
+                arrow({center+gap,y},{b,y},plot.xColor,weight,1,headLength/5);
+            }
+            const double captionY=stage.captionBelow?y+std::max({4.,font*.25,headLength*.4+2,weight*inkFactor/2+2}):y-layout.height/2;
+            plotText(layout.text,{center,captionY},font,plot.xColor,true,12,int(i));
         }
         std::vector<double> ticks;for(int i=0;plot.showYAxis&&plot.showYTicks&&i<=axis.intervals;i++)ticks.push_back(axis.firstTick+axis.step*i);
         std::sort(ticks.begin(),ticks.end());ticks.erase(std::unique(ticks.begin(),ticks.end(),[&](double a,double b){return std::abs(a-b)<axis.step*1e-7;}),ticks.end());
@@ -683,15 +734,15 @@ Scene makeScene(const Document& d,const Measure& measure){
         Rect yAxisBox{yAxisX-energyFont*.4-titleInkPad,y0-h/2-widthOf(yCaption,energyFont)/2,energyFont*2.05+2*titleInkPad,widthOf(yCaption,energyFont)};
         for(size_t pass=0;pass<=external.size();pass++){bool moved=false;for(auto other:external)if(overlaps(yAxisBox,other)){double shift=other.x-yAxisBox.w-8-yAxisBox.x;yAxisBox.x+=shift;yAxisX+=shift;moved=true;}if(!moved)break;}
         if(plot.showYAxis&&plot.energyAtTop){
-            // E and the unit share one baseline above the arrowhead. Reserve
+            // Keep the quantity and unit on one baseline above the arrowhead. Reserve
             // the whole header, including superscripts, before laying out legends.
             const double headerY=topY-14*plot.axisScale-energyFont*1.7-titleGap;
             const auto header=plot.energySymbol.empty()?std::string("E"):plot.energySymbol;
             const double eWidth=scriptWidth(header,energyFont);
-            const double unitWidth=displayUnit.empty()?0:scriptWidth("("+displayUnit+")",energyFont);
+            const double unitWidth=unitCaption.empty()?0:scriptWidth(unitCaption,energyFont);
             axisText(header,{x0,headerY},energyFont,plot.yColor,false);
-            if(unitWidth>0)axisText("("+displayUnit+")",{x0+eWidth/2+6+unitWidth/2,headerY},energyFont,plot.yColor,false);
-            external.push_back({x0-eWidth/2,headerY-energyFont*.4,eWidth+(unitWidth>0?6+unitWidth:0),energyFont*1.7});
+            if(unitWidth>0)axisText(unitCaption,{x0+eWidth/2+unitWidth/2,headerY},energyFont,plot.yColor,false);
+            external.push_back({x0-eWidth/2,headerY-energyFont*.4,eWidth+unitWidth,energyFont*1.7});
         }else if(plot.showYAxis)axisText(yCaption,{yAxisX,y0-h/2},energyFont,plot.yColor,true);
         // Label regular ticks only; range boundaries never create an extra irregular tick.
         double tickHeight=tickFont*1.3,lastLabel=y0+tickHeight+10;
@@ -741,7 +792,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             bool hasData=false;for(size_t i=0;i<plot.states.size();i++)if(paths[k].hasValue(i)){hasData=true;break;}
             if(hasData){legendPaths.push_back(k);if(plot.legendFontSize==0)legendFont=std::min(legendFont,std::max(4.,(w*.92-29)/std::max(1.,legendWidth(paths[k].name,1))));}
         }
-        // Compact, centered legend rows directly above the plotting area.
+        // The legend starts just beyond the x-axis arrow and stays clear of the plotted data.
         // The default title duplicates the x caption; retain its saved value without printing twice.
         bool showTitle=!plot.title.empty()&&plot.title!=plot.xLabel;
         const bool autoLegend=legendPaths.size()>1||(!legendPaths.empty()&&paths[legendPaths[0]].name!="Path 1");
@@ -754,18 +805,16 @@ Scene makeScene(const Document& d,const Measure& measure){
             auto& row=rows.back();if(!row.paths.empty())row.width+=itemGap;row.width+=itemWidth;row.paths.push_back(k);
         }
         double legendHeight=rows.empty()?0:rows.size()*rowHeight+(rows.size()-1)*rowGap;
-        double legendTop=topY-18-legendHeight,bandWidth=0;for(auto& row:rows)bandWidth=std::max(bandWidth,row.width);
-        Rect legendBox{x0+(w-bandWidth)/2,legendTop,bandWidth,legendHeight};
-        if(showLegend)for(size_t pass=0;pass<=external.size();pass++){bool moved=false;for(auto box:external)if(overlaps(legendBox,box)){legendBox.y=box.y-legendBox.h-8;moved=true;}if(!moved)break;}
-        legendTop=legendBox.y;
+        const double legendLeft=axes.xEnd.x+8+plot.legendOffset.x;
+        const double legendTop=axes.xEnd.y-legendHeight/2+plot.legendOffset.y;
         if(showTitle){
-            double titleY=(showLegend?legendTop:topY-18)-titleFont*1.3-7;
+            double titleY=topY-18-titleFont*1.3-7;
             Rect titleBox{x0+w/2-widthOf(plot.title,titleFont)/2,titleY,widthOf(plot.title,titleFont),titleFont*1.3};
             for(size_t pass=0;pass<=external.size();pass++){bool moved=false;for(auto box:external)if(overlaps(titleBox,box)){titleBox.y=box.y-titleBox.h-8;moved=true;}if(!moved)break;}
             plotText(plot.title,{x0+w/2,titleBox.y},titleFont,"#000000",true,4);
         }
         for(size_t r=0;r<rows.size();r++){
-            double cursor=x0+(w-rows[r].width)/2+plot.legendOffset.x,y=legendTop+r*(rowHeight+rowGap)+plot.legendOffset.y;
+            double cursor=legendLeft,y=legendTop+r*(rowHeight+rowGap);
             for(size_t k:rows[r].paths){auto& path=paths[k];double cy=y+rowHeight/2;
                 Primitive sample;sample.owner=owner;sample.textRole=7;sample.textIndex=int(k);sample.width=path.width;sample.color=path.color;sample.dash=1;sample.points={{cursor,cy},{cursor+sampleWidth,cy}};s.items.push_back(sample);
                 plotText(path.name,{cursor+sampleWidth+swatchGap,y},legendFont,path.color,false,7,int(k));
@@ -809,6 +858,21 @@ Scene makeScene(const Document& d,const Measure& measure){
             const double inset=plot.mode>=2?half:0;
             const auto left=a+Vec{inset,0},right=b-Vec{inset,0};
             crossings.emplace(i,std::make_pair(&crossing,left+(right-left)*crossing.position));
+        }
+        // A continuing branch starts on the already drawn common plateau.
+        // Keep that level in its route, but render its mark and value only once.
+        std::vector<std::optional<size_t>> sharedStarts(paths.size());
+        for(size_t k=1;k<paths.size();++k){
+            if(independent||!paths[k].sharedStart)continue;
+            for(size_t i=0;i<plot.states.size();++i){
+                if(!paths[k].hasValue(i))continue;
+                const auto& branch=paths[k];
+                const auto shared=std::find_if(paths.begin(),paths.begin()+k,[&](const auto& earlier){
+                    return earlier.hasValue(i)&&std::abs(earlier.values[i]-branch.values[i])<1e-9;
+                });
+                if(shared!=paths.begin()+k)sharedStarts[k]=i;
+                break;
+            }
         }
         auto connect=[&](Vec a,Vec b,const EnergySeries& path,double breakX,double breakScale,int breakStyle){
             if(std::isfinite(breakX)&&breakX>a.x&&breakX<b.x&&b.x-a.x>20){
@@ -892,7 +956,8 @@ Scene makeScene(const Document& d,const Measure& measure){
                 if(left.crossing&&i==1)solidEnd(left.right,right.left);
             }
             for(size_t i=0;i<path.values.size();i++){
-                if(!path.hasValue(i))continue;Vec a=pointAt(i,path.values[i]);
+                if(!path.hasValue(i)||sharedStarts[pathIndex]==i)continue;
+                Vec a=pointAt(i,path.values[i]);
                 path.color=i<basePath.levelColors.size()&&!basePath.levelColors[i].empty()?basePath.levelColors[i]:basePath.color;
                 if(visible(path,i))for(int edge: {-1,0,1}){
                     if(edge&&plot.mode<2)continue;
@@ -996,7 +1061,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         std::vector<Rect> stateBoxes;double stateBottom=axisY+10,stateScriptTop=0;
         for(auto& state:plot.states)if(state.label.find("^{")!=std::string::npos)stateScriptTop=-stateFont*.4;
         for(size_t i=0;i<plot.states.size();i++){
-            const auto& state=plot.states[i];if(state.labelPlacement==3)continue;
+            const auto& state=plot.states[i];if(state.labelPlacement>=3)continue;
             bool onCurve=state.labelPlacement==1||state.labelPlacement==2;
             if(onCurve&&(size_t(state.labelPath)>=paths.size()||!visible(paths[size_t(state.labelPath)],i)))continue;
             std::string label=state.label;
@@ -1059,7 +1124,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             external.push_back(item.rotation==-90?Rect{at.x,at.y-tw,th,tw}:Rect{at.x,at.y,tw,th});
         }
         struct ValueCaption{Vec anchor;std::string text,color;size_t path,index;Rect box;bool backing=false;};std::vector<ValueCaption> captions;
-        if(plot.showValues)for(size_t k=0;k<paths.size();k++)for(size_t i=0;i<paths[k].values.size();i++)if(visible(paths[k],i)){
+        if(plot.showValues)for(size_t k=0;k<paths.size();k++)for(size_t i=0;i<paths[k].values.size();i++)if(visible(paths[k],i)&&sharedStarts[k]!=i){
             std::ostringstream out;out.imbue(std::locale::classic());out<<std::fixed<<std::setprecision(1)<<paths[k].values[i];
             Vec anchor=pointAt(i,paths[k].values[i]);
             captions.push_back({anchor,energyCellText(paths[k],i,out.str()),i<paths[k].levelColors.size()&&!paths[k].levelColors[i].empty()?paths[k].levelColors[i]:paths[k].color,k,i,{}});
@@ -1160,6 +1225,36 @@ Scene makeScene(const Document& d,const Measure& measure){
         for(auto& caption:captions){
             if(caption.backing){Primitive backing;backing.type=Primitive::Box;backing.owner=owner;backing.color="#ffffff";backing.filled=true;backing.width=0;backing.points={{caption.box.x-1,caption.box.y-1},{caption.box.x+caption.box.w+1,caption.box.y+caption.box.h+1}};s.items.push_back(backing);}
             plotText(caption.text,{caption.box.x,caption.box.y},valueFont,caption.color,false,caption.path==0?8:0,int(caption.index));
+        }
+        // Place the state name after its numeric caption, whose collision solver
+        // may have moved the energy below the plotted level.
+        for(size_t i=0;i<plot.states.size();++i){
+            const auto& state=plot.states[i];
+            const size_t path=size_t(state.labelPath);
+            if(state.labelPlacement!=4||path>=paths.size()||!visible(paths[path],i)||state.label.empty())continue;
+            std::string label=state.label;
+            if(state.transitionState&&state.above.empty()&&state.below.empty())label="["+label+"]^{‡}";
+            const double x=stateX(i)+state.labelOffset.x;
+            double y=pointAt(i,paths[path].values[i]).y+10;
+            const auto caption=std::find_if(captions.begin(),captions.end(),[&](const auto& value){
+                return value.index==i&&(value.path==path||(sharedStarts[path]==i&&
+                    std::abs(paths[value.path].values[i]-paths[path].values[i])<1e-9));
+            });
+            if(caption!=captions.end())y=std::max(y,caption->box.y+caption->box.h+5);
+            const double width=scriptWidth(label,stateFont);
+            const double topPad=label.find("^{")==std::string::npos?0:stateFont*.4;
+            Rect box{x-width/2,y+state.labelOffset.y,width,stateFont*1.3+topPad};
+            if(state.labelOffset.x==0&&state.labelOffset.y==0){
+                auto clear=[&](const Rect& other){if(overlaps(box,other))box.y=other.y+other.h+5;};
+                for(size_t pass=0;pass<=external.size()+placedValueBoxes.size();++pass){
+                    const double old=box.y;
+                    for(const auto& other:external)clear(other);
+                    for(const auto& other:placedValueBoxes)clear(other);
+                    if(box.y==old)break;
+                }
+            }
+            plotText(label,{x,box.y+topPad},stateFont,"#000000",true,6,int(i));
+            external.push_back(box);
         }
         s.plotAxes[owner].valueFont=valueFont;
         if(plot.thinLines)for(size_t i=firstPlotItem;i<s.items.size();i++)if(s.items[i].type!=Primitive::Text)s.items[i].width*=.5;

@@ -99,14 +99,138 @@ bool stepPlotAppearance(int id,int action,int steps){
     history.checkpoint(doc);setPlotNumber(*graph,field,next);changed();
     return true;
 }
+static std::optional<double> kilojoulesPerUnit(const std::string& unit);
+
+static void editManagedAxis(int id,bool xAxis){
+    const auto* selected=plot(id);
+    const Document before=doc;
+    const auto original=*selected;
+    const auto axes=makeScene(before,measure).plotAxes.at(id);
+    const auto initialLength=number(xAxis?(axes.xEnd-axes.origin).length():(axes.yEnd-axes.origin).length());
+    const auto unit=original.unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):original.unit;
+    std::vector<ui::Field> fields={
+        ui::numericField(L"축선 굵기 (pt, 0: 자동)",xAxis?original.xAxisWidth:original.yAxisWidth,0,100,.5),
+        ui::numericField(L"화살촉 길이 (pt, 0: 자동)",xAxis?original.xAxisHeadLength:original.yAxisHeadLength,0,100,.5),
+        ui::numericField(L"화살촉 너비 (pt, 0: 자동)",xAxis?original.xAxisHeadWidth:original.yAxisHeadWidth,0,100,.5),
+        {L"축 길이 (pt)",initialLength},
+        {L"축 제목",xAxis?original.xLabel:original.yLabel,false,{},false,4,true},
+        {L"축 글자색",xAxis?original.xColor:original.yColor,false,{},true},
+        ui::numericField(L"제목 크기 (pt, 0: 자동)",xAxis?original.axisFontSize:original.energyLabelFontSize,0,72,1)
+    };
+    std::vector<std::pair<std::wstring,std::vector<size_t>>> tabs={{L"축선·화살촉",{0,1,2,3}},{L"제목",{4,5,6}}};
+    if(!xAxis){
+        const std::vector<ui::Field> yFields={
+            ui::numericField(L"Y축 제목 간격 (pt, 0: 자동)",original.yTitleGap,0,300,1),
+            {L"제목 배치",original.energyAtTop?"1":"0",false,{L"세로 축 제목",L"축 위에 표시"}},
+            {L"에너지 표기","0",false,{L"현재 표기 유지",L"ΔE · 에너지",L"ΔG · 자유 에너지"}},
+            {L"에너지 단위",unit,false,{L"kcal/mol",L"kcal mol⁻¹",L"kJ/mol",L"eV"},false,4,true,true},
+            {L"단위를 바꿀 때","0",false,{L"단위 표시만 변경",L"에너지와 축 수치도 변환"}},
+            {L"최솟값 (빈칸: 자동)",original.yMin?number(*original.yMin):""},
+            {L"최댓값 (빈칸: 자동)",original.yMax?number(*original.yMax):""},
+            ui::numericField(L"눈금 간격 (0: 자동)",original.yTickStep,0,1e8,1),
+            {L"눈금·숫자 표시",original.showYTicks?"1":"0",false,{L"숨김",L"표시"}},
+            ui::numericField(L"눈금 글자 크기 (pt, 0: 자동)",original.tickFontSize,0,72,1),
+            {L"Y축 제목의 단위 표기",original.yUnitParenthetical?"1":"0",false,
+                {L"ΔE / (kcal mol⁻¹) · IUPAC",L"ΔE (kcal mol⁻¹) · 괄호"}}
+        };
+        fields.insert(fields.end(),yFields.begin(),yFields.end());
+        tabs[1].second.insert(tabs[1].second.end(),{7,8,9});
+        tabs.push_back({L"범위·눈금",{12,13,14,15,16}});
+        tabs.push_back({L"단위",{10,11,17}});
+    }
+    const size_t namePlacementIndex=fields.size();
+    if(xAxis){
+        fields.push_back({L"반응물·TS·생성물 이름","0",false,{L"현재 배치 유지",L"X축에 표시",L"에너지 데이터 아래에 표시"}});
+        fields.push_back(ui::numericField(L"상태 이름 크기 (pt, 0: 자동)",original.stateFontSize,0,72,1));
+        tabs.push_back({L"상태 이름",{namePlacementIndex,namePlacementIndex+1}});
+    }
+    const size_t visibilityIndex=fields.size();
+    ui::Field visibility{L"축 표시 (클릭하여 전환)",(xAxis?original.showXAxis:original.showYAxis)?"1":"0"};
+    visibility.toggle=true;
+    fields.push_back(std::move(visibility));
+    tabs[0].second.insert(tabs[0].second.begin(),visibilityIndex);
+    auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
+        auto candidate=before;
+        auto& graph=*std::find_if(candidate.plots.begin(),candidate.plots.end(),[&](const auto& p){return p.id==id;});
+        (xAxis?graph.xAxisWidth:graph.yAxisWidth)=numeric(values[0],0,100);
+        (xAxis?graph.showXAxis:graph.showYAxis)=values[visibilityIndex]=="1";
+        (xAxis?graph.xAxisHeadLength:graph.yAxisHeadLength)=numeric(values[1],0,100);
+        (xAxis?graph.xAxisHeadWidth:graph.yAxisHeadWidth)=numeric(values[2],0,100);
+        (xAxis?graph.xLabel:graph.yLabel)=values[4];
+        (xAxis?graph.xColor:graph.yColor)=colorValue(values[5]);
+        auto font=[&](size_t index){
+            const double size=numeric(values[index],0,72);
+            if(size>0&&size<4)throw std::runtime_error("글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.");
+            return size;
+        };
+        (xAxis?graph.axisFontSize:graph.energyLabelFontSize)=font(6);
+        if(xAxis){
+            graph.stateFontSize=font(namePlacementIndex+1);
+            if(values[namePlacementIndex]!="0"){
+                const int placement=values[namePlacementIndex]=="1"?0:4;
+                for(size_t i=0;i<graph.states.size();++i){
+                    auto& state=graph.states[i];
+                    if(state.labelPlacement!=placement)state.labelOffset={};
+                    state.labelPlacement=placement;
+                    if(placement==4&&!graph.series.empty()&&(state.labelPath<0||
+                       size_t(state.labelPath)>=graph.series.size()||!graph.series[state.labelPath].hasValue(i))){
+                        const auto path=std::find_if(graph.series.begin(),graph.series.end(),[&](const auto& series){return series.hasValue(i);});
+                        state.labelPath=path==graph.series.end()?0:int(path-graph.series.begin());
+                    }
+                }
+            }
+        }else{
+            graph.yTitleGap=numeric(values[7],0,300);
+            graph.energyAtTop=values[8]=="1";
+            if(values[9]!="0"){graph.energySymbol=values[9]=="1"?"ΔE":"ΔG";graph.yLabel=graph.energySymbol;}
+            graph.unit=values[10]==ui::utf8(L"kcal mol⁻¹")?"kcal mol^{-1}":values[10];
+            graph.yMin=values[12].empty()?std::optional<double>{}:numeric(values[12]);
+            graph.yMax=values[13].empty()?std::optional<double>{}:numeric(values[13]);
+            graph.yTickStep=numeric(values[14],0,1e8);
+            graph.showYTicks=values[15]=="1";
+            graph.tickFontSize=font(16);
+            graph.yUnitParenthetical=values[17]=="1";
+            if(values[11]=="1"&&graph.unit!=original.unit){
+                const auto from=kilojoulesPerUnit(original.unit),to=kilojoulesPerUnit(graph.unit);
+                if(!from||!to)return L"수치 변환은 kcal/mol, kJ/mol, eV 사이에서 사용할 수 있습니다.";
+                const double factor=*from / *to;
+                for(auto& state:graph.states){
+                    state.energy*=factor;
+                    state.breakOmit*=factor;
+                    if(state.breakLow)*state.breakLow*=factor;
+                    if(state.breakHigh)*state.breakHigh*=factor;
+                }
+                for(auto& crossing:graph.crossings)crossing.energy*=factor;
+                for(auto& series:graph.series)for(auto& value:series.values)value*=factor;
+                if(graph.yMin)*graph.yMin*=factor;
+                if(graph.yMax)*graph.yMax*=factor;
+                graph.yTickStep*=factor;
+            }
+            const auto axis=energyAxis(graph);
+            if(graph.yTickStep>0&&(graph.yTickStep<1e-9||axis.step>graph.yTickStep*1.001))
+                return L"Y축 눈금이 너무 촘촘합니다. 더 큰 간격을 입력하세요.";
+        }
+        if(values[3]!=initialLength){
+            const double length=numeric(values[3],xAxis?100:70,4000);
+            const auto current=makeScene(candidate,measure).plotAxes.at(id);
+            candidate=resizedPlotAxes(candidate,id,xAxis?length:(current.xEnd-current.origin).length(),
+                                      xAxis?(current.yEnd-current.origin).length():length,measure);
+        }
+        doc=std::move(candidate);
+        redraw();UpdateWindow(win);return {};
+    }catch(const std::exception& e){return ui::wide(e.what());}};
+    const auto result=ui::form(win,xAxis?L"X축 관리":L"Y축 관리",fields,update,tabs);
+    if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+    else{doc=before;redraw();}
+}
+
 void editPlotAppearance(int id,int field){
     const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("조절할 에너지 그래프를 선택하세요.");
     if(field<0||field>8)return;
+    if(field==2||field==3){editManagedAxis(id,field==2);return;}
     const Document before=doc;
-    const wchar_t* labels[]={L"축 아래 이름 크기 (pt, 0: 자동)",L"데이터 값 크기 (pt, 0: 자동)",L"X축 (pt, 0: 숨김, -1: 자동)",L"Y축 (pt, 0: 숨김, -1: 자동)",L"곡선 굵기 (pt, 0: 경로별 설정)",L"삽입 그림 선 굵기 (%, 100: 기본)",L"Y축 제목 간격 (pt, 0: 자동, 최대 300)",L"물결 굵기 (pt, 0: 자동, 0.1~20)",L"물결·곡선 추가 여백 (pt, -1: 자동, 0~100)"};
+    const wchar_t* labels[]={L"축 아래 이름 크기 (pt, 0: 자동)",L"데이터 값 크기 (pt, 0: 자동)",L"",L"",L"곡선 굵기 (pt, 0: 경로별 설정)",L"삽입 그림 선 굵기 (%, 100: 기본)",L"Y축 제목 간격 (pt, 0: 자동, 최대 300)",L"물결 굵기 (pt, 0: 자동, 0.1~20)",L"물결·곡선 추가 여백 (pt, -1: 자동, 0~100)"};
     const auto setting=plotNumber(*p,field);
-    const bool axis=field==2||field==3;
-    const bool xAxis=field==2;
     auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
         const double value=numeric(values[0],setting.minimum,setting.maximum);
         if(value>0&&value<setting.firstPositive){
@@ -114,15 +238,14 @@ void editPlotAppearance(int id,int field){
             if(field<2)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
         }
         if(value<0&&value!=-1)return L"자동은 -1, 그 외에는 0 이상을 입력하세요.";
-        const double headLength=axis?numeric(values[1],0,100):0;
-        const double headWidth=axis?numeric(values[2],0,100):0;
-        doc=before;
-        auto& graph=*plot(id);
-        setPlotNumber(graph,field,value);
-        if(axis){
-            (xAxis?graph.xAxisHeadLength:graph.yAxisHeadLength)=headLength;
-            (xAxis?graph.xAxisHeadWidth:graph.yAxisHeadWidth)=headWidth;
+        double waveGap=0;
+        if(field==7){
+            waveGap=numeric(values[1],-1,100);
+            if(waveGap<0&&waveGap!=-1)return L"물결 여백은 -1(자동) 또는 0~100 pt로 입력하세요.";
         }
+        doc=before;
+        setPlotNumber(*plot(id),field,value);
+        if(field==7)plot(id)->waveGap=waveGap;
         redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
     ui::Field control{std::wstring(labels[field])+L"\n휠 또는 ↑ / ↓ 키로 조절",number(setting.value)};
@@ -132,12 +255,9 @@ void editPlotAppearance(int id,int field){
         return number(current.step(steps));
     };
     std::vector<ui::Field> fields{std::move(control)};
-    if(axis){
-        fields.push_back(ui::numericField(L"화살촉 길이 (pt, 0: 자동)",xAxis?p->xAxisHeadLength:p->yAxisHeadLength,0,100,.5));
-        fields.push_back(ui::numericField(L"화살촉 너비 (pt, 0: 자동)",xAxis?p->xAxisHeadWidth:p->yAxisHeadWidth,0,100,.5));
-    }
-    auto result=ui::form(win,axis?(xAxis?L"X축 표시·화살표":L"Y축 표시·화살표"):L"그래프 개별 크기·굵기",fields,update);
-    if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+    if(field==7)fields.push_back(ui::numericField(L"물결·곡선 추가 여백 (pt, -1: 자동)",p->waveGap,-1,100,1));
+    const auto result=ui::form(win,field==7?L"물결 관리":L"그래프 개별 크기·굵기",fields,update);
+    if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }
 void editPlotFont(int id){
@@ -200,7 +320,7 @@ static std::optional<double> kilojoulesPerUnit(const std::string& unit){
     if(unit=="eV")return 96.4853321233;
     return {};
 }
-void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");EnergyPlot original=*p;Document before=doc;
+void plotSettings(int id,bool generalOnly){auto* p=plot(id);if(!p)throw std::runtime_error("에너지 그래프를 선택하세요.");EnergyPlot original=*p;Document before=doc;
     auto update=[&](const std::vector<std::string>& v)->std::wstring{try{EnergyPlot p=original;p.title=v[0];p.unit=v[1]==ui::utf8(L"kcal mol⁻¹")?"kcal mol^{-1}":v[1];p.xLabel=v[2];p.yLabel=v[3];p.xColor=colorValue(v[4]);p.yColor=colorValue(v[5]);auto size=values(v[6]);if(size.size()!=2||size[0]<180||size[1]<140||size[0]>4000||size[1]>4000)return L"크기는 180×140 ~ 4000×4000 pt로 입력하세요.";p.width=size[0];p.height=size[1];p.mode=std::stoi(v[7]);p.showValues=v[8]=="1";p.yTickStep=v[9].empty()?0:numeric(v[9],0);p.yMin=v[10].empty()?std::optional<double>{}:numeric(v[10]);p.yMax=v[11].empty()?std::optional<double>{}:numeric(v[11]);
  p.valueGap=numeric(v[24],0,200);
  p.axisFontSize=numeric(v[12],0,72);p.tickFontSize=numeric(v[13],0,72);p.valueFontSize=numeric(v[14],0,72);p.energyLabelFontSize=numeric(v[15],0,72);p.thinLines=v[16]=="1";p.boldLevels=v[17]=="1";
@@ -221,7 +341,7 @@ void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에�
  if((xStroke<0&&xStroke!=-1)||(yStroke<0&&yStroke!=-1))return L"축은 0(숨김), -1(자동) 또는 양수 굵기로 입력하세요.";
  p.showXAxis=xStroke!=0;p.xAxisWidth=std::max(0.,xStroke);p.showYAxis=yStroke!=0;p.yAxisWidth=std::max(0.,yStroke);p.showYTicks=v[19]=="1";p.energyAtTop=v[20]=="1";
  energyAxis(p);if(p.yTickStep>0&&(p.yTickStep<1e-9||energyAxis(p).step>p.yTickStep*1.001))return L"y축 눈금이 너무 촘촘합니다. 더 큰 간격을 입력하세요.";doc=before;relocatePlot(original,p);*plot(id)=p;redraw();UpdateWindow(win);return {};}catch(const std::exception& e){return ui::wide(e.what());}};
-    auto r=ui::form(win,L"그래프·축 설정",{{L"제목",p->title,false,{},false,4,true},{L"에너지 단위 (선택 / 직접 입력)",p->unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):p->unit,false,{L"kcal/mol",L"kcal mol⁻¹",L"kJ/mol",L"eV"},false,4,true,true},{L"x축 (위·아래첨자 버튼)",p->xLabel,false,{},false,4,true},{L"y축 (위·아래첨자 버튼)",p->yLabel,false,{},false,4,true},{L"x축 글자색",p->xColor,false,{},true},{L"y축 글자색",p->yColor,false,{},true},{L"너비 / 높이 (pt)",number(p->width)+" "+number(p->height)},{L"그래프 형태",std::to_string(p->mode),false,{L"부드러운 곡선",L"직선",L"에너지 준위 (점선 연결)",L"평평한 준위와 직선",L"독립 에너지 준위"}},{L"에너지 값 표시",p->showValues?"1":"0",false,{L"아니요",L"예"}},{L"y축 눈금 간격 (0: 자동)",number(p->yTickStep)},
+    auto r=ui::form(win,generalOnly?L"그래프 설정":L"그래프·축 설정",{{L"제목",p->title,false,{},false,4,true},{L"에너지 단위 (선택 / 직접 입력)",p->unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):p->unit,false,{L"kcal/mol",L"kcal mol⁻¹",L"kJ/mol",L"eV"},false,4,true,true},{L"x축 (위·아래첨자 버튼)",p->xLabel,false,{},false,4,true},{L"y축 (위·아래첨자 버튼)",p->yLabel,false,{},false,4,true},{L"x축 글자색",p->xColor,false,{},true},{L"y축 글자색",p->yColor,false,{},true},{L"너비 / 높이 (pt)",number(p->width)+" "+number(p->height)},{L"그래프 형태",std::to_string(p->mode),false,{L"부드러운 곡선",L"직선",L"에너지 준위 (점선 연결)",L"평평한 준위와 직선",L"독립 에너지 준위"}},{L"에너지 값 표시",p->showValues?"1":"0",false,{L"아니요",L"예"}},{L"y축 눈금 간격 (0: 자동)",number(p->yTickStep)},
  {L"y축 최솟값 (빈칸: 자동)",p->yMin?number(*p->yMin):""},{L"y축 최댓값 (빈칸: 자동)",p->yMax?number(*p->yMax):""},
  {L"x축·그래프 제목 (pt, 0: 자동)",number(p->axisFontSize)},{L"눈금·상태 이름 (pt, 0: 자동)",number(p->tickFontSize)},{L"데이터 값 크기 (pt, 0: 자동)",number(p->valueFontSize)},{L"에너지 축 제목 (pt, 0: 자동)",number(p->energyLabelFontSize)},{L"그래프 두께",p->thinLines?"1":"0",false,{L"굵게 (기존)",L"얇게 (선·축·글자)"}},{L"평평한 준위선만 굵게",p->boldLevels?"1":"0",false,{L"아니요 (그래프 두께에 맞춤)",L"예 (기존 굵은 두께 유지)"}},
  {L"단위를 바꿀 때","0",false,{L"단위 표시만 변경",L"에너지와 축 수치도 변환"}},
@@ -230,7 +350,8 @@ void plotSettings(int id){auto* p=plot(id);if(!p)throw std::runtime_error("에�
   {L"X축 (pt, 0: 숨김, -1: 자동)",number(p->showXAxis?(p->xAxisWidth>0?p->xAxisWidth:-1):0)},
  {L"Y축 (pt, 0: 숨김, -1: 자동)",number(p->showYAxis?(p->yAxisWidth>0?p->yAxisWidth:-1):0)},
  {L"에너지 표기", "0",false,{L"현재 표기 유지",L"ΔE · 에너지",L"ΔG · 자유 에너지"}},{L"에너지 값과 곡선 간격 (pt)",number(p->valueGap)}},update,
- {{L"기본",{0,23,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{21,22,19,20}},{L"글자",{4,5,8,12,13,14,15,24}},{L"선 스타일",{7,16,17}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
+ generalOnly?std::vector<std::pair<std::wstring,std::vector<size_t>>>{{L"기본",{0,6}},{L"데이터 값",{8,14,24}},{L"선 스타일",{16,17}}}:
+      std::vector<std::pair<std::wstring,std::vector<size_t>>>{{L"기본",{0,23,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{21,22,19,20}},{L"글자",{4,5,8,12,13,14,15,24}},{L"선 스타일",{7,16,17}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
 }
 std::optional<PendingEnergyGap> pendingEnergyGap;
 void addEnergyGap(int id){
@@ -340,7 +461,7 @@ void editPlotAnnotations(int id){
     std::vector<std::wstring> gapSources={L"표시 안 함"};gapSources.insert(gapSources.end(),states.begin(),states.end());
     std::vector<ui::Field> fields={
         {L"구조 / 상태 이름",state.label,true,{},false,3,true},
-        {L"이름 배치",std::to_string(state.labelPlacement),false,{L"x축",L"곡선 위",L"곡선 아래",L"숨김"}},
+        {L"이름 배치",std::to_string(state.labelPlacement),false,{L"X축",L"곡선 위",L"곡선 아래",L"숨김",L"에너지 데이터 아래"}},
         {L"이름 기준 경로",std::to_string(state.labelPath),false,paths},
         {L"이름 X 이동 (pt, 오른쪽 +)",number(state.labelOffset.x)},
         {L"이름 Y 이동 (pt, 아래 +)",number(state.labelOffset.y)},
@@ -525,7 +646,7 @@ void snapPlotStages(int id){
     MechanismStage label=index<0?MechanismStage{"Mechanism",0,100}:p->stages[size_t(index)];
     auto text=ui::form(win,L"반응 이름",{{L"반응 이름",label.label,false,{},false,4,true},{L"글자 크기 (pt, 0: 자동)",number(label.fontSize)},{L"화살표 굵기 (0: 자동, 0.1~100 pt)",number(label.arrowWidth)},{L"화살촉 길이 (pt, 0: 자동)",number(label.arrowHeadSize)}});if(!text)return;
     auto checked=mechanismStageData({{(*text)[0],"0","100",(*text)[1],(*text)[2],(*text)[3]}});if(checked.empty())return;
-    snapLabel=checked.front();snapPlot=id;snapStage=index;snapStart.reset();selection={id};tool=Select;
+    snapLabel=checked.front();snapLabel.captionBelow=label.captionBelow;snapLabel.offset=label.offset;snapLabel.row=label.row;snapPlot=id;snapStage=index;snapStart.reset();selection={id};tool=Select;
     status=L"자석 배치: 준위의 왼쪽 끝·중앙·오른쪽 끝 중 첫 점을 클릭하세요. Esc: 취소";redraw();
 }
 void editPlotColors(int id){

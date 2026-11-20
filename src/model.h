@@ -80,7 +80,7 @@ struct Reaction {
 };
 struct EnergyState {
     std::string label; double energy=0; std::vector<int> above,below; int marker=-1; std::optional<double> position;
-    int labelPlacement=0,labelPath=0; // 0 axis, 1 above curve, 2 below curve, 3 hidden.
+    int labelPlacement=0,labelPath=0; // 0 axis, 1 above curve, 2 below curve, 3 hidden, 4 below the data value.
     Vec labelOffset;
     bool transitionState=false,breakAfter=false;
     double breakPosition=.5; // Fraction of the following connector, marked with //.
@@ -93,9 +93,15 @@ struct EnergyState {
     std::string gapLabel; // Empty: automatically calculated signed delta G (double dagger for TS).
 };
 inline constexpr double maxStageArrowWidth=100.;
-struct MechanismStage { std::string label; double start=0,end=100,fontSize=0,arrowWidth=0,arrowHeadSize=0; }; // Percent span; fontSize 0 matches state captions.
+struct MechanismStage {
+    std::string label;
+    double start=0,end=100,fontSize=0,arrowWidth=0,arrowHeadSize=0; // Percent span; 0 font matches state captions.
+    bool captionBelow=false;
+    Vec offset; // Move the arrow and caption together in plot points.
+    int row=0; // 0 places non-overlapping ranges on the same row automatically.
+};
 // Empty color entries inherit the pathway color. Segment i joins states i and i+1.
-struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors,valueLabels; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
+struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors,valueLabels; bool sharedStart=false; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
 // One shared point between two paths on the same segment. Position is the
 // fraction of the gap between the adjacent plateaus.
 struct EnergyCrossing {
@@ -129,6 +135,7 @@ struct EnergyPlot {
     bool thinLines=false; // Display preset; stored path widths remain editable in either mode.
     bool showXAxis=true,showYAxis=true;
     bool showYTicks=true,energyAtTop=false;
+    bool yUnitParenthetical=false; // Default is quantity divided by the unit.
     Vec legendOffset; // Offset from the automatic legend position, in points.
     bool boldLevels=false; // Keep plateau strokes at their original weight in thin mode.
     std::vector<EnergyCrossing> crossings;

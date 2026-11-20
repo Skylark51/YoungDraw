@@ -154,7 +154,7 @@ void validateEnergyAnnotations(const EnergyPlot& p){
     const size_t paths=std::max(size_t(1),p.series.size());
     auto offset=[](Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::abs(v.x)<=10000&&std::abs(v.y)<=10000;};
     for(size_t i=0;i<p.states.size();++i){const auto& s=p.states[i];
-        if(s.labelPlacement<0||s.labelPlacement>3||s.labelPath<0||size_t(s.labelPath)>=paths||!offset(s.labelOffset)||
+        if(s.labelPlacement<0||s.labelPlacement>4||s.labelPath<0||size_t(s.labelPath)>=paths||!offset(s.labelOffset)||
            !std::isfinite(s.breakPosition)||s.breakPosition<.05||s.breakPosition>.95||
            !std::isfinite(s.breakOmit)||s.breakOmit<0||s.breakOmit>1e6||!std::isfinite(s.breakUpperScale)||s.breakUpperScale<1||s.breakUpperScale>10||
            s.breakStyle<0||s.breakStyle>1||s.breakLow.has_value()!=s.breakHigh.has_value()||
@@ -234,6 +234,47 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     return result;
 }
 std::vector<MechanismStage> defaultMechanismStages(){return {{"Reactant",0,32},{"Transition State",34,66},{"Product",68,100}};}
+EnergyPlot verticalBranchPlot(const EnergyPlot& original,size_t sourcePath,size_t fork,
+                              const std::string& name,double energyOffset){
+    if(original.mode==independentEnergyLevels)
+        throw std::runtime_error("먼저 상태를 연결하는 그래프 형태를 선택하세요.");
+    if(original.states.size()<2||fork>=original.states.size()-1)
+        throw std::runtime_error("마지막 상태 이전의 분기점을 선택하세요.");
+    if(name.find_first_not_of(" \t\r\n")==std::string::npos||name.size()>256)
+        throw std::runtime_error("새 경로 이름을 1~256바이트로 입력하세요.");
+    if(!std::isfinite(energyOffset)||energyOffset==0)
+        throw std::runtime_error("분기 에너지 차이는 0이 아닌 숫자로 입력하세요.");
+    EnergyPlot result=original;
+    if(result.series.empty()){
+        EnergySeries base;
+        for(const auto& state:result.states)base.values.push_back(state.energy);
+        result.series.push_back(std::move(base));
+    }
+    if(sourcePath>=result.series.size()||result.series.size()>=100)
+        throw std::runtime_error("원본 경로를 확인하세요. 경로는 최대 100개입니다.");
+    const auto& source=result.series[sourcePath];
+    if(!source.hasValue(fork)||!source.hasValue(fork+1))
+        throw std::runtime_error("원본 경로에서 에너지가 연속된 두 상태 사이를 선택하세요.");
+    auto branch=source;
+    branch.name=name;
+    branch.sharedStart=true;
+    branch.color=energyOffset>0?"#ad405b":"#286688";
+    if(branch.color==source.color)branch.color=energyOffset>0?"#8c5024":"#305c4b";
+    branch.levelColors.clear();
+    branch.segmentColors.clear();
+    branch.valueLabels.clear();
+    branch.present.resize(branch.values.size());
+    for(size_t i=0;i<branch.values.size();++i){
+        branch.present[i]=i>=fork&&source.hasValue(i);
+        if(i<=fork||!branch.present[i])continue;
+        branch.values[i]+=energyOffset;
+        if(!std::isfinite(branch.values[i])||std::abs(branch.values[i])>1e6)
+            throw std::runtime_error("분기 에너지는 ±1,000,000 이내여야 합니다.");
+    }
+    result.series.push_back(std::move(branch));
+    return result;
+}
+
 std::vector<MechanismStage> mechanismStageData(const std::vector<std::vector<std::string>>& cells){
     std::vector<MechanismStage> result;
     for(size_t i=0;i<cells.size();i++){
@@ -250,7 +291,21 @@ std::vector<MechanismStage> mechanismStageData(const std::vector<std::vector<std
                 if(row[column].find_first_not_of(" \t\r\n",end)!=std::string::npos||!std::isfinite(value)||value<0||value>maximum||(value>0&&value<.1))throw std::runtime_error(column==4?"화살표 굵기는 0(자동) 또는 0.1~100 pt로 입력하세요.":"화살촉 길이는 0(자동) 또는 0.1~40 pt로 입력하세요.");return value;
             };
             width=optionalSize(4,maxStageArrowWidth);head=optionalSize(5,40);
-            result.push_back({row[0],start,end,font,width,head});if(result.size()>100)throw std::runtime_error("단계는 최대 100개입니다.");
+            auto setting=[&](size_t column,double minimum,double maximum){
+                if(row.size()<=column||row[column].find_first_not_of(" \t\r\n")==std::string::npos)return 0.;
+                size_t consumed=0;
+                const double value=std::stod(row[column],&consumed);
+                if(row[column].find_first_not_of(" \t\r\n",consumed)!=std::string::npos||
+                    !std::isfinite(value)||value<minimum||value>maximum)
+                    throw std::runtime_error("배치 0~1, 이동 ±4000 pt, 줄 0~20 범위를 확인하세요.");
+                return value;
+            };
+            const double below=setting(6,0,1),line=setting(9,0,20);
+            if(std::floor(below)!=below||std::floor(line)!=line)
+                throw std::runtime_error("배치와 줄 번호는 정수로 입력하세요.");
+            result.push_back({row[0],start,end,font,width,head,below==1,
+                {setting(7,-4000,4000),setting(8,-4000,4000)},int(line)});
+            if(result.size()>100)throw std::runtime_error("단계는 최대 100개입니다.");
         }catch(const std::exception& e){throw std::runtime_error(std::to_string(i+1)+"행: "+e.what());}
     }return result;
 }

@@ -18,15 +18,15 @@
 namespace yd::editor {
 HWND plotManagerWindow=nullptr;
 namespace {
-constexpr int tabFirst=4000,slotControl=4200,sideControl=4201,panelBack=4400,pathControl=4401;
+constexpr int tabFirst=4000,slotControl=4200,sideControl=4201,panelBack=4400,pathControl=4401,verticalBranch=4402,distributeStages=4403;
 constexpr int editStructure=4300,pasteStructure=4301,fileStructure=4302,sizeStructure=4303,removeStructure=4304;
 struct Card{int action,icon;const wchar_t* label;const wchar_t* detail;int slot=-1;};
 const std::vector<std::vector<Card>> pages={
-    {{131,131,L"데이터 표",L"상태·에너지 입력"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"}},
-    {{137,137,L"제목·축 설정",L"표시·범위·단위·눈금"},{plotAxisLengthsCommand,239,L"축 길이",L"가로·세로 길이"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{240,240,L"상태 이름 크기",L"축 아래 이름"},{241,241,L"데이터 값 크기",L"에너지 숫자"},{246,246,L"Y축 제목 간격",L"제목과 축 사이 여백"},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치",7}},
-    {{139,139,L"반응 이름·화살표",L"범위·글자·화살촉"},{136,136,L"화살표 자석 배치",L"캔버스에서 두 점 선택"},{plotAnnotationsCommand,236,L"TS·이름 위치",L"생략·갭·라벨 위치"},{addEnergyGapCommand,237,L"에너지 갭 추가",L"캔버스에 지시선 배치"},{151,151,L"스핀 교차점",L"교차 에너지·라벨"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"}},
+    {{131,131,L"데이터 표",L"상태·에너지 입력"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상하 분기",L"공통 상태에서 갈라짐"}},
+    {{137,137,L"그래프 설정",L"제목·크기·표시"},{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"},{241,241,L"데이터 값 크기",L"에너지 숫자",4},{242,242,L"X축 관리",L"길이·제목·선·화살촉",5},{243,243,L"Y축 관리",L"범위·눈금·제목 간격",6},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치",7}},
+    {{139,139,L"반응 이름·화살표",L"이름 배치·줄·위치"},{136,136,L"화살표 자석 배치",L"캔버스에서 두 점 선택"},{plotAnnotationsCommand,236,L"TS·이름 위치",L"생략·갭·라벨 위치"},{addEnergyGapCommand,237,L"에너지 갭 추가",L"캔버스에 지시선 배치"},{151,151,L"스핀 교차점",L"교차 에너지·라벨"}},
     {{editStructure,186,L"구조 그리기·편집",L"선택한 위·아래 영역"},{pasteStructure,123,L"구조 붙여넣기",L"클립보드에서 삽입"},{fileStructure,124,L"구조 파일 삽입",L"CDXML·이미지 파일"},{sizeStructure,165,L"구조 크기",L"선택 구조 확대·축소"},{removeStructure,144,L"구조 제거",L"선택 영역만 비우기"}},
-    {{242,242,L"X축 표시·화살표",L"축선 굵기·화살촉"},{243,243,L"Y축 표시·화살표",L"축선 굵기·화살촉"},{244,244,L"곡선 굵기",L"경로 선 굵기"},{245,245,L"그림 선 굵기",L"선택 후 + / - 조절"},{plotWaveWidthCommand,250,L"물결 굵기",L"선택 후 + / - 조절"},{plotWaveGapCommand,251,L"물결·곡선 간격",L"본선 절단 여백"}}
+    {{244,244,L"곡선 굵기",L"경로 선 굵기"},{245,245,L"그림 선 굵기",L"선택 후 + / - 조절"},{plotWaveWidthCommand,250,L"물결 관리",L"물결 굵기·곡선 간격"}}
 };
 struct Manager{
     HWND window=nullptr;int owner=0,page=0;bool busy=false;
@@ -105,7 +105,8 @@ struct Manager{
         ui::Table rows;
         const auto stages=p->stages.empty()?defaultMechanismStages():p->stages;
         for(const auto& stage:stages)rows.push_back({stage.label,number(stage.start),number(stage.end),
-            number(stage.fontSize),number(stage.arrowWidth),number(stage.arrowHeadSize)});
+            number(stage.fontSize),number(stage.arrowWidth),number(stage.arrowHeadSize),stage.captionBelow?"1":"0",
+             number(stage.offset.x),number(stage.offset.y),std::to_string(stage.row)});
         grid=ui::embeddedStageTable(window,rows,[this,last=rows](const ui::Table& data) mutable ->std::wstring{
             if(data==last)return {};
             try{
@@ -190,6 +191,30 @@ struct Manager{
         EnergySeries result;
         for(const auto& state:plot.states)result.values.push_back(state.energy);
         return result;
+    }
+
+    void openVerticalBranch(){
+        const auto& source=*graph();
+        if(source.states.size()<2||source.mode==independentEnergyLevels)
+            throw std::runtime_error("연결된 상태가 두 개 이상인 그래프를 선택하세요.");
+        std::vector<std::wstring> paths,states;
+        for(const auto& path:source.series)paths.push_back(ui::wide(path.name));
+        if(paths.empty())paths.push_back(L"Path 1");
+        for(size_t i=0;i+1<source.states.size();++i)
+            states.push_back(std::to_wstring(i+1)+L" · "+ui::wide(source.states[i].label));
+        const auto axis=energyAxis(source);
+        const auto initial=std::min(10000.,std::max(.1,axis.step));
+        openForm(verticalBranch,L"상하 분기 추가",{
+            {L"공통 구간의 원본 경로","0",false,paths},
+            {L"갈라지는 마지막 공통 상태","0",false,states},
+            {L"새 분기 경로 이름","Branch "+std::to_string(paths.size()+1)},
+            {L"새 경로 방향","0",false,{L"위쪽 (에너지 증가)",L"아래쪽 (에너지 감소)"}},
+            ui::numericField(L"분기 뒤 에너지 차이",initial,.000001,1000000,.5)
+        },[](EnergyPlot& target,const auto& values){
+            const double shift=numeric(values[4],.000001,1000000)*(values[3]=="0"?1:-1);
+            target=verticalBranchPlot(target,size_t(std::stoul(values[0])),size_t(std::stoul(values[1])),values[2],shift);
+        });
+        SendMessageW(form,WM_COMMAND,MAKEWPARAM(102,EN_CHANGE),0);
     }
 
     void openSeries(bool add,size_t index=0){
@@ -305,6 +330,7 @@ struct Manager{
         place(GetDlgItem(window,slotControl),20,panelTop+46,width-192,28,page==3&&!subpane);place(GetDlgItem(window,sideControl),width-162,panelTop+46,142,28,page==3&&!subpane);
         const int start=panelTop+(page==3?84:46),columns=4,cardWidth=(width-40-(columns-1)*gap)/columns;
         for(auto& category:pages)for(auto& card:category){auto h=GetDlgItem(window,card.action);auto found=std::find_if(pages[size_t(page)].begin(),pages[size_t(page)].end(),[&](const Card& c){return c.action==card.action;});bool show=found!=pages[size_t(page)].end()&&!expanded;int i=show?(card.slot>=0?card.slot:int(found-pages[size_t(page)].begin())):0;place(h,20+(i%columns)*(cardWidth+gap),start+(i/columns)*100,cardWidth,90,show);}
+        place(GetDlgItem(window,distributeStages),width-188,panelTop+37,168,26,grid&&panel==139&&expanded&&!subpane);
         if(grid){
             const int gridTop=panel==139?64:44;
             place(grid,20,panelTop+gridTop,width-40,height-panelTop-gridTop-56,expanded&&!subpane);
@@ -336,7 +362,7 @@ struct Manager{
             if(wheelAction!=card.action){wheelAction=card.action;wheelDelta=0;}
             wheelDelta+=delta;
             const int steps=wheelDelta/WHEEL_DELTA;wheelDelta%=WHEEL_DELTA;
-            stepPlotAppearance(owner,card.action,steps);
+            if(card.action!=242&&card.action!=243)stepPlotAppearance(owner,card.action,steps);
             return;
         }
         wheelAction=0;
@@ -361,8 +387,17 @@ struct Manager{
         const bool pressed=(item.itemState&ODS_SELECTED)!=0;
         const auto color=active||keyboardFocus||pressed?palette.accent:palette.text;
         const Card* card=nullptr;for(auto& entry:pages[size_t(page)])if(entry.action==int(item.CtlID))card=&entry;
-        if(card){icon(g,card->icon,{box.X+(box.Width-32)/2,box.Y+6,32,32},color);ui::drawLabel(g,card->label,{box.X+4,box.Y+42,box.Width-8,22},13.f,color,true,true);auto current=value(card->action);ui::drawLabel(g,current.empty()?card->detail:current,{box.X+4,box.Y+67,box.Width-8,17},11.f,palette.muted,false,true);}
-        else{wchar_t label[128]{};GetWindowTextW(item.hwndItem,label,128);ui::drawLabel(g,label,box,13.f,color,active,true);}
+        if(card){
+            const float left=(box.Width-36)/2;
+            appearance::rounded(g,{left,3,36,36},9,keyboardFocus||pressed?palette.hover:palette.raised);
+            icon(g,card->icon,{left+4,7,28,28},color);ui::drawLabel(g,card->label,{box.X+4,box.Y+42,box.Width-8,22},13.f,color,true,true);auto current=value(card->action);ui::drawLabel(g,current.empty()?card->detail:current,{box.X+4,box.Y+67,box.Width-8,17},11.f,palette.muted,false,true);}
+        else if(item.CtlID==distributeStages){
+            appearance::rounded(g,{0,0,box.Height,box.Height},7,keyboardFocus||pressed?palette.hover:palette.raised);
+            Pen pen(color,1.3f);
+            for(float x:{6.f,12.f,18.f}){g.DrawLine(&pen,x,9.f,x,17.f);}
+            g.DrawLine(&pen,6.f,13.f,18.f,13.f);
+            ui::drawLabel(g,L"자동 균등 배치",{box.Height+7,0,box.Width-box.Height-7,box.Height},13.f,color,true,false);
+        }else{wchar_t label[128]{};GetWindowTextW(item.hwndItem,label,128);ui::drawLabel(g,label,box,13.f,color,active,true);}
     }
     void paint(HDC dc){
         Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);const auto& palette=appearance::palette();RECT client{};GetClientRect(window,&client);SolidBrush background(palette.panel);g.FillRectangle(&background,0,0,client.right,client.bottom);
@@ -384,12 +419,13 @@ struct Manager{
             GetWindowRect(GetDlgItem(window,tabFirst),&tabs);
             POINT at{tabs.left,tabs.top};
             ScreenToClient(window,&at);
-            text(g,L"반응 이름·화살표",20,float(at.y+42),14,palette.text,true);
+            text(g,L"배치 0: 가운데 / 1: 아래  ·  같은 줄 번호로 나란히 배치  ·  X·Y 이동값: pt",20,float(at.y+42),13,palette.text,true);
         }
         if(!notice.empty()&&!subpane)text(g,notice,20,float(client.bottom-73),13,palette.accent);
         else if(!subpane&&!panelVisible()&&page!=2)text(g,page==4?L"크기·굵기 위에서 휠로 조절 · Ctrl+Z: 실행 취소":page==1?L"크기·간격 위에서 휠로 조절할 수 있습니다.":page==3?L"상태와 위·아래 영역을 고른 뒤 구조를 그리거나 편집하세요.":L"데이터 표는 하단 패널에서 입력하고 그래프에 즉시 반영합니다.",20,float(client.bottom-70),11,palette.muted);
     }
     void act(int action){
+        if(action==distributeStages){if(grid&&panel==139)ui::distributeEmbeddedStages(grid);return;}
         if(!flushGrid())return;
         if(action==panelBack){clearPanel();layout();SetFocus(GetDlgItem(window,tabFirst+page));return;}
         if(action==131){openData();return;}
@@ -398,7 +434,8 @@ struct Manager{
         if(action==104||action==105){command(action);targets();InvalidateRect(window,nullptr,FALSE);for(auto h:cards)InvalidateRect(h,nullptr,FALSE);return;}
         if(!graph())throw std::runtime_error("편집할 그래프가 없습니다.");if(doc.isLocked(owner))throw std::runtime_error("그래프 잠금을 해제한 뒤 편집하세요.");
         selection={owner};
-        if(action==137){plotSettings(owner);return;}
+        if(action==137){plotSettings(owner,true);return;}
+        if(action==verticalBranch){openVerticalBranch();return;}
         if(action==139){openStages();return;}
         if(action==plotLegendCommand){openLegend();return;}
         if(action==132||action==133){openSeries(action==132);return;}
@@ -416,7 +453,7 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_NCCREATE){self=static_cast<Manager*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);self->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}
     if(!self)return DefWindowProcW(h,message,wp,lp);
     switch(message){
-    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"데이터·경로",L"축·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i=0;i<5;i++)self->button(tabFirst+i,tabs[i]);self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");
+    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"데이터·경로",L"축·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i=0;i<5;i++)self->button(tabFirst+i,tabs[i]);self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");self->button(distributeStages,L"자동 균등 배치");
         auto path=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
             0,0,170,180,h,reinterpret_cast<HMENU>(INT_PTR(pathControl)),nullptr,nullptr);
         SendMessageW(path,WM_SETFONT,(WPARAM)self->font,TRUE);ui::themeCombo(path);

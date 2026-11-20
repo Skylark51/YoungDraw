@@ -75,7 +75,7 @@ int main(){try{
     edit.states[0].labelPlacement=3;
     auto hidden=makeScene(d);check(std::none_of(hidden.items.begin(),hidden.items.end(),[](const auto& p){return p.type==Primitive::Text&&p.textRole==6&&p.textIndex==0;}),"hidden state caption is absent");
     edit.states[0].labelPlacement=0;
-    for(bool x:{false,true})for(bool y:{false,true}){edit.showXAxis=x;edit.showYAxis=y;auto s=makeScene(d);check(textContains(s,"Reaction coordinate")==x&&textContains(s,"ΔG (")==y,"axes independently show captions");}
+    for(bool x:{false,true})for(bool y:{false,true}){edit.showXAxis=x;edit.showYAxis=y;auto s=makeScene(d);check(textContains(s,"Reaction coordinate")==x&&textContains(s,"ΔG / (")==y,"axes independently show captions");}
     edit.showXAxis=edit.showYAxis=true;
     // An attached structure is framed by its actual geometry, not a fixed label box.
     int a=d.addAtom({260,-120},6),b=d.addAtom({295,-145},8);int bond=d.addBond(a,b);edit.states[1].above={a,b,bond};
@@ -148,7 +148,7 @@ int main(){try{
         bool x=false,y=false,curve=false,name=false,value=false,structure=false,legend=false;
         for(const auto& item:scene.items){
             if(item.owner==graph.id&&item.type==Primitive::Line&&item.points.size()==2){
-                if(std::abs(item.points[0].y-axes.origin.y)<1e-8&&std::abs(item.points[1].y-axes.origin.y)<1e-8){x=true;check(std::abs(item.width-3)<1e-8,"X axis thickness is independent of global and thin stroke settings");}
+                if((item.points[0]-axes.origin).length()<1e-8&&std::abs(item.points[1].y-axes.origin.y)<1e-8){x=true;check(std::abs(item.width-3)<1e-8,"X axis thickness is independent of global and thin stroke settings");}
                 if(std::abs(item.points[0].x-axes.origin.x)<1e-8&&std::abs(item.points[1].x-axes.origin.x)<1e-8){y=true;check(std::abs(item.width-5)<1e-8,"Y axis thickness is independent of curve thickness");}
             }
             if(item.owner==graph.id&&item.type==Primitive::Bezier&&item.color==graph.series[0].color){curve=true;check(std::abs(item.width-7)<1e-8,"curve thickness is independently respected");}
@@ -187,6 +187,23 @@ int main(){try{
             for(const auto& restored:{fromNative(toNative(arrows)),fromCdxml(toCdxml(arrows))})check(toNative(restored)==toNative(arrows),"large reaction arrow thickness survives saving and reopening");
 #endif
         }
+        arrows.plots[0].stages=mechanismStageData({
+            {"First","0","50","12","1","5","1","18","-20","1"},
+            {"Second","50","100","12","1","5","1","18","-20","1"}});
+        const auto placed=makeScene(arrows);
+        const auto shafts=arrowItems();
+        std::vector<Primitive> continuous;
+        for(const auto& item:shafts)if(item.type==Primitive::Line)continuous.push_back(item);
+        check(continuous.size()==2&&std::abs(continuous[0].points[0].y-continuous[1].points[0].y)<1e-8&&
+            std::abs((continuous[0].points[1]-continuous[0].points[0]).length()-
+                     (continuous[1].points[1]-continuous[1].points[0]).length())<1e-8,
+            "arrow-under-caption mode draws one continuous equal shaft per reaction on the same row");
+        for(const auto& item:placed.items)if(item.type==Primitive::Text&&item.textRole==12)
+            check(item.points[0].y>continuous.front().points[0].y,"reaction captions can sit below their arrows");
+#ifdef TEST_CDXML
+        for(const auto& restored:{fromNative(toNative(arrows)),fromCdxml(toCdxml(arrows))})
+            check(toNative(restored)==toNative(arrows),"reaction placement and offsets survive saving");
+#endif
         auto old=mechanismStageData({{"Legacy","0","100","14"}});check(old[0].arrowWidth==0&&old[0].arrowHeadSize==0,"older stage rows retain automatic arrow sizing");
         for(auto row:std::vector<std::vector<std::string>>{{"Bad","0","100","14","101","0"},{"Bad","0","100","14","nan","0"},{"Bad","0","100","14","1","41"}}){bool rejected=false;try{mechanismStageData({row});}catch(...){rejected=true;}check(rejected,"invalid reaction arrow dimensions are rejected");}
         std::ofstream("reaction-arrow-style-preview.svg")<<toSvg(makeScene(arrows));
