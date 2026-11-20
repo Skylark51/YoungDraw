@@ -18,8 +18,9 @@
 namespace yd::editor {
 HWND plotManagerWindow=nullptr;
 namespace {
-constexpr int tabFirst=4000,slotControl=4200,sideControl=4201,panelBack=4400,pathControl=4401,verticalBranch=4402,distributeStages=4403;
+constexpr int tabFirst=4000,slotControl=4200,sideControl=4201,panelBack=4400,pathControl=4401,verticalBranch=4402,distributeStages=4403,dataFont=4404;
 constexpr int editStructure=4300,pasteStructure=4301,fileStructure=4302,sizeStructure=4303,removeStructure=4304;
+int tableFontPoints=12;
 struct Card{int action,icon;const wchar_t* label;const wchar_t* detail;int slot=-1;};
 const std::vector<std::vector<Card>> pages={
     {{131,131,L"데이터 표",L"상태·에너지 입력"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상하 분기",L"공통 상태에서 갈라짐"}},
@@ -86,7 +87,46 @@ struct Manager{
             if(!graph()||doc.isLocked(owner))return {};Document before=doc;graph()->series[column-1].name=result->front();if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}return ui::wide(result->front());
         });
         if(!grid)throw std::runtime_error("데이터 표를 열 수 없습니다.");
+        if(tableFontPoints!=12)ui::setEmbeddedTableFontSize(grid,tableFontPoints);
         panel=131;layout();SetFocus(GetDlgItem(grid,10));ui::attachWindowHelp(window);
+    }
+    void editDataFont(){
+        const auto* p=graph();
+        if(!p||!grid||doc.isLocked(owner))return;
+        const EnergyPlot original=*p;
+        auto settings=[&](const std::vector<std::string>& values){
+            auto graph=original;
+            graph.stateFontSize=numeric(values[0],0,72);
+            graph.valueFontSize=numeric(values[1],0,72);
+            for(double size:{graph.stateFontSize,graph.valueFontSize})
+                if(size>0&&size<4)throw std::runtime_error("그래프 글자는 0(자동) 또는 4~72 pt로 입력하세요.");
+            if(graph.valueFontSize!=original.valueFontSize)graph.fixedValueFontSize=graph.valueFontSize>0;
+            const int tableSize=int(numeric(values[2],8,24));
+            return std::pair{std::move(graph),tableSize};
+        };
+        const auto edited=ui::form(window,L"데이터 표 · 글자 크기",{
+            ui::numericField(L"그래프 상태 이름 (pt, 0: 자동)",original.stateFontSize,0,72,1),
+            ui::numericField(L"그래프 에너지 숫자 (pt, 0: 자동)",original.valueFontSize,0,72,1),
+            ui::numericField(L"표 편집 화면 글자 (pt)",tableFontPoints,8,24,1)
+        },[&](const auto& values)->std::wstring{
+            try{
+                draft=settings(values).first;
+                cachedScene.reset();InvalidateRect(window,nullptr,FALSE);return {};
+            }catch(const std::exception& error){return ui::wide(error.what());}
+        });
+        draft.reset();cachedScene.reset();InvalidateRect(window,nullptr,FALSE);
+        SetFocus(GetDlgItem(grid,10));
+        if(!edited)return;
+        auto [updated,tableSize]=settings(*edited);
+        if(tableSize!=tableFontPoints){
+            tableFontPoints=tableSize;
+            ui::setEmbeddedTableFontSize(grid,tableFontPoints);
+        }
+        if(auto* current=graph()){
+            Document before=doc;
+            *current=std::move(updated);
+            if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}
+        }
     }
     int panelPage() const {
         if(panel==plotLegendCommand)return 1;
@@ -331,8 +371,9 @@ struct Manager{
         const int start=panelTop+(page==3?84:46),columns=4,cardWidth=(width-40-(columns-1)*gap)/columns;
         for(auto& category:pages)for(auto& card:category){auto h=GetDlgItem(window,card.action);auto found=std::find_if(pages[size_t(page)].begin(),pages[size_t(page)].end(),[&](const Card& c){return c.action==card.action;});bool show=found!=pages[size_t(page)].end()&&!expanded;int i=show?(card.slot>=0?card.slot:int(found-pages[size_t(page)].begin())):0;place(h,20+(i%columns)*(cardWidth+gap),start+(i/columns)*100,cardWidth,90,show);}
         place(GetDlgItem(window,distributeStages),width-188,panelTop+37,168,26,grid&&panel==139&&expanded&&!subpane);
+        place(GetDlgItem(window,dataFont),width-188,panelTop+37,168,26,grid&&panel==131&&expanded&&!subpane);
         if(grid){
-            const int gridTop=panel==139?64:44;
+            const int gridTop=panel==139||panel==131?64:44;
             place(grid,20,panelTop+gridTop,width-40,height-panelTop-gridTop-56,expanded&&!subpane);
         }
         if(form)place(form,20,panelTop+44,width-40,height-panelTop-100,showForm);
@@ -391,7 +432,11 @@ struct Manager{
             const float left=(box.Width-36)/2;
             appearance::rounded(g,{left,3,36,36},9,keyboardFocus||pressed?palette.hover:palette.raised);
             icon(g,card->icon,{left+4,7,28,28},color);ui::drawLabel(g,card->label,{box.X+4,box.Y+42,box.Width-8,22},13.f,color,true,true);auto current=value(card->action);ui::drawLabel(g,current.empty()?card->detail:current,{box.X+4,box.Y+67,box.Width-8,17},11.f,palette.muted,false,true);}
-        else if(item.CtlID==distributeStages){
+        else if(item.CtlID==dataFont){
+            appearance::rounded(g,{0,0,box.Height,box.Height},7,keyboardFocus||pressed?palette.hover:palette.raised);
+            icon(g,241,{4,4,box.Height-8,box.Height-8},color);
+            ui::drawLabel(g,L"글자 크기",{box.Height+7,0,box.Width-box.Height-7,box.Height},13.f,color,true,false);
+        }else if(item.CtlID==distributeStages){
             appearance::rounded(g,{0,0,box.Height,box.Height},7,keyboardFocus||pressed?palette.hover:palette.raised);
             Pen pen(color,1.3f);
             for(float x:{6.f,12.f,18.f}){g.DrawLine(&pen,x,9.f,x,17.f);}
@@ -427,6 +472,7 @@ struct Manager{
     void act(int action){
         if(action==distributeStages){if(grid&&panel==139)ui::distributeEmbeddedStages(grid);return;}
         if(!flushGrid())return;
+        if(action==dataFont&&panel==131){editDataFont();return;}
         if(action==panelBack){clearPanel();layout();SetFocus(GetDlgItem(window,tabFirst+page));return;}
         if(action==131){openData();return;}
         if(form||grid){clearPanel();layout();}
@@ -453,7 +499,7 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_NCCREATE){self=static_cast<Manager*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);self->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}
     if(!self)return DefWindowProcW(h,message,wp,lp);
     switch(message){
-    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"데이터·경로",L"축·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i=0;i<5;i++)self->button(tabFirst+i,tabs[i]);self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");self->button(distributeStages,L"자동 균등 배치");
+    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"데이터·경로",L"축·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i=0;i<5;i++)self->button(tabFirst+i,tabs[i]);self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");self->button(distributeStages,L"자동 균등 배치");self->button(dataFont,L"글자 크기");
         auto path=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
             0,0,170,180,h,reinterpret_cast<HMENU>(INT_PTR(pathControl)),nullptr,nullptr);
         SendMessageW(path,WM_SETFONT,(WPARAM)self->font,TRUE);ui::themeCombo(path);

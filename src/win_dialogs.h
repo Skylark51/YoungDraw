@@ -35,6 +35,7 @@ using TableColumnEdit = std::function<std::optional<std::wstring>(HWND,size_t co
 std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview={},bool scripts=false,const std::wstring& hint=L"",bool stages=false,int scriptColumn=-1,const TableCellError& cellError={},const TableColumnEdit& columnEdit={});
 HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,const TableCellError& cellError={},const TableColumnEdit& columnEdit={});
 bool commitEmbeddedTable(HWND grid);
+void setEmbeddedTableFontSize(HWND grid,int points);
 void distributeEmbeddedStages(HWND grid);
 HWND embeddedStageTable(HWND parent,const Table& rows,const TablePreview& preview);
 std::optional<COLORREF> chooseColor(HWND parent,COLORREF initial);

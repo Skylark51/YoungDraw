@@ -20,8 +20,8 @@ struct Grid {
     TableColumnEdit columnEdit;
     std::vector<std::wstring> originalColumns;
     std::set<std::pair<int,int>> invalidCells;
-    HWND win=nullptr,list=nullptr,edit=nullptr,error=nullptr,apply=nullptr; HFONT font=nullptr,italicFont=nullptr;
-    int row=0,col=0,anchorRow=0,anchorCol=0,scriptColumn=-1;
+    HWND win=nullptr,list=nullptr,edit=nullptr,error=nullptr,apply=nullptr; HFONT font=nullptr,italicFont=nullptr,interfaceFont=nullptr;
+    int row=0,col=0,anchorRow=0,anchorCol=0,scriptColumn=-1,linePixels=20;
     HIMAGELIST rowHeight=nullptr;
     bool embedded=false,reactionStages=false;
     bool done=false,ok=false,loading=false,composing=false,scripts=false,stages=false;
@@ -59,7 +59,7 @@ bool validate(Grid& g){
 }
 void resizeRows(Grid& g){
     size_t lines=1;for(auto& row:g.rows)for(auto& cell:row)lines=std::max(lines,size_t(1+std::count(cell.begin(),cell.end(),'\n')));
-    int height=int(lines)*20+6;
+    int height=int(lines)*g.linePixels+6;
     if(g.rowHeight){int w=0,h=0;ImageList_GetIconSize(g.rowHeight,&w,&h);if(h==height)return;}
     auto images=ImageList_Create(1,height,ILC_COLOR32,1,1);
     if(images){ListView_SetImageList(g.list,images,LVSIL_SMALL);if(g.rowHeight)ImageList_Destroy(g.rowHeight);g.rowHeight=images;}
@@ -67,7 +67,7 @@ void resizeRows(Grid& g){
 void sizeEditor(Grid& g){
     if(!g.edit)return;auto text=value(g.edit);RECT cell{},client{};
     ListView_GetSubItemRect(g.list,g.row,g.col+1,LVIR_BOUNDS,&cell);GetClientRect(g.list,&client);
-    int height=std::max(int(cell.bottom-cell.top)-2,26+20*int(std::count(text.begin(),text.end(),L'\n')));
+    int height=std::max(int(cell.bottom-cell.top)-2,g.linePixels+6+g.linePixels*int(std::count(text.begin(),text.end(),L'\n')));
     height=std::min(height,std::max(26,int(client.bottom-cell.top-2)));
     SetWindowPos(g.edit,HWND_TOP,cell.left+1,cell.top+1,cell.right-cell.left-2,height,SWP_NOACTIVATE);
 }
@@ -388,7 +388,7 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         if(!g->reactionStages)for(int i=25;i<=26;i++)ShowWindow(GetDlgItem(hwnd,i),SW_HIDE);
         sizeEditor(*g);return 0;
     }
-    if(msg==WM_NCDESTROY&&g->embedded){SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);DeleteObject(g->font);DeleteObject(g->italicFont);delete g;return DefWindowProcW(hwnd,msg,wp,lp);}
+    if(msg==WM_NCDESTROY&&g->embedded){SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);DeleteObject(g->font);DeleteObject(g->italicFont);if(g->interfaceFont)DeleteObject(g->interfaceFont);delete g;return DefWindowProcW(hwnd,msg,wp,lp);}
     if(msg==WM_ERASEBKGND){RECT r;GetClientRect(hwnd,&r);FillRect((HDC)wp,&r,g->colors.panel);return 1;}
     if(msg==WM_CTLCOLORSTATIC)return g->colors.control(msg,(HDC)wp);
     if(msg==WM_DRAWITEM){const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);g->colors.draw(item,item.CtlID==22);return TRUE;}
@@ -482,6 +482,31 @@ void distributeEmbeddedStages(HWND grid){
     refresh(*g);
     validate(*g);
     selectCell(*g,g->row,g->col);
+}
+void setEmbeddedTableFontSize(HWND grid,int points){
+    auto* g=reinterpret_cast<Grid*>(GetWindowLongPtrW(grid,GWLP_USERDATA));
+    if(!g||!g->embedded)return;
+    LOGFONTW style{};
+    if(!GetObjectW(g->font,sizeof(style),&style))return;
+    const HDC dc=GetDC(grid);
+    const int dpi=dc?GetDeviceCaps(dc,LOGPIXELSY):96;
+    if(dc)ReleaseDC(grid,dc);
+    style.lfHeight=-MulDiv(std::clamp(points,8,24),dpi,72);
+    style.lfItalic=FALSE;
+    HFONT normal=CreateFontIndirectW(&style);
+    style.lfItalic=TRUE;
+    HFONT italic=CreateFontIndirectW(&style);
+    if(!normal||!italic){if(normal)DeleteObject(normal);if(italic)DeleteObject(italic);return;}
+    SendMessageW(g->list,WM_SETFONT,WPARAM(normal),TRUE);
+    SendMessageW(ListView_GetHeader(g->list),WM_SETFONT,WPARAM(normal),TRUE);
+    if(g->edit)SendMessageW(g->edit,WM_SETFONT,WPARAM(normal),TRUE);
+    // Keep the original font alive for the grid help and command buttons.
+    if(!g->interfaceFont)g->interfaceFont=g->font;
+    else DeleteObject(g->font);
+    DeleteObject(g->italicFont);
+    g->font=normal;g->italicFont=italic;
+    g->linePixels=-style.lfHeight+4;
+    resizeRows(*g);sizeEditor(*g);InvalidateRect(g->list,nullptr,TRUE);
 }
 bool commitEmbeddedTable(HWND grid){auto* g=reinterpret_cast<Grid*>(GetWindowLongPtrW(grid,GWLP_USERDATA));if(!g)return true;commit(*g);return validate(*g);}
 std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,bool scripts,const std::wstring& hint,bool stages,int scriptColumn,const TableCellError& cellError,const TableColumnEdit& columnEdit){

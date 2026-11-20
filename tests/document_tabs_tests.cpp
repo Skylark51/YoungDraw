@@ -308,7 +308,10 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }
     if(std::wstring(name)!=L"YoungDrawForm")return;
     KillTimer(parent,timer);formDriven=true;
-    if(formAction>=20&&formAction<=24){
+    if(formAction==41||formAction==42){
+        SetDlgItemTextW(dialog,100,L"17");SetDlgItemTextW(dialog,101,L"21");SetDlgItemTextW(dialog,102,L"16");
+        previewObserved=toNative(doc)==formBefore;
+    }else if(formAction>=20&&formAction<=24){
         if(formAction<=22){SendDlgItemMessageW(dialog,101,CB_SETCURSEL,formAction==22?0:1,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,101));}
         else if(formAction==23){SetDlgItemTextW(dialog,101,L"kJ/mol");SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_EDITCHANGE),(LPARAM)GetDlgItem(dialog,101));}
         previewObserved=toNative(doc)!=formBefore;
@@ -378,7 +381,7 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else{
         SetDlgItemTextW(dialog,101,L"30");previewObserved=toNative(doc)!=formBefore;
     }
-    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28||formAction==33||formAction==34||formAction==36)?IDCANCEL:IDOK,0);
+    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28||formAction==33||formAction==34||formAction==36||formAction==42)?IDCANCEL:IDOK,0);
 }
 static void graphCaptionChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection.clear();tool=Select;guides=true;fit();
@@ -531,6 +534,26 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(manager,WM_COMMAND,104,0);
     SendMessageW(manager,WM_COMMAND,104,0);
     SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"inline data change undoes in one action");
+    SendMessageW(manager,WM_COMMAND,131,0);
+    inlineGrid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
+    list=GetDlgItem(inlineGrid,10);
+    check(inlineGrid&&list,"data table can be reopened after graph undo");
+    const auto tableFont=[&](){
+        LOGFONTW font{};
+        auto handle=reinterpret_cast<HFONT>(SendMessageW(list,WM_GETFONT,0,0));
+        return GetObjectW(handle,sizeof(font),&font)?std::abs(font.lfHeight):0L;
+    };
+    const auto initialTableFont=tableFont();
+    formBefore=before;formAction=42;formDriven=previewObserved=false;
+    SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,4404,0);KillTimer(hwnd,901);
+    check(formDriven&&previewObserved&&toNative(doc)==before&&tableFont()==initialTableFont,
+        "cancelling data table font edits keeps document and table unchanged");
+    formAction=41;formDriven=previewObserved=false;
+    SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,4404,0);KillTimer(hwnd,901);
+    check(formDriven&&previewObserved&&tableFont()>initialTableFont&&
+          doc.plots.front().stateFontSize==17&&doc.plots.front().valueFontSize==21,
+          "data table sets its screen font and the two graph font sizes independently");
+    check(history.undo(doc)&&toNative(doc)==before,"graph font settings apply with one undo step");
     for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
     check(GetDlgItem(manager,131)==originalButton,"tab changes reuse controls instead of recreating them");
     SendMessageW(manager,WM_COMMAND,4000,0);
