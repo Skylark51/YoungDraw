@@ -6,9 +6,9 @@
 #include "mechanism_data.h"
 #include "win_editor_state.h"
 #include <commctrl.h>
-#include <commdlg.h>
 #include <windowsx.h>
 #include <uxtheme.h>
+#include <memory>
 namespace ui {
 namespace {
 struct GraphPicker {
@@ -261,6 +261,9 @@ struct Form {
     std::vector<Field> fields;std::vector<HWND> edits;
     std::vector<std::string> result;Preview preview;
     bool done=false,ok=false;HFONT font=nullptr;HWND error=nullptr,apply=nullptr;
+    bool ownsStorage=false;
+    Preview embeddedApply;
+    std::function<void()> dismiss;
 };
 static std::vector<std::string> read(Form& f){
     std::vector<std::string> values;
@@ -275,7 +278,7 @@ static std::vector<std::string> read(Form& f){
 static bool preview(Form& f){
     if(!f.preview)return true;std::wstring error;
     try{error=f.preview(read(f));}catch(const std::exception& e){error=wide(e.what());}
-    SetWindowTextW(f.error,error.empty()?L"미리보기가 갱신되었습니다. 취소하면 원래 그림으로 복원합니다.":error.c_str());
+    SetWindowTextW(f.error,error.empty()?(f.dismiss?L"":L"미리보기가 갱신되었습니다. 취소하면 원래 그림으로 복원합니다."):error.c_str());
     EnableWindow(f.apply,error.empty());return error.empty();
 }
 static void drawFormTabs(HWND hwnd,HDC dc){
@@ -372,6 +375,91 @@ static LRESULT CALLBACK formEditEdgeProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,
     return result;
 }
 
+static void layoutEmbeddedForm(HWND hwnd,Form& f){
+    RECT bounds{};
+    GetClientRect(hwnd,&bounds);
+    constexpr int margin=16,gap=26,columns=2;
+    const int width=std::max(600L,bounds.right);
+    const int columnWidth=(width-2*margin-gap)/columns;
+    constexpr int labelWidth=158,buttonWidth=37,buttonGap=4,rowStep=37,top=28;
+    for(size_t i=0;i<f.rows.size();++i){
+        const auto& row=f.rows[i];
+        const auto& field=f.fields[i];
+        const int x=margin+int(i%columns)*(columnWidth+gap);
+        const int y=top+int(i/columns)*rowStep;
+        const int reserve=int(row.size()-2)*(buttonWidth+buttonGap);
+        const int inputWidth=columnWidth-labelWidth-reserve;
+        MoveWindow(row[0],x,y+4,labelWidth-5,25,TRUE);
+        MoveWindow(row[1],x+labelWidth,y,inputWidth,field.choices.empty()?29:200,TRUE);
+        for(size_t j=2;j<row.size();++j){
+            const int buttonX=x+labelWidth+inputWidth+buttonGap+int(j-2)*(buttonWidth+buttonGap);
+            MoveWindow(row[j],buttonX,y,buttonWidth,29,TRUE);
+        }
+    }
+    const int footer=top+int((f.rows.size()+columns-1)/columns)*rowStep+4;
+    MoveWindow(f.error,margin,footer+3,width-260,38,TRUE);
+    MoveWindow(f.apply,width-margin-210,footer,100,32,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDCANCEL),width-margin-100,footer,100,32,TRUE);
+}
+
+static void drawEmbeddedCombo(HWND hwnd,HDC dc){
+    const auto& palette=appearance::palette();
+    auto brush=static_cast<HBRUSH>(GetStockObject(DC_BRUSH));
+    const int saved=SaveDC(dc);
+    RECT box{};
+    GetClientRect(hwnd,&box);
+    const bool editable=(GetWindowLongPtrW(hwnd,GWL_STYLE)&3)==CBS_DROPDOWN;
+    COMBOBOXINFO info{sizeof(info)};
+    GetComboBoxInfo(hwnd,&info);
+    if(editable)ExcludeClipRect(dc,info.rcItem.left,info.rcItem.top,info.rcItem.right,info.rcItem.bottom);
+    SetDCBrushColor(dc,colorRef(palette.raised));
+    FillRect(dc,&box,brush);
+    const auto focus=GetFocus();
+    const bool focused=focus==hwnd||(focus&&IsChild(hwnd,focus));
+    SetDCBrushColor(dc,colorRef(focused?palette.accent:palette.edge));
+    FrameRect(dc,&box,brush);
+
+    RECT button=info.rcButton;
+    if(button.left>=button.right)button={box.right-23,1,box.right-1,box.bottom-1};
+    SetDCBrushColor(dc,colorRef(SendMessageW(hwnd,CB_GETDROPPEDSTATE,0,0)?palette.hover:palette.panel));
+    FillRect(dc,&button,brush);
+    const LONG x=(button.left+button.right)/2,y=(button.top+button.bottom)/2;
+    const POINT arrow[]={{x-4,y-1},{x+4,y-1},{x,y+3}};
+    SetDCBrushColor(dc,colorRef(palette.text));
+    SelectObject(dc,brush);
+    SelectObject(dc,GetStockObject(NULL_PEN));
+    Polygon(dc,arrow,int(std::size(arrow)));
+
+    if(!editable){
+        wchar_t value[256]{};
+        GetWindowTextW(hwnd,value,int(std::size(value)));
+        if(auto font=SendMessageW(hwnd,WM_GETFONT,0,0))SelectObject(dc,reinterpret_cast<HFONT>(font));
+        SetBkMode(dc,TRANSPARENT);
+        SetTextColor(dc,colorRef(palette.text));
+        RECT label{box.left+6,box.top,button.left-4,box.bottom};
+        DrawTextW(dc,value,-1,&label,DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);
+    }
+    RestoreDC(dc,saved);
+}
+
+static LRESULT CALLBACK embeddedComboProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR){
+    if(msg==WM_ERASEBKGND)return 1;
+    if(msg==WM_PAINT){
+        PAINTSTRUCT ps{};
+        drawEmbeddedCombo(hwnd,BeginPaint(hwnd,&ps));
+        EndPaint(hwnd,&ps);
+        return 0;
+    }
+    if(msg==WM_PRINTCLIENT){
+        drawEmbeddedCombo(hwnd,reinterpret_cast<HDC>(wp));
+        return 0;
+    }
+    const auto result=DefSubclassProc(hwnd,msg,wp,lp);
+    if(msg==CB_SETCURSEL||msg==WM_SETFOCUS||msg==WM_KILLFOCUS||msg==WM_KEYDOWN||
+       msg==WM_LBUTTONDOWN||msg==WM_LBUTTONUP||msg==WM_COMMAND)InvalidateRect(hwnd,nullptr,FALSE);
+    return result;
+}
+
 static void layoutFormTabs(Form& f){
     const int active=TabCtrl_GetCurSel(f.tab);
     if(active<0||size_t(active)>=f.tabs.size())return;
@@ -392,6 +480,13 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_CREATE){ui::enableButtonHelp();
         f=static_cast<Form*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(f));
         f->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());int y=16;
+        if(f->dismiss){
+            wchar_t title[96]{};
+            GetWindowTextW(hwnd,title,int(std::size(title)));
+            auto label=CreateWindowW(L"STATIC",title,WS_CHILD|WS_VISIBLE,16,0,630,24,hwnd,nullptr,nullptr,nullptr);
+            SendMessageW(label,WM_SETFONT,(WPARAM)f->font,TRUE);
+            y=28;
+        }
         if(!f->tabs.empty()){
             f->tab=CreateWindowW(WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|TCS_OWNERDRAWFIXED,16,10,644,35,hwnd,nullptr,nullptr,nullptr);
             SendMessageW(f->tab,WM_SETFONT,WPARAM(f->font),TRUE);
@@ -408,28 +503,46 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             int height=inputHeight(field);HWND edit;
             if(!field.choices.empty()){
                 edit=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|(field.editableChoices?CBS_DROPDOWN:CBS_DROPDOWNLIST)|WS_VSCROLL|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS,230,y,field.scripts?330:430,200,hwnd,(HMENU)(INT_PTR)(100+i),nullptr,nullptr);
+                if(f->dismiss)SetWindowSubclass(edit,embeddedComboProc,3,0);
                 for(auto& c:field.choices)SendMessageW(edit,CB_ADDSTRING,0,(LPARAM)c.c_str());
                 if(field.editableChoices)SetWindowTextW(edit,wide(field.value).c_str());else SendMessageW(edit,CB_SETCURSEL,std::stoi(field.value),0);
-            }else edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",wide(field.value).c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|(field.multiline?ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_VSCROLL:ES_AUTOHSCROLL),230,y,field.scripts?330:field.color?385:430,height,hwnd,(HMENU)(INT_PTR)(100+i),nullptr,nullptr);
-            if(f->tab&&field.choices.empty()){
+            }else edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",wide(field.value).c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|(field.multiline?ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_VSCROLL:ES_AUTOHSCROLL),230,y,field.scripts?330:field.color?385:field.stepButtons?330:430,height,hwnd,(HMENU)(INT_PTR)(100+i),nullptr,nullptr);
+            if((f->tab||f->dismiss)&&field.choices.empty()){
                 SetWindowSubclass(edit,formEditEdgeProc,2,0);
                 SendMessageW(edit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(6,6));
             }
             SendMessageW(edit,WM_SETFONT,(WPARAM)f->font,TRUE);
+            if(f->dismiss)appearance::nativeControl(edit);
             SendMessageW(edit,EM_SETLIMITTEXT,100000,0);
             f->edits.push_back(edit);f->rows.push_back({label,edit});
-            if(field.color){HWND b=CreateWindowW(L"BUTTON",L"...",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,621,y,39,29,hwnd,(HMENU)(INT_PTR)(500+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);f->rows.back().push_back(b);}
+            if(field.color){HWND b=CreateWindowW(L"BUTTON",L"…",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,621,y,39,29,hwnd,(HMENU)(INT_PTR)(500+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);f->rows.back().push_back(b);}
             if(field.choices.empty()||field.editableChoices)SetWindowSubclass(editSurface(edit),scriptEditProc,1,reinterpret_cast<DWORD_PTR>(&field));
             if(field.scripts)for(int k=0;k<2;k++){HWND b=CreateWindowW(L"BUTTON",k?L"x₂":L"x²",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,565+k*48,y,44,29,hwnd,(HMENU)(INT_PTR)((k?800:700)+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);f->rows.back().push_back(b);}
-            if(f->tabs.empty())y+=rowHeight(field);
+            if(field.stepButtons&&field.stepValue)for(int k=0;k<2;k++){
+                HWND b=CreateWindowW(L"BUTTON",k?L"+":L"−",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
+                    565+k*48,y,44,29,hwnd,(HMENU)(INT_PTR)((k?1000:900)+i),nullptr,nullptr);
+                SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);
+                f->rows.back().push_back(b);
+            }
+            if(f->tabs.empty())y+=f->dismiss?34:rowHeight(field);
         }
         if(f->tab){layoutFormTabs(*f);y=f->contentBottom;}
         if(f->illustration){f->picture={16,y,660,y+124};y+=132;}
-        if(f->preview){f->error=CreateWindowW(L"STATIC",L"올바른 입력은 그림에 즉시 반영됩니다.",WS_CHILD|WS_VISIBLE,16,y,644,40,hwnd,nullptr,nullptr,nullptr);SendMessageW(f->error,WM_SETFONT,(WPARAM)f->font,TRUE);y+=43;}
+        if(f->dismiss){
+            f->error=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,16,y+2,420,40,hwnd,nullptr,nullptr,nullptr);
+            SendMessageW(f->error,WM_SETFONT,(WPARAM)f->font,TRUE);
+        }else if(f->preview){f->error=CreateWindowW(L"STATIC",L"올바른 입력은 그림에 즉시 반영됩니다.",WS_CHILD|WS_VISIBLE,16,y,644,40,hwnd,nullptr,nullptr,nullptr);SendMessageW(f->error,WM_SETFONT,(WPARAM)f->font,TRUE);y+=43;}
         for(int i=0;i<2;i++){HWND b=CreateWindowW(L"BUTTON",i?L"취소":L"적용",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,450+i*110,y+4,100,32,hwnd,(HMENU)(INT_PTR)(i?IDCANCEL:IDOK),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);if(!i)f->apply=b;}
         return 0;
     }
     if(!f)return DefWindowProcW(hwnd,msg,wp,lp);
+    if(msg==WM_NCDESTROY&&f->ownsStorage){
+        SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);
+        DeleteObject(f->font);
+        delete f;
+        return DefWindowProcW(hwnd,msg,wp,lp);
+    }
+    if(msg==WM_SIZE&&f->dismiss&&f->apply){layoutEmbeddedForm(hwnd,*f);return 0;}
     if(msg==WM_MOUSEWHEEL){
         const POINT cursor{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};
         for(size_t i=0;i<f->edits.size();++i){
@@ -457,11 +570,32 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_MEASUREITEM){reinterpret_cast<MEASUREITEMSTRUCT*>(lp)->itemHeight=25;return TRUE;}
     if(msg==WM_DRAWITEM){const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);f->colors.draw(item,item.CtlID==IDOK);return TRUE;}
     if(msg==WM_COMMAND){int id=LOWORD(wp);
+        if((id>=900&&id<int(900+f->fields.size()))||(id>=1000&&id<int(1000+f->fields.size()))){
+            const bool increase=id>=1000;
+            const size_t index=size_t(id-(increase?1000:900));
+            if(f->fields[index].stepValue)stepEdit(f->edits[index],f->fields[index],increase?1:-1);
+            return 0;
+        }
         if((id>=700&&id<int(700+f->fields.size()))||(id>=800&&id<int(800+f->fields.size()))){size_t i=size_t(id-(id>=800?800:700));toggleScript(editSurface(f->edits[i]),id<800);return 0;}
         if(id>=500&&id<int(500+f->fields.size())){
-            size_t i=size_t(id-500);static COLORREF custom[16]={};CHOOSECOLORW c{};c.lStructSize=sizeof(c);c.hwndOwner=hwnd;c.lpCustColors=custom;c.Flags=CC_FULLOPEN|CC_RGBINIT;
-            try{auto value=read(*f)[i];unsigned rgb=std::stoul(value.substr(1),nullptr,16);c.rgbResult=RGB((rgb>>16)&255,(rgb>>8)&255,rgb&255);}catch(...){}
-            if(ChooseColorW(&c)){char value[8];sprintf_s(value,"#%02x%02x%02x",GetRValue(c.rgbResult),GetGValue(c.rgbResult),GetBValue(c.rgbResult));SetWindowTextW(f->edits[i],wide(value).c_str());}return 0;
+            const size_t i=size_t(id-500);
+            COLORREF initial=RGB(0,0,0);
+            try{const auto value=read(*f)[i];const unsigned rgb=std::stoul(value.substr(1),nullptr,16);initial=RGB((rgb>>16)&255,(rgb>>8)&255,rgb&255);}catch(const std::exception&){}
+            if(auto color=chooseColor(GetAncestor(hwnd,GA_ROOT),initial);color&&IsWindow(hwnd)){
+                char value[8];sprintf_s(value,"#%02x%02x%02x",GetRValue(*color),GetGValue(*color),GetBValue(*color));
+                SetWindowTextW(f->edits[i],wide(value).c_str());
+            }
+            return 0;
+        }
+        if(f->dismiss&&(id==IDOK||id==IDCANCEL)){
+            if(id==IDOK){
+                if(!preview(*f))return 0;
+                const auto error=f->embeddedApply(read(*f));
+                if(!error.empty()){SetWindowTextW(f->error,error.c_str());return 0;}
+            }
+            const auto dismiss=f->dismiss;
+            dismiss();
+            return 0;
         }
         if(id==IDOK||id==IDCANCEL){if(id==IDOK){if(!preview(*f))return 0;f->result=read(*f);f->ok=true;}f->done=true;PostMessageW(hwnd,WM_NULL,0,0);return 0;}
         if(f->apply&&f->edits.size()==f->fields.size()&&(HIWORD(wp)==EN_CHANGE||HIWORD(wp)==CBN_SELCHANGE||HIWORD(wp)==CBN_EDITCHANGE)){
@@ -471,6 +605,18 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     }
     if(msg==WM_CLOSE){f->done=true;PostMessageW(hwnd,WM_NULL,0,0);return 0;}return DefWindowProcW(hwnd,msg,wp,lp);
 }
+HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fields,const Preview& update,
+    const Preview& apply,const std::function<void()>& dismiss){
+    WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawEmbeddedForm";
+    wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
+    auto f=std::make_unique<Form>();
+    f->fields=fields;f->preview=update;f->embeddedApply=apply;f->dismiss=dismiss;
+    HWND hwnd=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,title,WS_CHILD|WS_CLIPCHILDREN,
+        0,0,680,280,parent,nullptr,wc.hInstance,f.get());
+    if(hwnd){f->ownsStorage=true;layoutEmbeddedForm(hwnd,*f);f.release();ui::attachWindowHelp(hwnd);}
+    return hwnd;
+}
+
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& callback,const FormTabs& tabs,
     const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration){
     static bool registered=false;if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawForm";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);registered=true;}

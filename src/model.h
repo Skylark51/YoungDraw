@@ -115,6 +115,9 @@ struct EnergyPlot {
     std::string fontFamily="Arial";int fontFace=-1; // -1 follows the document/preset; 0 regular, 1 bold, 2 italic, 3 bold italic.
     double waveWidth=0,waveGap=-1; // Stroke in pt (0 auto); extra break clearance in pt (-1 auto).
     double legendFontSize=0; // 0 follows automatic tick sizing; explicit sizes are preserved.
+    int legendVisibility=0; // Auto, show, hide.
+    std::string legendFontFamily; // Empty follows the graph font family.
+    int legendFace=-1; // -1 follows the graph font style.
     double stateFontSize=0,xAxisWidth=0,curveWidth=0,structureInkScale=1;
     bool fixedValueFontSize=false; // Sidebar sizes stay fixed; legacy documents retain automatic fitting.
     double yTitleGap=0; // Clearance from the Y title to ticks/axis; 0 chooses a readable automatic gap.

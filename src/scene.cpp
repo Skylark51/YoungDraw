@@ -495,7 +495,11 @@ Scene makeScene(const Document& d,const Measure& measure){
         }
         size_t firstPlotItem=s.items.size();
         int plotFace=plot.fontFace>=0?plot.fontFace:plot.thinLines?(d.style.labelFace&~1):d.style.labelFace;
-        auto graphFont=[&](const std::string& value){if(plot.fontFamily=="Arial")for(unsigned char c:value)if(c>=0xe3)return std::string("Malgun Gothic");return plot.fontFamily;};
+        auto graphFont=[&](const std::string& value,bool legend=false){
+            const auto& family=legend&&!plot.legendFontFamily.empty()?plot.legendFontFamily:plot.fontFamily;
+            if(family=="Arial")for(unsigned char c:value)if(c>=0xe3)return std::string("Malgun Gothic");
+            return family;
+        };
         auto faceFor=[&](const std::string& value){
             int face=plotFace;
             for(size_t i=0;i<value.size();i++)if(value[i]=='S'&&(i==0||value[i-1]==' '||value[i-1]=='('||value[i-1]=='\n')){
@@ -602,8 +606,8 @@ Scene makeScene(const Document& d,const Measure& measure){
         auto yAt=[&](double value){return y0-h*(displayEnergy(displayBands,value)-displayLow)/(displayHigh-displayLow);};
         energyFont=std::min(energyFont,std::max(4.,(plot.energyAtTop?w*.95:h*.95)/std::max(1.,scriptWidth(plot.energyAtTop?(plot.energySymbol.empty()?"E":plot.energySymbol)+" ("+displayUnit+")":yCaption,1))));
         auto plotText=[&](const std::string& text,Vec at,double size,const std::string& color="#000000",bool centered=false,int role=0,int index=-1){
-            Primitive item;item.type=Primitive::Text;item.owner=owner;item.textRole=role;item.textIndex=index;item.text=text;item.fontSize=size;item.face=faceFor(text);item.color=color;
-            item.font=graphFont(text);
+            Primitive item;item.type=Primitive::Text;item.owner=owner;item.textRole=role;item.textIndex=index;item.text=text;item.fontSize=size;item.face=role==7&&plot.legendFace>=0?plot.legendFace:faceFor(text);item.color=color;
+            item.font=graphFont(text,role==7);
             emitText(s.items,item,at,centered,measure);
         };
         auto overlaps=[](Rect a,Rect b,double pad=4.){return a.x<b.x+b.w+pad&&a.x+a.w+pad>b.x&&a.y<b.y+b.h+pad&&a.y+a.h+pad>b.y;};
@@ -695,19 +699,23 @@ Scene makeScene(const Document& d,const Measure& measure){
         std::vector<EnergySeries> paths=plot.series;if(paths.empty()){EnergySeries path;for(auto& st:plot.states)path.values.push_back(st.energy);paths.push_back(path);}
         if(plot.curveWidth>0)for(auto& path:paths)path.width=plot.curveWidth/inkFactor;
         titleFont=std::min(titleFont,std::max(4.,w/std::max(1.,widthOf(plot.title,1))));
+        auto legendWidth=[&](const std::string& name,double size){
+            return textWidth(measure,name,size,graphFont(name,true),plot.legendFace<0?faceFor(name):plot.legendFace);
+        };
         std::vector<size_t> legendPaths;
         for(size_t k=0;k<paths.size();k++){
             bool hasData=false;for(size_t i=0;i<plot.states.size();i++)if(paths[k].hasValue(i)){hasData=true;break;}
-            if(hasData){legendPaths.push_back(k);if(plot.legendFontSize==0)legendFont=std::min(legendFont,std::max(4.,(w*.92-29)/std::max(1.,widthOf(paths[k].name,1))));}
+            if(hasData){legendPaths.push_back(k);if(plot.legendFontSize==0)legendFont=std::min(legendFont,std::max(4.,(w*.92-29)/std::max(1.,legendWidth(paths[k].name,1))));}
         }
         // Compact, centered legend rows directly above the plotting area.
         // The default title duplicates the x caption; retain its saved value without printing twice.
         bool showTitle=!plot.title.empty()&&plot.title!=plot.xLabel;
-        bool showLegend=legendPaths.size()>1||(!legendPaths.empty()&&paths[legendPaths[0]].name!="Path 1");
+        const bool autoLegend=legendPaths.size()>1||(!legendPaths.empty()&&paths[legendPaths[0]].name!="Path 1");
+        const bool showLegend=!legendPaths.empty()&&(plot.legendVisibility==1||(plot.legendVisibility==0&&autoLegend));
         struct LegendRow{std::vector<size_t> paths;double width=0;};std::vector<LegendRow> rows;
         double itemGap=std::max(14.,legendFont),sampleWidth=22,swatchGap=7,rowHeight=legendFont*1.3,rowGap=5;
         if(showLegend)for(size_t k:legendPaths){
-            double itemWidth=sampleWidth+swatchGap+widthOf(paths[k].name,legendFont);
+            double itemWidth=sampleWidth+swatchGap+legendWidth(paths[k].name,legendFont);
             if(rows.empty()||(!rows.back().paths.empty()&&rows.back().width+itemGap+itemWidth>w*.92))rows.push_back({});
             auto& row=rows.back();if(!row.paths.empty())row.width+=itemGap;row.width+=itemWidth;row.paths.push_back(k);
         }
@@ -727,7 +735,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             for(size_t k:rows[r].paths){auto& path=paths[k];double cy=y+rowHeight/2;
                 Primitive sample;sample.owner=owner;sample.textRole=7;sample.textIndex=int(k);sample.width=path.width;sample.color=path.color;sample.dash=1;sample.points={{cursor,cy},{cursor+sampleWidth,cy}};s.items.push_back(sample);
                 plotText(path.name,{cursor+sampleWidth+swatchGap,y},legendFont,path.color,false,7,int(k));
-                cursor+=sampleWidth+swatchGap+widthOf(path.name,legendFont)+itemGap;
+                cursor+=sampleWidth+swatchGap+legendWidth(path.name,legendFont)+itemGap;
             }
         }
         auto pointAt=[&](size_t i,double value){return Vec{stateX(i),yAt(value)};};

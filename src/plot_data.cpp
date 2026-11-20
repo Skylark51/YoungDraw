@@ -139,6 +139,11 @@ double energyFromDisplay(const std::vector<EnergyDisplayBand>& bands,double valu
 void validateEnergyAnnotations(const EnergyPlot& p){
     if(p.fontFamily.empty()||p.fontFamily.size()>128||p.fontFamily.find_first_of("\r\n\t")!=std::string::npos||p.fontFamily.find_first_not_of(" ")==std::string::npos||p.fontFace< -1||p.fontFace>3)throw std::runtime_error("Invalid graph font");
     if(!std::isfinite(p.waveWidth)||p.waveWidth<0||p.waveWidth>20||(p.waveWidth>0&&p.waveWidth<.1)||!std::isfinite(p.waveGap)||p.waveGap>100||(p.waveGap<0&&p.waveGap!=-1))throw std::runtime_error("Invalid wave stroke or clearance");
+    const auto& legendFamily=p.legendFontFamily;
+    if(p.legendVisibility<0||p.legendVisibility>2||p.legendFace< -1||p.legendFace>3||
+       legendFamily.size()>128||legendFamily.find_first_of("\r\n\t")!=std::string::npos||
+       (!legendFamily.empty()&&legendFamily.find_first_not_of(" ")==std::string::npos))
+        throw std::runtime_error("Invalid legend style");
     if(!std::isfinite(p.legendFontSize)||(p.legendFontSize!=0&&(p.legendFontSize<4||p.legendFontSize>72)))throw std::runtime_error("Invalid legend font size");
     if(!std::isfinite(p.yTitleGap)||p.yTitleGap<0||p.yTitleGap>300)throw std::runtime_error("Invalid Y-axis title gap");
     if(!std::isfinite(p.valueGap)||p.valueGap<0||p.valueGap>200||!std::isfinite(p.yAxisWidth)||p.yAxisWidth<0||p.yAxisWidth>100)throw std::runtime_error("Invalid plot label clearance or axis width");

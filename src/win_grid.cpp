@@ -22,7 +22,7 @@ struct Grid {
     HWND win=nullptr,list=nullptr,edit=nullptr,error=nullptr,apply=nullptr; HFONT font=nullptr;
     int row=0,col=0,anchorRow=0,anchorCol=0,scriptColumn=-1;
     HIMAGELIST rowHeight=nullptr;
-    bool embedded=false;
+    bool embedded=false,reactionStages=false;
     bool done=false,ok=false,loading=false,composing=false,scripts=false,stages=false;
 };
 void finish(Grid& g,bool accepted){
@@ -50,7 +50,7 @@ bool validate(Grid& g){
         if(g.invalidCells.size()>1)error+=L" ("+std::to_wstring(g.invalidCells.size())+L"개 셀)";
         InvalidateRect(g.list,nullptr,FALSE);
     }
-    if(error.empty())try{if(g.preview)error=g.preview(g.stages?populatedRows(g):g.rows);}catch(const std::exception& e){error=wide(e.what());}
+    if(error.empty())try{if(g.preview)error=g.preview(g.stages||g.reactionStages?populatedRows(g):g.rows);}catch(const std::exception& e){error=wide(e.what());}
     if(error.empty()&&!g.hint.empty()){SetWindowTextW(g.error,(g.hint+L"\n드래그+Delete: 범위 지우기 · Ctrl+Z: 되돌리기 · Ctrl+= / Ctrl+Shift+=: 첨자 · Alt+Enter: 줄바꿈").c_str());return true;}
     SetWindowTextW(g.error,error.empty()?L"입력: 바로 타이핑 / F2 / 더블클릭 · Shift+방향키: 범위 선택 · Ctrl+C/V: 복사/붙여넣기\nAlt+Enter: 셀 안 줄바꿈 · Tab: 다음 셀 · Enter: 아래 셀 · Esc: 입력 취소 · Ctrl+D: 행 복제 · 드래그+Delete: 범위 지우기 · Ctrl+Z: 되돌리기 · Ctrl+= / Ctrl+Shift+=: 첨자":error.c_str());
     // Never disable Apply from stale validation: the active editor may fix the error.
@@ -328,10 +328,10 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         SetWindowSubclass(g->list,listProc,1,(DWORD_PTR)g);
         for(size_t c=0;c<=g->columns.size();c++){LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=c?std::max(120,870/int(g->columns.size())):45;auto name=c?g->columns[c-1]:L"행";col.pszText=name.data();ListView_InsertColumn(g->list,int(c),&col);}
         g->error=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,16,480,940,48,hwnd,nullptr,nullptr,nullptr);SendMessageW(g->error,WM_SETFONT,(WPARAM)g->font,TRUE);
-        const wchar_t* labels[]={g->stages?L"단계 추가":L"행 추가",g->stages?L"단계 삭제":L"행 삭제",L"적용",L"취소",g->stages?L"단계 복제":L"행 복제"};const int positions[]={16,356,526,696,186};
+        const wchar_t* labels[]={g->stages||g->reactionStages?L"단계 추가":L"행 추가",g->stages||g->reactionStages?L"단계 삭제":L"행 삭제",L"적용",L"취소",g->stages||g->reactionStages?L"단계 복제":L"행 복제"};const int positions[]={16,356,526,696,186};
         for(int i=0;i<5;i++){HWND b=CreateWindowW(L"BUTTON",labels[i],WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,positions[i],540,155,34,hwnd,(HMENU)(INT_PTR)(20+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);if(i==2)g->apply=b;}
         if(g->scripts)for(int i=0;i<2;i++){HWND b=CreateWindowW(L"BUTTON",i?L"x²":L"x₂",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,860+i*50,540,46,34,hwnd,(HMENU)(INT_PTR)(25+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}
-        for(int i=0;i<2;i++){HWND b=CreateWindowW(L"BUTTON",i?L"다시 실행 (Ctrl+Shift+Z)":L"되돌리기 (Ctrl+Z)",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,16+i*240,580,230,28,hwnd,(HMENU)(INT_PTR)(27+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}
+        for(int i=0;i<2;i++){HWND b=CreateWindowW(L"BUTTON",g->reactionStages?(i?L"표 다시 실행":L"표 실행 취소"):(i?L"다시 실행 (Ctrl+Shift+Z)":L"되돌리기 (Ctrl+Z)"),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,16+i*240,580,230,28,hwnd,(HMENU)(INT_PTR)(27+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}
         refresh(*g);validate(*g);return 0;
     }
     if(!g)return DefWindowProcW(hwnd,msg,wp,lp);
@@ -339,10 +339,12 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         RECT r{};GetClientRect(hwnd,&r);int w=r.right,h=r.bottom;
         MoveWindow(g->list,0,0,w,std::max(60,h-100),TRUE);
         MoveWindow(g->error,0,std::max(60,h-96),w,44,TRUE);
-        const int ids[]={20,24,21,27,28};int bw=std::max(70,(w-24)/5);
-        for(int i=0;i<5;i++)MoveWindow(GetDlgItem(hwnd,ids[i]),i*(bw+6),h-38,bw,30,TRUE);
+        const int ids[]={20,24,21,27,28,25,26};
+        const int count=g->reactionStages?7:5;
+        const int bw=std::max(70,(w-(count-1)*6)/count);
+        for(int i=0;i<count;i++)MoveWindow(GetDlgItem(hwnd,ids[i]),i*(bw+6),h-38,bw,30,TRUE);
         ShowWindow(GetDlgItem(hwnd,22),SW_HIDE);ShowWindow(GetDlgItem(hwnd,23),SW_HIDE);
-        for(int i=25;i<=26;i++)ShowWindow(GetDlgItem(hwnd,i),SW_HIDE);
+        if(!g->reactionStages)for(int i=25;i<=26;i++)ShowWindow(GetDlgItem(hwnd,i),SW_HIDE);
         sizeEditor(*g);return 0;
     }
     if(msg==WM_NCDESTROY&&g->embedded){SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);DeleteObject(g->font);delete g;return DefWindowProcW(hwnd,msg,wp,lp);}
@@ -394,14 +396,25 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_CLOSE){requestClose(*g);return 0;}return DefWindowProcW(hwnd,msg,wp,lp);
 }
 }
-HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,const TableCellError& cellError,const TableColumnEdit& columnEdit){
+static HWND createEmbeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,const TableCellError& cellError,const TableColumnEdit& columnEdit,bool reactionStages){
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&controls);
     WNDCLASSW wc{};wc.lpfnWndProc=gridProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawEmbeddedGrid";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
     auto* g=new Grid;g->embedded=true;g->columns=columns;g->rows=g->original=rows;g->preview=preview;g->cellError=cellError;g->columnEdit=columnEdit;g->originalColumns=columns;
     g->hint=L"셀 더블클릭 / F2: 입력 · Ctrl+V: 여러 셀 붙여넣기 · 입력 즉시 반영";
+    if(reactionStages){
+        g->reactionStages=true;g->scripts=true;
+        g->hint=L"범위 0~100% · 끝은 시작보다 최소 1% 크게 · 글자·굵기·화살촉의 0은 자동 · 모든 행을 지우면 숨김";
+    }
     if(g->rows.empty())g->rows.push_back(std::vector<std::string>(columns.size()));
     auto h=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"데이터 표",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,0,0,700,250,parent,nullptr,wc.hInstance,g);
     if(!h){delete g;return nullptr;}selectCell(*g,0,0);return h;
+}
+HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,
+    const TableCellError& cellError,const TableColumnEdit& columnEdit){
+    return createEmbeddedTable(parent,columns,rows,preview,cellError,columnEdit,false);
+}
+HWND embeddedStageTable(HWND parent,const Table& rows,const TablePreview& preview){
+    return createEmbeddedTable(parent,{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 (pt)",L"굵기 (pt)",L"화살촉 (pt)"},rows,preview,{},{},true);
 }
 bool commitEmbeddedTable(HWND grid){auto* g=reinterpret_cast<Grid*>(GetWindowLongPtrW(grid,GWLP_USERDATA));if(!g)return true;commit(*g);return validate(*g);}
 std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,bool scripts,const std::wstring& hint,bool stages,int scriptColumn,const TableCellError& cellError,const TableColumnEdit& columnEdit){

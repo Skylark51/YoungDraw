@@ -20,7 +20,6 @@ void editPlotAxisLengths(int id);
 bool stepPlotAppearance(int id,int action,int steps);
 void editPlotAppearance(int id,int field);
 bool adjustSelectedPlotWeight(bool increase);
-void editPlotStages(int id);
 void editPlotCrossings(int id);
 void editPlotAnnotations(int id);
 std::optional<std::pair<int,size_t>> plotStateAt(Vec at); // Canvas coordinates.
@@ -33,6 +32,5 @@ void addEnergyGap(int id);
 bool placeEnergyGap(Vec at);
 void snapPlotStages(int id);
 void editPlotColors(int id);
-void editSeries(int id,bool add);
 
 } // namespace yd::editor

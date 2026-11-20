@@ -9,7 +9,6 @@
 #include "win_dialogs.h"
 #include "win_scripts.h"
 #include "win_ui.h"
-#include <commdlg.h>
 #include <windowsx.h>
 
 namespace yd::editor {
@@ -32,6 +31,7 @@ void setInlineValue(const InlineTarget& t,const std::string& value){
 }
 std::optional<InlineTarget> textAt(Vec p){
     auto sc=scene();for(auto i=sc.items.rbegin();i!=sc.items.rend();++i){const auto& t=*i;if(t.type!=Primitive::Text||t.points.empty()||t.textRole==13||t.textRole==mullikenSpinTextRole||doc.isLocked(t.owner))continue;if(!t.textRole&&!textObject(t.owner)&&!doc.atom(t.owner))continue;
+        if(t.textRole==7){const auto* graph=plot(t.owner);if(!graph||size_t(t.textIndex)>=graph->series.size())continue;}
         auto a=t.points[0];double w=measure(t.text,t.fontSize,t.font,t.face),h=t.fontSize*1.3*(1+std::count(t.text.begin(),t.text.end(),'\n'));
         if(p.x>=a.x-2&&p.x<=a.x+w+2&&p.y>=a.y-2&&p.y<=a.y+h+2)return InlineTarget{t.owner,t.textRole,t.textIndex,a,t.fontSize};
     }return {};
@@ -114,10 +114,9 @@ void textColorPalette(const std::optional<InlineTarget>& target){
         if(target&&(item.owner!=target->owner||item.textRole!=target->role||item.textIndex!=target->index))continue;
         current=item.color;break;
     }
-    auto initial=rgb(current);static COLORREF custom[16]={};CHOOSECOLORW picker{};
-    picker.lStructSize=sizeof(picker);picker.hwndOwner=win;picker.lpCustColors=custom;picker.Flags=CC_FULLOPEN|CC_RGBINIT;picker.rgbResult=RGB(initial.GetR(),initial.GetG(),initial.GetB());
-    if(!ChooseColorW(&picker))return;
-    char value[8];sprintf_s(value,"#%02x%02x%02x",GetRValue(picker.rgbResult),GetGValue(picker.rgbResult),GetBValue(picker.rgbResult));
+    const auto color=ui::chooseColor(win,rgb(current).ToCOLORREF());
+    if(!color)return;
+    char value[8];sprintf_s(value,"#%02x%02x%02x",GetRValue(*color),GetGValue(*color),GetBValue(*color));
     applyTextColor(value,target);status=L"텍스트 색상을 변경했습니다. · Ctrl+Z: 되돌리기";redraw();
 }
 

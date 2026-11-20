@@ -240,9 +240,11 @@ static void CALLBACK driveSidebarRecognition(HWND parent,UINT,UINT_PTR timer,DWO
 }
 
 static void CALLBACK driveTextPalette(HWND parent,UINT,UINT_PTR timer,DWORD){
-    HWND dialog=GetLastActivePopup(parent);wchar_t name[64]{};GetClassNameW(dialog,name,64);if(std::wstring(name)!=L"#32770")return;
+    HWND dialog=nullptr;
+    while((dialog=FindWindowExW(nullptr,dialog,L"YoungDrawColorPicker",nullptr)))if(GetWindow(dialog,GW_OWNER)==parent)break;
+    if(!dialog)return;
     KillTimer(parent,timer);paletteDriven=true;
-    SendMessageW(dialog,RegisterWindowMessageW(L"commdlg_SetRGBColor"),0,RGB(35,90,225));
+    SetDlgItemTextW(dialog,300,L"#235AE1");
     PostMessageW(dialog,WM_COMMAND,IDOK,0);
 }
 static void CALLBACK driveMechanismAdvanced(HWND parent,UINT,UINT_PTR timer,DWORD){
@@ -277,8 +279,6 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
         SetDlgItemTextW(dialog,100,formAction==37?L"0":formAction==38?L"-1":L"2.5");
     }else if(formAction>=31&&formAction<=34){
         SetDlgItemTextW(dialog,100,formAction==31?L"3.2":formAction==32?L"4":formAction==33?L"5":L"12");previewObserved=toNative(doc)!=formBefore;
-    }else if(formAction==29||formAction==30){
-        SetDlgItemTextW(dialog,100,formAction==29?L"28":L"40");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==27||formAction==28){
         SetDlgItemTextW(dialog,100,formAction==27?L"60":L"80");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==25){
@@ -320,7 +320,7 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
     }else{
         SetDlgItemTextW(dialog,101,L"30");previewObserved=toNative(doc)!=formBefore;
     }
-    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28||formAction==30||formAction==33||formAction==34||formAction==36)?IDCANCEL:IDOK,0);
+    SendMessageW(dialog,WM_COMMAND,(formAction==1||formAction==3||formAction==6||formAction==10||formAction==12||formAction==14||formAction==15||formAction==18||formAction==20||formAction==28||formAction==33||formAction==34||formAction==36)?IDCANCEL:IDOK,0);
 }
 static void graphCaptionChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection.clear();tool=Select;guides=true;fit();
@@ -451,6 +451,105 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"inline data change undoes in one action");
     for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
     check(GetDlgItem(manager,131)==originalButton,"tab changes reuse controls instead of recreating them");
+    SendMessageW(manager,WM_COMMAND,4001,0);
+    RECT legendCard{},lastColumn{},secondRow{};
+    GetWindowRect(GetDlgItem(manager,plotLegendCommand),&legendCard);
+    GetWindowRect(GetDlgItem(manager,240),&lastColumn);
+    GetWindowRect(GetDlgItem(manager,241),&secondRow);
+    check(legendCard.left==lastColumn.left&&legendCard.top==secondRow.top,"legend occupies the eighth axis and text slot");
+    SendMessageW(manager,WM_COMMAND,plotLegendCommand,0);
+    auto form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+    check(form&&GetParent(form)==manager,"legend opens in the graph manager");
+    SendDlgItemMessageW(form,100,CB_SETCURSEL,1,0);
+    SetDlgItemTextW(form,101,L"Times New Roman");
+    SendDlgItemMessageW(form,102,CB_SETCURSEL,3,0);
+    SetDlgItemTextW(form,103,L"28");
+    SetDlgItemTextW(form,104,L"15");
+    SetDlgItemTextW(form,105,L"-12");
+    check(toNative(doc)==before,"legend preview leaves the document untouched before Apply");
+    SendMessageW(form,WM_COMMAND,IDOK,0);
+    const auto& graph=doc.plots.front();
+    check(graph.legendVisibility==1&&graph.legendFace==2&&graph.legendFontFamily=="Times New Roman"&&graph.legendFontSize==28&&graph.legendOffset.x==15&&graph.legendOffset.y==-12,
+        "legend applies all settings together");
+    const auto styled=toNative(doc);
+    for(const auto& restored:{fromNative(styled),fromCdxml(toCdxml(doc))})
+        check(toNative(restored)==styled,"legend settings survive both file formats");
+    auto preview=makeScene(doc,measure);
+    check(std::any_of(preview.items.begin(),preview.items.end(),[](const auto& item){
+        return item.type==Primitive::Text&&item.textRole==7&&item.face==2&&item.font=="Times New Roman"&&item.fontSize==28;
+    }),"legend renders its own italic and size");
+    SendMessageW(manager,WM_COMMAND,plotLegendCommand,0);
+    form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+    preview=makeScene(doc.subset({owner}),measure);
+    auto item=std::find_if(preview.items.begin(),preview.items.end(),[](const auto& p){return p.textRole==7&&p.type==Primitive::Text;});
+    check(item!=preview.items.end(),"the preview contains a draggable legend");
+    RECT topTab{},client{};
+    GetWindowRect(GetDlgItem(manager,4001),&topTab);
+    POINT tabOrigin{topTab.left,topTab.top};
+    ScreenToClient(manager,&tabOrigin);
+    GetClientRect(manager,&client);
+    const double w=client.right-40,h=tabOrigin.y-110;
+    const auto& b=preview.bounds;
+    const double scale=std::min((w-32)/std::max(1.,b.w),(h-32)/std::max(1.,b.h));
+    const auto position=(item->points.front()-Vec{b.x,b.y}+Vec{4,4})*scale+
+        Vec{20+(w-b.w*scale)/2,88+(h-b.h*scale)/2};
+    SendMessageW(manager,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(int(position.x),int(position.y)));
+    SendMessageW(manager,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(int(position.x)+18,int(position.y)+10));
+    SendMessageW(manager,WM_LBUTTONUP,0,MAKELPARAM(int(position.x)+18,int(position.y)+10));
+    wchar_t offset[32]{};
+    GetDlgItemTextW(form,104,offset,32);
+    check(numeric(ui::utf8(offset))>15&&toNative(doc)==styled,"drag adjusts the legend offset in preview only");
+    SendMessageW(form,WM_COMMAND,IDCANCEL,0);
+    check(toNative(doc)==styled,"canceling a drag retains the applied position");
+    SendMessageW(manager,WM_COMMAND,plotLegendCommand,0);
+    form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+    SendDlgItemMessageW(form,100,CB_SETCURSEL,2,0);
+    SendMessageW(form,WM_COMMAND,IDOK,0);
+    preview=makeScene(doc,measure);
+    check(std::none_of(preview.items.begin(),preview.items.end(),[](const auto& item){return item.textRole==7;}),"hide removes the legend from the rendered graph");
+    SendMessageW(manager,WM_COMMAND,104,0);
+    SendMessageW(manager,WM_COMMAND,104,0);
+    check(toNative(doc)==before,"legend changes each undo in one operation");
+
+    SendMessageW(manager,WM_COMMAND,4002,0);
+    SendMessageW(manager,WM_COMMAND,139,0);
+    auto stages=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
+    check(stages&&toNative(doc)==before,"reaction name and arrows open in the manager without changing data");
+    const auto labels=GetDlgItem(stages,10);
+    SendMessageW(labels,WM_KEYDOWN,VK_F2,0);
+    auto label=FindWindowExW(labels,nullptr,L"EDIT",nullptr);
+    check(label!=nullptr,"the reaction grid has an inline name editor");
+    SetWindowTextW(label,L"Reactant updated");
+    SendMessageW(labels,WM_KEYDOWN,VK_RETURN,0);
+    check(!doc.plots.front().stages.empty()&&doc.plots.front().stages[0].label=="Reactant updated","reaction labels apply immediately on cell commit");
+    SendMessageW(manager,WM_COMMAND,104,0);
+    check(toNative(doc)==before,"reaction label edits undo through the manager");
+
+    SendMessageW(manager,WM_COMMAND,4000,0);
+    SendMessageW(manager,WM_COMMAND,132,0);
+    form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+    check(form&&toNative(doc)==before,"adding a pathway opens in the manager without committing the preview");
+    SetDlgItemTextW(form,100,L"Alternate pathway");
+    SetDlgItemTextW(form,105,L"4");
+    SendMessageW(form,WM_COMMAND,1005,0);
+    SendMessageW(GetDlgItem(form,105),WM_CHAR,L'-',0);
+    SendMessageW(form,WM_COMMAND,1005,0);
+    SendMessageW(form,WM_COMMAND,IDOK,0);
+    check(doc.plots.front().series.size()==2&&doc.plots.front().series.back().name=="Alternate pathway"&&
+        doc.plots.front().series.back().markerSize==4.5,"path creation and marker plus/minus commit together");
+    SendMessageW(manager,WM_COMMAND,133,0);
+    check(GetWindowLongPtrW(GetDlgItem(manager,4401),GWL_STYLE)&WS_VISIBLE,"path style panel exposes an inline path selector");
+    SendDlgItemMessageW(manager,4401,CB_SETCURSEL,1,0);
+    SendMessageW(manager,WM_COMMAND,MAKEWPARAM(4401,CBN_SELCHANGE),0);
+    form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+    SendMessageW(form,WM_COMMAND,905,0);
+    SendMessageW(form,WM_COMMAND,IDOK,0);
+    check(doc.plots.front().series.back().markerSize==4,"minus changes the selected path marker radius");
+    SendMessageW(manager,WM_COMMAND,104,0);
+    SendMessageW(manager,WM_COMMAND,104,0);
+    check(toNative(doc)==before,"path creation and styling are separately undoable");
+
+
     SendMessageW(manager,WM_COMMAND,4001,0);formBefore=before;formAction=36;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotFontCommand,0);
     check(formDriven&&previewObserved&&toNative(doc)==before,"manager font cancellation restores the previewed graph");
     formAction=35;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotFontCommand,0);
@@ -482,11 +581,22 @@ static void graphManagerChecks(HWND hwnd){
     RECT bounds{};GetClientRect(manager,&bounds);Bitmap snapshot(bounds.right,bounds.bottom,PixelFormat32bppARGB);
     auto capture=[&](){Graphics graphics(&snapshot);auto dc=graphics.GetHDC();SendMessageW(manager,WM_PRINTCLIENT,(WPARAM)dc,PRF_CLIENT);struct Context{HWND manager;HDC dc;};Context context{manager,dc};
         EnumChildWindows(manager,[](HWND child,LPARAM data)->BOOL{auto& context=*reinterpret_cast<Context*>(data);for(auto ancestor=child;ancestor&&ancestor!=context.manager;ancestor=GetParent(ancestor))if(!(GetWindowLongPtrW(ancestor,GWL_STYLE)&WS_VISIBLE))return TRUE;RECT rect{};GetWindowRect(child,&rect);MapWindowPoints(HWND_DESKTOP,context.manager,reinterpret_cast<POINT*>(&rect),2);int saved=SaveDC(context.dc);SetViewportOrgEx(context.dc,rect.left,rect.top,nullptr);wchar_t type[32]{};GetClassNameW(child,type,32);
-            if(std::wstring(type)==L"Button"){DRAWITEMSTRUCT item{};item.CtlType=ODT_BUTTON;item.CtlID=GetDlgCtrlID(child);item.hwndItem=child;item.hDC=context.dc;item.rcItem={0,0,rect.right-rect.left,rect.bottom-rect.top};SendMessageW(GetParent(child),WM_DRAWITEM,item.CtlID,(LPARAM)&item);}else SendMessageW(child,WM_PRINTCLIENT,(WPARAM)context.dc,PRF_CLIENT);RestoreDC(context.dc,saved);return TRUE;},(LPARAM)&context);graphics.ReleaseHDC(dc);
+            if(std::wstring(type)==L"Button"){DRAWITEMSTRUCT item{};item.CtlType=ODT_BUTTON;item.CtlID=GetDlgCtrlID(child);item.hwndItem=child;item.hDC=context.dc;item.rcItem={0,0,rect.right-rect.left,rect.bottom-rect.top};SendMessageW(GetParent(child),WM_DRAWITEM,item.CtlID,(LPARAM)&item);}else if(std::wstring(type)==L"Edit"){
+                SendMessageW(child,WM_PRINT,(WPARAM)context.dc,PRF_CLIENT|PRF_NONCLIENT|PRF_ERASEBKGND);
+            }else SendMessageW(child,WM_PRINTCLIENT,(WPARAM)context.dc,PRF_CLIENT);RestoreDC(context.dc,saved);return TRUE;},(LPARAM)&context);graphics.ReleaseHDC(dc);
     };
     CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};capture();check(snapshot.Save(L"graph-manager-preview.png",&png,nullptr)==Ok,"capture the graph manager and live preview");
     SendMessageW(manager,WM_COMMAND,4001,0);capture();check(snapshot.Save(L"graph-manager-font-preview.png",&png,nullptr)==Ok,"capture graph font and axis tools");
     SendMessageW(manager,WM_COMMAND,4000,0);SendMessageW(manager,WM_COMMAND,131,0);capture();check(snapshot.Save(L"graph-manager-data-preview.png",&png,nullptr)==Ok,"capture the inline data panel below the graph");
+    SendMessageW(manager,WM_COMMAND,132,0);
+    capture();check(snapshot.Save(L"graph-manager-add-path.png",&png,nullptr)==Ok,"capture the inline path form");
+    SendMessageW(manager,WM_COMMAND,4001,0);SendMessageW(manager,WM_COMMAND,plotLegendCommand,0);
+    auto legendPanel=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+    SendDlgItemMessageW(legendPanel,100,CB_SETCURSEL,1,0);
+    SendMessageW(legendPanel,WM_COMMAND,MAKEWPARAM(100,CBN_SELCHANGE),0);
+    capture();check(snapshot.Save(L"graph-manager-legend.png",&png,nullptr)==Ok,"capture legend controls and visible graph");
+    SendMessageW(manager,WM_COMMAND,4002,0);SendMessageW(manager,WM_COMMAND,139,0);
+    capture();check(snapshot.Save(L"graph-manager-reaction-arrows.png",&png,nullptr)==Ok,"capture the inline reaction table");
     newDocumentTab();check(!plotManagerWindow,"document changes close the manager before graph IDs can be reused");std::cout<<"Graph manager categories, font, structures, undo and document lifetime checks passed\n";
 }
 static void carbonRadicalChecks(HWND hwnd){
@@ -746,7 +856,7 @@ int main(int argc,char** argv){
             auto before=toNative(doc);command(183);repaint();
             check(present(plotManagerCommand)&&present(130)&&!helpText(plotManagerCommand).empty(),"graph sidebar exposes the manager and new graph entry");
             check(hit(plotManagerCommand).Y==hit(130).Y,"graph management is the primary sidebar action");
-            for(int id:{131,132,133,137,139,138,151,plotAnnotationsCommand,plotWaveWidthCommand,plotWaveGapCommand,plotLegendSizeCommand,plotAxisLengthsCommand})check(!present(id),"individual graph controls are consolidated into the manager window");
+            for(int id:{131,132,133,137,139,138,151,plotAnnotationsCommand,plotWaveWidthCommand,plotWaveGapCommand,plotLegendCommand,plotAxisLengthsCommand})check(!present(id),"individual graph controls are consolidated into the manager window");
             check(before==toNative(doc)&&dirty==originalDirty,"switching sidebar tabs never modifies the document");
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;
             check(present(dottedBondCommand)&&!helpText(dottedBondCommand).empty(),"dotted single bond tool is available in the sidebar with help");
@@ -884,11 +994,6 @@ int main(int argc,char** argv){
             writePreview(L"y-title-spacing.png",doc);
             check(history.undo(doc)&&toNative(doc)==spacingBefore,"Y title spacing is one undo action");
             check(history.redo(doc)&&doc.plots[0].yTitleGap==60,"Y title spacing can be redone");
-            const auto legendBefore=toNative(doc);formBefore=legendBefore;formAction=30;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotLegendSizeCommand);
-            check(formDriven&&previewObserved&&toNative(doc)==legendBefore,"canceling sidebar legend size restores the previewed document");
-            formAction=29;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotLegendSizeCommand);
-            check(formDriven&&previewObserved&&doc.plots[0].legendFontSize==28,"sidebar legend control applies its own font size");
-            check(history.undo(doc)&&toNative(doc)==legendBefore,"legend size is one undo action");
             const auto waveBefore=toNative(doc);formBefore=waveBefore;formAction=33;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotWaveWidthCommand);
             check(formDriven&&previewObserved&&toNative(doc)==waveBefore,"cancel restores wave stroke preview");
             formAction=31;formDriven=previewObserved=false;SetTimer(hwnd,901,10,driveForm);command(plotWaveWidthCommand);

@@ -35,20 +35,20 @@ void CALLBACK inspectPlotSettings(HWND owner,UINT,UINT_PTR timer,DWORD){
  KillTimer(owner,timer);
  const auto tab=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);
  const auto offset=GetDlgItem(dialog,121);
- RECT legend{};
- if(!tab||TabCtrl_GetItemCount(tab)!=6||!TabCtrl_GetItemRect(tab,5,&legend)||!offset){
+ RECT axisTab{};
+ if(!tab||TabCtrl_GetItemCount(tab)!=5||!TabCtrl_GetItemRect(tab,2,&axisTab)||!offset){
   plotSettingsValid=false;
   PostMessageW(dialog,WM_COMMAND,IDCANCEL,0);
   return;
  }
- const auto click=MAKELPARAM((legend.left+legend.right)/2,(legend.top+legend.bottom)/2);
+ const auto click=MAKELPARAM((axisTab.left+axisTab.right)/2,(axisTab.top+axisTab.bottom)/2);
  SendMessageW(tab,WM_LBUTTONDOWN,MK_LBUTTON,click);
  SendMessageW(tab,WM_LBUTTONUP,0,click);
- plotSettingsValid=plotSettingsValid&&TabCtrl_GetCurSel(tab)==5&&IsWindowVisible(offset)&&!IsWindowVisible(GetDlgItem(dialog,100));
+ plotSettingsValid=plotSettingsValid&&TabCtrl_GetCurSel(tab)==2&&IsWindowVisible(offset)&&!IsWindowVisible(GetDlgItem(dialog,100));
  SendMessageW(tab,WM_KEYDOWN,VK_LEFT,0);
- plotSettingsValid=plotSettingsValid&&TabCtrl_GetCurSel(tab)==4&&!IsWindowVisible(offset);
+ plotSettingsValid=plotSettingsValid&&TabCtrl_GetCurSel(tab)==1&&!IsWindowVisible(offset);
  SendMessageW(tab,WM_KEYDOWN,VK_RIGHT,0);
- plotSettingsValid=plotSettingsValid&&TabCtrl_GetCurSel(tab)==5&&IsWindowVisible(offset);
+ plotSettingsValid=plotSettingsValid&&TabCtrl_GetCurSel(tab)==2&&IsWindowVisible(offset);
 
  const auto& palette=appearance::palette();
  RECT bounds{},outer{},edit{};
@@ -59,7 +59,7 @@ void CALLBACK inspectPlotSettings(HWND owner,UINT,UINT_PTR timer,DWORD){
  ScreenToClient(dialog,&origin);
  ScreenToClient(dialog,&editOrigin);
  MapWindowPoints(tab,dialog,&tabOrigin,1);
- TabCtrl_GetItemRect(tab,5,&legend);
+ TabCtrl_GetItemRect(tab,2,&axisTab);
 
  Bitmap snapshot(bounds.right,bounds.bottom);
  Graphics graphics(&snapshot);
@@ -70,7 +70,7 @@ void CALLBACK inspectPlotSettings(HWND owner,UINT,UINT_PTR timer,DWORD){
  SendMessageW(dialog,WM_PRINT,(WPARAM)dc,PRF_CLIENT|PRF_CHILDREN);
  SetViewportOrgEx(dc,0,0,nullptr);
  const auto panel=GetPixel(dc,tabOrigin.x+625,tabOrigin.y+10);
- const auto underline=GetPixel(dc,tabOrigin.x+legend.left+3,tabOrigin.y+legend.bottom-1);
+ const auto underline=GetPixel(dc,tabOrigin.x+axisTab.left+3,tabOrigin.y+axisTab.bottom-1);
  const auto edge=GetPixel(dc,editOrigin.x+30,editOrigin.y);
  graphics.ReleaseHDC(dc);
  if(panel!=palette.panel.ToCOLORREF()||underline!=palette.accent.ToCOLORREF()||edge!=palette.edge.ToCOLORREF()){
@@ -83,6 +83,22 @@ void CALLBACK inspectPlotSettings(HWND owner,UINT,UINT_PTR timer,DWORD){
  PostMessageW(dialog,WM_COMMAND,IDCANCEL,0);
 }
 
+void CALLBACK inspectColor(HWND owner,UINT,UINT_PTR timer,DWORD){
+ const auto picker=FindWindowW(L"YoungDrawColorPicker",L"색 선택");
+ if(!picker||GetWindow(picker,GW_OWNER)!=owner)return;
+ KillTimer(owner,timer);
+ const auto dc=GetDC(picker);
+ const auto brush=reinterpret_cast<HBRUSH>(SendMessageW(picker,WM_CTLCOLOREDIT,WPARAM(dc),LPARAM(GetDlgItem(picker,300))));
+ LOGBRUSH info{};
+ GetObjectW(brush,sizeof(info),&info);
+ valid=valid&&info.lbColor==appearance::palette().raised.ToCOLORREF();
+ ReleaseDC(picker,dc);
+ SendMessageW(picker,WM_COMMAND,100,0);
+ wchar_t hex[8]{};
+ GetDlgItemTextW(picker,300,hex,int(std::size(hex)));
+ valid=valid&&std::wstring(hex)==L"#F7B8BF";
+ PostMessageW(picker,WM_COMMAND,IDOK,0);
+}
 void CALLBACK chooseTheme(HWND,UINT,UINT_PTR timer,DWORD){
  HWND picker=nullptr;
  // An independently running editor may also have its appearance dialog open.
@@ -98,6 +114,10 @@ void CALLBACK chooseTheme(HWND,UINT,UINT_PTR timer,DWORD){
  SendMessageW(picker,WM_COMMAND,302,0);
  SetTimer(picker,998,10,inspectSearch);ui::search(picker,L"테마 검색 검증",{{L"메커니즘",L"단계와 연결"},{L"그래프",L"축과 주석"}},L"열기",true);KillTimer(picker,998);
  if(requested==2||requested==5){
+  SetTimer(picker,995,10,inspectColor);
+  const auto color=ui::chooseColor(picker,RGB(0,0,0));
+  KillTimer(picker,995);
+  valid=valid&&color==RGB(247,184,191);
   SetTimer(win,999,10,inspectPlotSettings);
   plotSettings(doc.plots.front().id);
   KillTimer(win,999);

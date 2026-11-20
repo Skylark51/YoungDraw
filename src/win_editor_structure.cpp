@@ -375,10 +375,9 @@ void fillTarget(bool file){
     insertStructureTarget(*fragment);
 }
 static std::optional<std::string> chooseDrawingColor(const std::string& color){
-    auto initial=rgb(color);static COLORREF custom[16]={};CHOOSECOLORW picker{};
-    picker.lStructSize=sizeof(picker);picker.hwndOwner=win;picker.lpCustColors=custom;picker.Flags=CC_FULLOPEN|CC_RGBINIT;picker.rgbResult=RGB(initial.GetR(),initial.GetG(),initial.GetB());
-    if(!ChooseColorW(&picker))return std::nullopt;
-    char value[8];sprintf_s(value,"#%02x%02x%02x",GetRValue(picker.rgbResult),GetGValue(picker.rgbResult),GetBValue(picker.rgbResult));
+    const auto chosen=ui::chooseColor(win,rgb(color).ToCOLORREF());
+    if(!chosen)return std::nullopt;
+    char value[8];sprintf_s(value,"#%02x%02x%02x",GetRValue(*chosen),GetGValue(*chosen),GetBValue(*chosen));
     return std::string(value);
 }
 

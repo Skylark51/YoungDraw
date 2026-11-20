@@ -15,7 +15,6 @@
 #include "win_editor_commands.h"
 #include "win_editor_canvas.h"
 #include "win_editor_render.h"
-#include <commdlg.h>
 #include <iostream>
 #include <stdexcept>
 using namespace yd;
@@ -36,10 +35,10 @@ static void CALLBACK driveRotation(HWND owner,UINT,UINT_PTR timer,DWORD){
 }
 static void CALLBACK driveArrowColor(HWND owner,UINT,UINT_PTR timer,DWORD){
     HWND dialog=nullptr;
-    while((dialog=FindWindowExW(nullptr,dialog,L"#32770",nullptr)))if(GetWindow(dialog,GW_OWNER)==owner)break;
+    while((dialog=FindWindowExW(nullptr,dialog,L"YoungDrawColorPicker",nullptr)))if(GetWindow(dialog,GW_OWNER)==owner)break;
     if(!dialog)return;
     KillTimer(owner,timer);
-    SendMessageW(dialog,RegisterWindowMessageW(SETRGBSTRINGW),0,RGB(18,52,86));
+    SetDlgItemTextW(dialog,300,L"#123456");
     PostMessageW(dialog,WM_COMMAND,IDOK,0);
 }
 static void editorToolRegression(HWND hwnd){

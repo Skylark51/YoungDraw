@@ -71,7 +71,8 @@ void icon(Graphics& g,int id,RectF box,Color color){
         positive.AddBezier(0.f,0.f,-16.f,-23.f,-27.f,-12.f,-20.f,0.f);positive.AddBezier(-20.f,0.f,-27.f,12.f,-16.f,23.f,0.f,0.f);positive.CloseFigure();g.FillPath(&brush,&positive);
         negative.AddBezier(0.f,0.f,16.f,-23.f,27.f,-12.f,20.f,0.f);negative.AddBezier(20.f,0.f,27.f,12.f,16.f,23.f,0.f,0.f);negative.CloseFigure();g.DrawPath(&pen,&negative);break;}
     case 127:case 137:case 219:g.DrawEllipse(&pen,-12.f,-12.f,24.f,24.f);g.DrawEllipse(&pen,-4.f,-4.f,8.f,8.f);for(int i=0;i<8;i++){double a=i*pi/4;line(float(13*std::cos(a)),float(13*std::sin(a)),float(20*std::cos(a)),float(20*std::sin(a)));}break;
-    case 240:case 241:case plotLegendSizeCommand:case plotFontCommand:{FontFamily ff(L"Arial");Font f(&ff,26,FontStyleBold,UnitPixel);g.DrawString(L"Aa",-1,&f,PointF(-20,-18),&brush);line(-19,18,20,18);break;}
+    case plotLegendCommand:for(int y:{-14,0,14}){line(-21,y,-7,y);line(0,y,20,y);}break;
+    case 240:case 241:case plotFontCommand:{FontFamily ff(L"Arial");Font f(&ff,26,FontStyleBold,UnitPixel);g.DrawString(L"Aa",-1,&f,PointF(-20,-18),&brush);line(-19,18,20,18);break;}
     case 242:case 243:line(-19,19,21,19);line(-19,19,-19,-21);pen.SetWidth(4);if(id==242)line(-19,19,21,19);else line(-19,19,-19,-21);break;
     case 244:pen.SetWidth(3.5f);g.DrawBezier(&pen,PointF(-22,10),PointF(-8,-24),PointF(7,24),PointF(22,-13));break;
     case 245:ring(6,false);pen.SetWidth(4);line(-15,12,15,-12);break;
@@ -196,7 +197,7 @@ std::wstring helpText(int id){
     if(id==plotFontCommand)return L"그래프 글꼴\n축·상태 이름·데이터 값·범례·반응 이름의 글꼴과 굵게·기울임 스타일을 그래프별로 설정합니다.";
     if(id==plotWaveWidthCommand)return L"물결 굵기\n생략 표시의 물결 획을 본선과 독립적으로 조절합니다. 0은 자동이며 0.1~20 pt를 지정할 수 있습니다.";
     if(id==plotWaveGapCommand)return L"물결·곡선 간격\n물결 표시 주변에서 본선을 끊는 추가 여백입니다. -1은 자동, 0은 가장 좁게, 양수는 더 넓게 벌립니다. Y축 물결에도 적용됩니다.";
-    if(id==plotLegendSizeCommand)return L"범례 글자 크기\n범례 크기를 눈금·이름·데이터 값과 독립적으로 조절합니다. 0은 자동이며 4~72 pt로 지정한 크기는 자동 축소하지 않습니다.";
+    if(id==plotLegendCommand)return L"범례 관리\n범례 표시, 글꼴·크기·스타일, X/Y 위치를 조절합니다. 위 미리보기에서 범례를 직접 끌어 옮길 수도 있습니다.";
     if(id==copyPngCommand)return L"투명 PNG로 복사\n선택한 항목을 배경이 투명한 PNG 그림으로 클립보드에 복사합니다. 선택이 없으면 문서 전체를 복사합니다. 격자·선택 테두리는 포함하지 않습니다.";
     if(id==exportPngCommand)return L"그림으로 내보내기 (PNG)\n문서 전체를 투명 배경의 PNG 파일로 저장합니다.";
     if(id==131)return L"에너지 표 편집\n상태 이름과 에너지를 수정하거나 Excel 표를 붙여넣습니다. 경로 이름은 열 제목을 더블클릭해 바꿉니다.";

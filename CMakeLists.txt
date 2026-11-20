@@ -41,6 +41,7 @@ if(WIN32)
     src/win_splash.cpp
     src/win_button_help.cpp
     src/win_dialogs.cpp
+    src/win_color_picker.cpp
     src/win_grid.cpp
     src/win_gallery.cpp
     src/office.cpp
