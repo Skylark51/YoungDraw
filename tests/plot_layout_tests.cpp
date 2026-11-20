@@ -16,6 +16,28 @@ static bool overlaps(Rect a,Rect b){return a.x<b.x+b.w-0.01&&a.x+a.w>b.x+0.01&&a
 static EnergyPlot sample(){EnergyPlot p;p.id=1;p.p={30,90};p.width=760;p.height=400;p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#167d9a",{0,37.2,17.7,27.3,-9.9},0,2},{"Path 2","#b44758",{0,37.2,17.7,27.3,-9.9},1,2}};return p;}
 int main(){try{
     {
+        Document d;auto p=sample();
+        p.xAxisHeadLength=18;p.xAxisHeadWidth=7;p.yAxisHeadLength=11;p.yAxisHeadWidth=13;
+        p.thinLines=true;p.inkScale=2.5;d.plots={p};
+        const auto drawing=makeScene(d,measure);
+        const auto axes=drawing.plotAxes.at(p.id);
+        auto checkHead=[&](Vec tip,Vec direction,double length,double width){
+            const auto head=std::find_if(drawing.items.begin(),drawing.items.end(),[&](const Primitive& item){
+                return item.type==Primitive::Polygon&&item.owner==p.id&&item.points.size()==3&&(item.points.front()-tip).length()<1e-8;
+            });
+            check(head!=drawing.items.end(),"axis arrowhead is rendered at the axis endpoint");
+            const Vec base=(head->points[1]+head->points[2])*.5;
+            check((tip-base-direction*length).length()<1e-8&&std::abs((head->points[1]-head->points[2]).length()-width)<1e-8,
+                "axis arrowhead length and width are independent of line weight");
+        };
+        checkHead(axes.xEnd,{1,0},18,7);
+        checkHead(axes.yEnd,{0,-1},11,13);
+#ifdef TEST_CDXML
+        const auto saved=toNative(d);
+        check(toNative(fromNative(saved))==saved&&toNative(fromCdxml(toCdxml(d)))==saved,"axis arrowhead sizes roundtrip in both document formats");
+#endif
+    }
+    {
         for(const std::string unit:{"kcal mol^{-1}","kJ mol^{−1}","kcal mol⁻¹","kcal mol-1","kcal mol–1","kcal mol^{–1}"})for(bool top:{false,true}){
             Document d;auto p=sample();p.unit=unit;p.energyAtTop=top;d.plots={p};
             const auto drawing=makeScene(d,measure);bool exponent=false;double unitFont=0;

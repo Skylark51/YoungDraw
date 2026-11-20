@@ -231,7 +231,7 @@ std::optional<COLORREF> chooseColor(HWND parent,COLORREF initial){
             0,0,560,306,host->window,nullptr,wc.hInstance,&picker);
         if(!panel)return {};
         appearance::nativeControl(GetDlgItem(panel,hexInput));
-        runInlineDialog(panel,306,picker.done,GetDlgItem(panel,hexInput));
+        runInlineDialog(panel,picker.done,GetDlgItem(panel,hexInput));
         return picker.accepted?std::optional<COLORREF>{picker.current}:std::nullopt;
     }
     constexpr DWORD style=WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN;

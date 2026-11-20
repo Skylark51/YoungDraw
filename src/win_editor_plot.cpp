@@ -105,6 +105,8 @@ void editPlotAppearance(int id,int field){
     const Document before=doc;
     const wchar_t* labels[]={L"축 아래 이름 크기 (pt, 0: 자동)",L"데이터 값 크기 (pt, 0: 자동)",L"X축 (pt, 0: 숨김, -1: 자동)",L"Y축 (pt, 0: 숨김, -1: 자동)",L"곡선 굵기 (pt, 0: 경로별 설정)",L"삽입 그림 선 굵기 (%, 100: 기본)",L"Y축 제목 간격 (pt, 0: 자동, 최대 300)",L"물결 굵기 (pt, 0: 자동, 0.1~20)",L"물결·곡선 추가 여백 (pt, -1: 자동, 0~100)"};
     const auto setting=plotNumber(*p,field);
+    const bool axis=field==2||field==3;
+    const bool xAxis=field==2;
     auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
         const double value=numeric(values[0],setting.minimum,setting.maximum);
         if(value>0&&value<setting.firstPositive){
@@ -112,7 +114,16 @@ void editPlotAppearance(int id,int field){
             if(field<2)return L"글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.";
         }
         if(value<0&&value!=-1)return L"자동은 -1, 그 외에는 0 이상을 입력하세요.";
-        doc=before;setPlotNumber(*plot(id),field,value);redraw();UpdateWindow(win);return {};
+        const double headLength=axis?numeric(values[1],0,100):0;
+        const double headWidth=axis?numeric(values[2],0,100):0;
+        doc=before;
+        auto& graph=*plot(id);
+        setPlotNumber(graph,field,value);
+        if(axis){
+            (xAxis?graph.xAxisHeadLength:graph.yAxisHeadLength)=headLength;
+            (xAxis?graph.xAxisHeadWidth:graph.yAxisHeadWidth)=headWidth;
+        }
+        redraw();UpdateWindow(win);return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
     ui::Field control{std::wstring(labels[field])+L"\n휠 또는 ↑ / ↓ 키로 조절",number(setting.value)};
     control.stepValue=[setting](const std::string& text,int steps) mutable {
@@ -120,7 +131,12 @@ void editPlotAppearance(int id,int field){
         try{current.value=numeric(text,setting.minimum,setting.maximum);}catch(const std::exception&){}
         return number(current.step(steps));
     };
-    auto result=ui::form(win,L"그래프 개별 크기·굵기",{control},update);
+    std::vector<ui::Field> fields{std::move(control)};
+    if(axis){
+        fields.push_back(ui::numericField(L"화살촉 길이 (pt, 0: 자동)",xAxis?p->xAxisHeadLength:p->yAxisHeadLength,0,100,.5));
+        fields.push_back(ui::numericField(L"화살촉 너비 (pt, 0: 자동)",xAxis?p->xAxisHeadWidth:p->yAxisHeadWidth,0,100,.5));
+    }
+    auto result=ui::form(win,axis?(xAxis?L"X축 표시·화살표":L"Y축 표시·화살표"):L"그래프 개별 크기·굵기",fields,update);
     if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }

@@ -122,6 +122,7 @@ struct EnergyPlot {
     bool fixedValueFontSize=false; // Sidebar sizes stay fixed; legacy documents retain automatic fitting.
     double yTitleGap=0; // Clearance from the Y title to ticks/axis; 0 chooses a readable automatic gap.
     double valueGap=0,yAxisWidth=0; // Extra energy-label clearance; y-axis width 0 follows the primary curve.
+    double xAxisHeadLength=0,xAxisHeadWidth=0,yAxisHeadLength=0,yAxisHeadWidth=0; // In pt; 0 uses automatic dimensions.
     double yTickStep=0; // 0: automatic; positive: spacing in the plot's energy unit.
     std::vector<MechanismStage> stages; // Empty in older documents; editable independently of energy states.
     std::vector<EnergyState> states; std::vector<EnergySeries> series; int mode=3; bool showValues=true;

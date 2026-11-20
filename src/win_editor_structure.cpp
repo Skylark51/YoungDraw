@@ -332,13 +332,13 @@ std::optional<Document> runStructureEditor(const Document& fragment,HWND owner){
         viewport=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"구조 편집",
             WS_CHILD|WS_CLIPCHILDREN,0,0,1,1,host->window,nullptr,wc.hInstance,&viewportColors);
         if(!viewport)throw std::runtime_error("구조 편집 영역을 만들 수 없습니다.");
-        host->mount(viewport,450);
+        host->mount(viewport);
         commandLine+=L" "+std::to_wstring(reinterpret_cast<UINT_PTR>(viewport));
     }
     struct ViewportGuard {
         HWND child;
         ui::InlineDialogHost* host;
-        ~ViewportGuard(){if(child){DestroyWindow(child);host->mount(nullptr,0);}}
+        ~ViewportGuard(){if(child){DestroyWindow(child);host->mount(nullptr);}}
     } viewportGuard{viewport,host};
     const RECT placement=ui::ownedWindowRect(owner,width,height);
     STARTUPINFOW startup{};startup.cb=sizeof(startup);

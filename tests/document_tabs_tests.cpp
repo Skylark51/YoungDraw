@@ -95,12 +95,17 @@ static void CALLBACK drivePathName(HWND parent,UINT,UINT_PTR timer,DWORD){
 }
 static int graphStyleMode=0,graphStyleResult=IDCANCEL;
 static bool graphStyleCardsSeen=false,graphStylePreviewSeen=false;
+static RECT graphManagerTabBounds{};
+static bool graphManagerTabsAnchored(HWND manager){
+    RECT bounds{};
+    return GetWindowRect(GetDlgItem(manager,4000),&bounds)&&EqualRect(&bounds,&graphManagerTabBounds);
+}
 static void CALLBACK driveGraphStyle(HWND parent,UINT,UINT_PTR timer,DWORD){
     auto picker=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawGraphPicker",L"그래프 형태");
     if(!picker)picker=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"그래프 형태");
     if(!picker)return;
     KillTimer(parent,timer);
-    graphStyleCardsSeen=true;
+    graphStyleCardsSeen=graphManagerTabsAnchored(plotManagerWindow);
     RECT previous{},panel{};GetWindowRect(picker,&panel);
     for(int i=0;i<5;++i){
         const auto card=GetDlgItem(picker,100+i);
@@ -110,6 +115,19 @@ static void CALLBACK driveGraphStyle(HWND parent,UINT,UINT_PTR timer,DWORD){
             bounds.left>=panel.left&&bounds.right<=panel.right&&bounds.right>bounds.left&&
             (!i||(bounds.left>=previous.right&&bounds.top==previous.top));
         previous=bounds;
+    }
+    if(graphStyleCardsSeen){
+        const auto selected=GetDlgItem(picker,100+doc.plots.front().mode);
+        RECT bounds{};GetClientRect(selected,&bounds);
+        Bitmap bitmap(bounds.right,bounds.bottom,PixelFormat32bppRGB);
+        Graphics graphics(&bitmap);
+        const auto dc=graphics.GetHDC();
+        DRAWITEMSTRUCT item{ODT_BUTTON,UINT(GetDlgCtrlID(selected)),0,ODA_DRAWENTIRE,ODS_FOCUS,selected,dc,bounds};
+        SendMessageW(picker,WM_DRAWITEM,item.CtlID,LPARAM(&item));
+        const auto& palette=appearance::palette();
+        graphStyleCardsSeen=GetPixel(dc,1,1)==palette.panel.ToCOLORREF()&&
+            GetPixel(dc,bounds.right/2,1)==palette.hover.ToCOLORREF();
+        graphics.ReleaseHDC(dc);
     }
     if(graphStyleCardsSeen){
         const int id=100+graphStyleMode;
@@ -302,8 +320,12 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==35||formAction==36){
         SetDlgItemTextW(dialog,100,formAction==35?L"Times New Roman":L"Arial");SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(100,CBN_EDITCHANGE),(LPARAM)GetDlgItem(dialog,100));SendDlgItemMessageW(dialog,101,CB_SETCURSEL,formAction==35?3:2,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,101));previewObserved=toNative(doc)!=formBefore;
-    }else if(formAction>=37&&formAction<=39){
+    }else if(formAction>=37&&formAction<=40){
         SetDlgItemTextW(dialog,100,formAction==37?L"0":formAction==38?L"-1":L"2.5");
+        if(formAction>=39){
+            SetDlgItemTextW(dialog,101,formAction==39?L"12":L"18");
+            SetDlgItemTextW(dialog,102,formAction==39?L"6":L"9");
+        }
     }else if(formAction>=31&&formAction<=34){
         SetDlgItemTextW(dialog,100,formAction==31?L"3.2":formAction==32?L"4":formAction==33?L"5":L"12");previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==27||formAction==28){
@@ -467,10 +489,13 @@ static void graphManagerChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
     const auto before=toNative(doc);managePlot(owner,false);auto manager=plotManagerWindow;check(manager&&IsWindow(manager)&&toNative(doc)==before,"graph manager opens without modifying the selected graph");
     auto originalButton=GetDlgItem(manager,131);
+    GetWindowRect(GetDlgItem(manager,4000),&graphManagerTabBounds);
+    RECT frame{};GetWindowRect(manager,&frame);
     wchar_t doneLabel[32]{};GetDlgItemTextW(manager,4400,doneLabel,32);
     check(std::wstring(doneLabel)==L"확인","data panel confirmation is labeled clearly");
     SendMessageW(manager,WM_COMMAND,131,0);auto inlineGrid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
     check(inlineGrid&&GetParent(inlineGrid)==manager&&toNative(doc)==before,"data opens as a nonmutating child panel");
+    check(graphManagerTabsAnchored(manager),"opening the energy grid leaves the tabs and preview anchored");
     auto list=GetDlgItem(inlineGrid,10);RECT cell{};ListView_GetSubItemRect(list,0,2,LVIR_BOUNDS,&cell);
     SendMessageW(list,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(cell.left+6,cell.top+6));auto input=FindWindowExW(list,nullptr,L"EDIT",nullptr);check(input!=nullptr,"inline cells use the shared keyboard editor");
     SetWindowTextW(input,L"invalid");SendMessageW(manager,WM_COMMAND,4001,0);
@@ -507,7 +532,7 @@ static void graphManagerChecks(HWND hwnd){
         graphStyleResult=result;graphStyleCardsSeen=false;graphStylePreviewSeen=false;
         SetTimer(hwnd,901,10,driveGraphStyle);
         SendMessageW(manager,WM_COMMAND,changePlotStyleCommand,0);KillTimer(hwnd,901);
-        check(graphStyleCardsSeen&&graphStylePreviewSeen,"five inline graph cards show help and preview on selection");
+        check(graphStyleCardsSeen&&graphStylePreviewSeen,"rounded graph cards show help and preview in the anchored manager");
         check(toNative(doc)==(result==IDOK?toNative(styledGraph):before),"graph style applies or cancels without affecting other data");
     }
     check(history.undo(doc)&&toNative(doc)==before,"graph style change undoes in one operation");
@@ -523,6 +548,8 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(manager,WM_COMMAND,plotLegendCommand,0);
     auto form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
     check(form&&GetParent(form)==manager,"legend opens in the graph manager");
+    RECT currentFrame{};GetWindowRect(manager,&currentFrame);
+    check(EqualRect(&frame,&currentFrame)&&graphManagerTabsAnchored(manager),"switching tabs and opening editors preserves the manager frame and preview position");
     SendDlgItemMessageW(form,100,CB_SETCURSEL,1,0);
     SetDlgItemTextW(form,101,L"Times New Roman");
     SendDlgItemMessageW(form,102,CB_SETCURSEL,3,0);
@@ -649,6 +676,10 @@ static void graphManagerChecks(HWND hwnd){
     check(std::abs(doc.plots[0].waveWidth-3.3)<1e-8&&doc.plots[0].structureInkScale==weightBefore,"plus adjusts only the selected wave thickness");
     SendMessageW(manager,WM_KEYDOWN,VK_SUBTRACT,0);check(std::abs(doc.plots[0].waveWidth-3.2)<1e-8,"minus reverses a wave thickness step");
     for(int action:{37,38,39}){formAction=action;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,242,0);check(formDriven,"unified axis editor opens");if(action==37)check(!doc.plots[0].showXAxis,"zero hides the axis");else check(doc.plots[0].showXAxis&&doc.plots[0].xAxisWidth==(action==38?0:2.5),"automatic and explicit thickness restore the axis");}
+    formAction=40;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,243,0);KillTimer(hwnd,901);
+    const auto& axisGraph=doc.plots.front();
+    check(formDriven&&axisGraph.xAxisHeadLength==12&&axisGraph.xAxisHeadWidth==6&&axisGraph.yAxisHeadLength==18&&axisGraph.yAxisHeadWidth==9,
+        "manager edits X and Y arrowheads independently");
     // A graph point keeps the exact stage as the independent editor target.
     SendMessageW(manager,WM_COMMAND,4003,0);tool=Select;fit();auto point=scene().plotSnapPoints.at(owner).front();mouseDown(screen(point.p));mouseUp(screen(point.p));
     check(targetContainer==owner&&targetSlot==size_t(point.state),"clicking a graph point retains its structure stage");

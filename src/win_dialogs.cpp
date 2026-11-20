@@ -12,17 +12,17 @@
 namespace ui {
 namespace { thread_local InlineDialogHost* dialogHost=nullptr; }
 
-InlineDialogHost::InlineDialogHost(HWND hwnd,std::function<void(HWND,int)> show)
+InlineDialogHost::InlineDialogHost(HWND hwnd,std::function<void(HWND)> show)
     :window(hwnd),mount(std::move(show)),previous(dialogHost){dialogHost=this;}
 InlineDialogHost::~InlineDialogHost(){dialogHost=previous;}
 InlineDialogHost* inlineDialogHost(){return dialogHost;}
 
-void runInlineDialog(HWND child,int height,const bool& done,HWND focus){
+void runInlineDialog(HWND child,const bool& done,HWND focus){
     auto& host=*dialogHost;
     const HWND owner=GetWindow(host.window,GW_OWNER),previousFocus=GetFocus();
     const bool wasEnabled=owner&&IsWindowEnabled(owner);
     if(wasEnabled)EnableWindow(owner,FALSE);
-    host.mount(child,height);
+    host.mount(child);
     ShowWindow(child,SW_SHOW);
     SetFocus(focus);
     MSG msg{};
@@ -36,7 +36,7 @@ void runInlineDialog(HWND child,int height,const bool& done,HWND focus){
         if(!within||!IsDialogMessageW(child,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}
     }
     if(IsWindow(child))DestroyWindow(child);
-    host.mount(nullptr,0);
+    host.mount(nullptr);
     if(wasEnabled&&IsWindow(owner))EnableWindow(owner,TRUE);
     if(IsWindowVisible(previousFocus))SetFocus(previousFocus);
     if(received==0)PostQuitMessage(int(msg.wParam));
@@ -113,12 +113,12 @@ void drawMechanismCard(const DRAWITEMSTRUCT& item,const GraphPicker& picker,int 
 }
 void drawGraphCard(const DRAWITEMSTRUCT& item,const GraphPicker& picker,int mode){
     using namespace Gdiplus;
-    Graphics g(item.hDC);g.SetSmoothingMode(SmoothingModeAntiAlias);
     const auto& palette=picker.colors.palette;const bool selected=picker.choice.mode==mode;
+    const bool focused=(item.itemState&ODS_FOCUS)&&!(item.itemState&ODS_NOFOCUSRECT);
+    FillRect(item.hDC,&item.rcItem,picker.colors.panel);
+    Graphics g(item.hDC);g.SetSmoothingMode(SmoothingModeAntiAlias);
     RectF box(float(item.rcItem.left),float(item.rcItem.top),float(item.rcItem.right-item.rcItem.left),float(item.rcItem.bottom-item.rcItem.top));
-    SolidBrush fill(selected?palette.hover:palette.raised);g.FillRectangle(&fill,box);
-    Pen border(selected?palette.accent:palette.edge,selected?2.f:1.f);g.DrawRectangle(&border,box.X+1,box.Y+1,box.Width-2,box.Height-2);
-    if((item.itemState&ODS_FOCUS)&&!(item.itemState&ODS_NOFOCUSRECT)){RECT focus=item.rcItem;InflateRect(&focus,-4,-4);DrawFocusRect(item.hDC,&focus);}
+    appearance::rounded(g,box,12,selected||(item.itemState&ODS_SELECTED)?palette.hover:palette.raised);
     const bool compact=picker.inlinePanel;
     const float w=compact?std::min(124.f,box.Width-38):box.Width-44;
     const float x=box.X+(box.Width-w)/2,y=box.Y+(compact?13:20),scale=compact?.8f:1.f,h=60*scale;
@@ -134,7 +134,9 @@ void drawGraphCard(const DRAWITEMSTRUCT& item,const GraphPicker& picker,int mode
         }
     }
     SolidBrush dot(palette.accent);for(auto pt:pts)g.FillEllipse(&dot,pt.X-2.8f,pt.Y-2.8f,5.6f,5.6f);
-    ui::drawLabel(g,graphNames[mode],{box.X+8,box.Y+(compact?68:91),box.Width-16,25},14,palette.text,true,true);
+    const float labelY=box.Y+(compact?68:91);
+    ui::drawLabel(g,graphNames[mode],{box.X+8,labelY,box.Width-16,25},14,focused?palette.accent:palette.text,true,true);
+    if(focused)appearance::rounded(g,{box.X+box.Width/2-9,labelY+24,18,2},1,palette.accent);
     if(!compact)ui::drawLabel(g,graphDetails[mode],{box.X+10,box.Y+118,box.Width-20,26},10.5f,palette.muted,false,true);
     if(selected){SolidBrush chosen(palette.accent);g.FillEllipse(&chosen,box.X+box.Width-19.f,box.Y+9.f,8.f,8.f);}
 }
@@ -217,7 +219,7 @@ std::optional<GraphChoice> showPathPicker(HWND owner,GraphPicker& picker,const w
             0,0,840,inlineGraphPickerHeight,host->window,nullptr,instance,&picker);
         if(!hwnd)return {};
         attachWindowHelp(hwnd);
-        runInlineDialog(hwnd,inlineGraphPickerHeight,picker.done,GetDlgItem(hwnd,100+picker.choice.mode));
+        runInlineDialog(hwnd,picker.done,GetDlgItem(hwnd,100+picker.choice.mode));
         if(picker.font)DeleteObject(picker.font);
         if(picker.ok)return picker.choice;
         return {};
@@ -727,15 +729,7 @@ std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& tit
             WS_CHILD|WS_CLIPCHILDREN,0,0,840,290,host->window,nullptr,GetModuleHandleW(nullptr),&f);
         if(!hwnd)return {};
         ui::attachWindowHelp(hwnd);
-        size_t count=fields.size();bool multiline=false;
-        if(!tabs.empty()){
-            count=0;
-            for(const auto& tab:tabs)count=std::max(count,tab.second.size());
-        }
-        for(const auto& field:fields)multiline=multiline||field.multiline;
-        const int height=(tabs.empty()?28:63)+int((count+1)/2)*37+(multiline?70:0)+
-            (illustration?120:0)+44;
-        runInlineDialog(hwnd,height,f.done,f.tab?f.tab:!f.edits.empty()?f.edits.front():f.apply);
+        runInlineDialog(hwnd,f.done,f.tab?f.tab:!f.edits.empty()?f.edits.front():f.apply);
         if(f.font)DeleteObject(f.font);
         if(f.ok)return f.result;
         return {};

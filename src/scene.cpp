@@ -246,7 +246,20 @@ Scene makeScene(const Document& d,const Measure& measure){
     }
     strokeColor="#000000";s.items.insert(s.items.end(),labels.begin(),labels.end());
     int arrowIndex=-1;std::vector<int> hiddenArrowIndices;
-    auto arrow=[&](Vec a,Vec z,const std::string& color,double width,int head,double headScale=1.){if(arrowIndex>=0&&std::find(hiddenArrowIndices.begin(),hiddenArrowIndices.end(),arrowIndex)!=hiddenArrowIndices.end())return;Vec v=z-a;double len=v.length();if(len<1e-6)return;headScale=std::min(headScale,len/8);Vec u=v*(1/len),n{-u.y,u.x};Primitive p;p.reactionArrow=arrowIndex;p.owner=owner;p.points={a,head?z-u*(4.8*headScale):z};p.width=width;p.color=color;s.items.push_back(p);if(head){p.type=Primitive::Polygon;p.points=head==2?std::vector<Vec>{z,z-u*(5*headScale)+n*(2*headScale)}:std::vector<Vec>{z,z-u*(5*headScale)+n*(2*headScale),z-u*(5*headScale)-n*(2*headScale)};s.items.push_back(p);}};
+    auto arrow=[&](Vec a,Vec z,const std::string& color,double width,int head,double headScale=1.,double headWidth=0.){
+        if(arrowIndex>=0&&std::find(hiddenArrowIndices.begin(),hiddenArrowIndices.end(),arrowIndex)!=hiddenArrowIndices.end())return;
+        const Vec v=z-a;const double len=v.length();if(len<1e-6)return;
+        headScale=std::min(headScale,len/8);
+        const Vec u=v*(1/len),n{-u.y,u.x};
+        Primitive p;p.reactionArrow=arrowIndex;p.owner=owner;p.points={a,head?z-u*(4.8*headScale):z};
+        p.width=width;p.color=color;s.items.push_back(p);
+        if(head){
+            const Vec base=z-u*(5*headScale),side=n*(headWidth>0?headWidth/2:2*headScale);
+            p.type=Primitive::Polygon;p.points={z,base+side};
+            if(head!=2)p.points.push_back(base-side);
+            s.items.push_back(p);
+        }
+    };
     auto addText=[&](std::string value,Vec p,double size=9,std::string color="#000000",bool center=false,int role=0,int index=-1){Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=value;t.fontSize=size*d.style.fontSize/10.;t.face=d.style.labelFace;t.color=color;t.font=d.style.labelFont;if(t.font=="Arial")for(unsigned char c:value)if(c>=0xe3)t.font="Malgun Gothic";emitText(s.items,t,p,center,measure);};
     for(auto& o:d.objects){owner=o.id;Primitive p;p.owner=o.id;p.points=o.points;p.width=o.width;p.color=o.color;p.filled=o.filled;p.fontSize=o.fontSize;p.font=o.font;p.dash=o.dash;p.face=o.face;p.closed=o.closed;p.text=o.text;
         if(o.points.empty())continue;
@@ -634,11 +647,16 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(item.type==Primitive::Text){r=l+textWidth(measure,item.text,item.fontSize,item.font,item.face);b=t+item.fontSize*1.3;}
             external.push_back({l,t,std::max(1.,r-l),std::max(1.,b-t)});
         }
-        s.plotAxes[owner]={{x0,axisY},{x0+w+12*plot.axisScale,axisY},{x0,topY-14*plot.axisScale},axisFont,tickFont,valueFont,energyFont,h};
+        const PlotAxes axes{{x0,axisY},{x0+w+12*plot.axisScale,axisY},{x0,topY-14*plot.axisScale},axisFont,tickFont,valueFont,energyFont,h};
+        s.plotAxes[owner]=axes;
         const double inkFactor=plot.inkScale*(plot.thinLines?.5:1.);
-        if(plot.showXAxis)arrow({x0,axisY},{x0+w+12*plot.axisScale,axisY},"#000000",plot.xAxisWidth>0?plot.xAxisWidth/inkFactor:std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,plot.axisScale*(3.5/3.0));
+        const double automaticHeadScale=plot.axisScale*(3.5/3.0);
+        if(plot.showXAxis)arrow(axes.origin,axes.xEnd,"#000000",
+            plot.xAxisWidth>0?plot.xAxisWidth/inkFactor:std::max(.8,d.style.lineWidth*.6)*plot.axisScale,1,
+            plot.xAxisHeadLength>0?plot.xAxisHeadLength/5:automaticHeadScale,plot.xAxisHeadWidth);
         const double yAxisStroke=plot.yAxisWidth>0?plot.yAxisWidth/inkFactor:plot.series.empty()?2.4:plot.series.front().width;
-        if(plot.showYAxis)arrow({x0,axisY},{x0,topY-14*plot.axisScale},"#000000",yAxisStroke,1,std::max(plot.axisScale*(3.5/3.0),yAxisStroke*inkFactor*.6));
+        if(plot.showYAxis)arrow(axes.origin,axes.yEnd,"#000000",yAxisStroke,1,
+            plot.yAxisHeadLength>0?plot.yAxisHeadLength/5:std::max(automaticHeadScale,yAxisStroke*inkFactor*.6),plot.yAxisHeadWidth);
         for(size_t i=0;i<plot.stages.size();i++){
             const auto [a,b]=stageRange(plot.stages[i]);double c=(a+b)/2;
             const auto& layout=stageLayouts[i];double font=layout.font;
@@ -658,7 +676,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         double tickWidth=0;for(double v:ticks)tickWidth=std::max(tickWidth,widthOf(energyTickLabel(v,axis.step),tickFont));
         const double titleGap=plot.yTitleGap>0?plot.yTitleGap:std::max(24.,energyFont*.8);
         const double titleInkPad=energyFont*.025*std::max(0.,plot.inkScale-1);
-        const double axisLeft=std::min(x0-yAxisStroke*inkFactor/2,ticks.empty()?x0:x0-10-tickWidth);
+        const double axisLeft=std::min(x0-std::max(yAxisStroke*inkFactor,plot.yAxisHeadWidth)/2,ticks.empty()?x0:x0-10-tickWidth);
         // A rotated subscript extends right of the normal glyphs. Include both
         // script offsets and added text ink before measuring the visible gap.
         double yAxisX=axisLeft-titleGap-energyFont*1.65-titleInkPad;

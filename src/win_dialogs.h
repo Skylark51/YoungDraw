@@ -11,13 +11,13 @@ inline std::string utf8(const std::wstring& w){if(w.empty())return {};int n=Wide
 // Routes an existing dialog workflow to a child panel while its caller retains the edit transaction.
 struct InlineDialogHost {
     HWND window;
-    std::function<void(HWND,int)> mount;
+    std::function<void(HWND)> mount;
     InlineDialogHost* previous;
-    InlineDialogHost(HWND window,std::function<void(HWND,int)> mount);
+    InlineDialogHost(HWND window,std::function<void(HWND)> mount);
     ~InlineDialogHost();
 };
 InlineDialogHost* inlineDialogHost();
-void runInlineDialog(HWND child,int height,const bool& done,HWND focus);
+void runInlineDialog(HWND child,const bool& done,HWND focus);
 void themeCombo(HWND combo);
 struct GraphChoice {int mode=0;bool freeEnergy=true;};
 std::optional<GraphChoice> graphChoice(HWND owner,int initialMode=0,bool editStyle=false,const std::function<void(int)>& preview={});

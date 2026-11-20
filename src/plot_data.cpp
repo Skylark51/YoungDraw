@@ -147,6 +147,8 @@ void validateEnergyAnnotations(const EnergyPlot& p){
     if(!std::isfinite(p.legendFontSize)||(p.legendFontSize!=0&&(p.legendFontSize<4||p.legendFontSize>72)))throw std::runtime_error("Invalid legend font size");
     if(!std::isfinite(p.yTitleGap)||p.yTitleGap<0||p.yTitleGap>300)throw std::runtime_error("Invalid Y-axis title gap");
     if(!std::isfinite(p.valueGap)||p.valueGap<0||p.valueGap>200||!std::isfinite(p.yAxisWidth)||p.yAxisWidth<0||p.yAxisWidth>100)throw std::runtime_error("Invalid plot label clearance or axis width");
+    for(double size:{p.xAxisHeadLength,p.xAxisHeadWidth,p.yAxisHeadLength,p.yAxisHeadWidth})
+        if(!std::isfinite(size)||size<0||size>100)throw std::runtime_error("Invalid axis arrowhead dimension");
     if(!std::isfinite(p.inkScale)||p.inkScale<.25||p.inkScale>4)throw std::runtime_error("Invalid graph ink scale");
     if(!p.energySymbol.empty()&&p.energySymbol!="ΔE"&&p.energySymbol!="ΔG")throw std::runtime_error("Invalid energy symbol");
     const size_t paths=std::max(size_t(1),p.series.size());
