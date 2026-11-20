@@ -106,7 +106,7 @@ struct Manager{
         const auto stages=p->stages.empty()?defaultMechanismStages():p->stages;
         for(const auto& stage:stages)rows.push_back({stage.label,number(stage.start),number(stage.end),
             number(stage.fontSize),number(stage.arrowWidth),number(stage.arrowHeadSize),stage.captionBelow?"1":"0",
-             number(stage.offset.x),number(stage.offset.y),std::to_string(stage.row)});
+             number(stage.offset.x),number(stage.offset.y),std::to_string(stage.row),stage.levelRange?"1":"0"});
         grid=ui::embeddedStageTable(window,rows,[this,last=rows](const ui::Table& data) mutable ->std::wstring{
             if(data==last)return {};
             try{
@@ -419,7 +419,7 @@ struct Manager{
             GetWindowRect(GetDlgItem(window,tabFirst),&tabs);
             POINT at{tabs.left,tabs.top};
             ScreenToClient(window,&at);
-            text(g,L"배치 0: 가운데 / 1: 아래  ·  같은 줄 번호로 나란히 배치  ·  X·Y 이동값: pt",20,float(at.y+42),13,palette.text,true);
+            text(g,L"이름 0: 가운데 / 1: 아래  ·  범위 기준 0: 축 / 1: 물질 중앙",20,float(at.y+42),13,palette.text,true);
         }
         if(!notice.empty()&&!subpane)text(g,notice,20,float(client.bottom-73),13,palette.accent);
         else if(!subpane&&!panelVisible()&&page!=2)text(g,page==4?L"크기·굵기 위에서 휠로 조절 · Ctrl+Z: 실행 취소":page==1?L"크기·간격 위에서 휠로 조절할 수 있습니다.":page==3?L"상태와 위·아래 영역을 고른 뒤 구조를 그리거나 편집하세요.":L"데이터 표는 하단 패널에서 입력하고 그래프에 즉시 반영합니다.",20,float(client.bottom-70),11,palette.muted);

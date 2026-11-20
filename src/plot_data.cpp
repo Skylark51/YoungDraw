@@ -300,11 +300,11 @@ std::vector<MechanismStage> mechanismStageData(const std::vector<std::vector<std
                     throw std::runtime_error("배치 0~1, 이동 ±4000 pt, 줄 0~20 범위를 확인하세요.");
                 return value;
             };
-            const double below=setting(6,0,1),line=setting(9,0,20);
-            if(std::floor(below)!=below||std::floor(line)!=line)
-                throw std::runtime_error("배치와 줄 번호는 정수로 입력하세요.");
+            const double below=setting(6,0,1),line=setting(9,0,20),basis=setting(10,0,1);
+            if(std::floor(below)!=below||std::floor(line)!=line||std::floor(basis)!=basis)
+                throw std::runtime_error("배치, 줄 번호, 범위 기준은 정수로 입력하세요.");
             result.push_back({row[0],start,end,font,width,head,below==1,
-                {setting(7,-4000,4000),setting(8,-4000,4000)},int(line)});
+                {setting(7,-4000,4000),setting(8,-4000,4000)},int(line),basis==1});
             if(result.size()>100)throw std::runtime_error("단계는 최대 100개입니다.");
         }catch(const std::exception& e){throw std::runtime_error(std::to_string(i+1)+"행: "+e.what());}
     }return result;

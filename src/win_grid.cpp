@@ -361,7 +361,7 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         ListView_SetTextBkColor(g->list,colorRef(g->colors.palette.raised));
         ListView_SetTextColor(g->list,colorRef(g->colors.palette.text));
         SetWindowSubclass(g->list,listProc,1,(DWORD_PTR)g);
-        constexpr int reactionWidths[]={35,152,86,86,64,64,84,82,65,65,72};
+        constexpr int reactionWidths[]={35,140,80,80,57,57,73,69,61,61,62,84};
         for(size_t c=0;c<=g->columns.size();c++){LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=g->reactionStages?reactionWidths[c]:(c?std::max(120,870/int(g->columns.size())):45);auto name=c?g->columns[c-1]:L"행";col.pszText=name.data();ListView_InsertColumn(g->list,int(c),&col);}
         g->error=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,16,480,940,48,hwnd,nullptr,nullptr,nullptr);SendMessageW(g->error,WM_SETFONT,(WPARAM)g->font,TRUE);
         const wchar_t* labels[]={g->stages||g->reactionStages?L"단계 추가":L"행 추가",g->stages||g->reactionStages?L"단계 삭제":L"행 삭제",L"적용",L"취소",g->stages||g->reactionStages?L"단계 복제":L"행 복제"};const int positions[]={16,356,526,696,186};
@@ -458,7 +458,7 @@ HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Ta
     return createEmbeddedTable(parent,columns,rows,preview,cellError,columnEdit,false);
 }
 HWND embeddedStageTable(HWND parent,const Table& rows,const TablePreview& preview){
-    return createEmbeddedTable(parent,{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 pt",L"굵기 pt",L"화살촉 pt",L"배치 0/1",L"X 이동",L"Y 이동",L"줄 번호"},rows,preview,{},{},true);
+    return createEmbeddedTable(parent,{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 pt",L"굵기 pt",L"화살촉 pt",L"배치 0/1",L"X 이동",L"Y 이동",L"줄 번호",L"범위 기준"},rows,preview,{},{},true);
 }
 void distributeEmbeddedStages(HWND grid){
     auto* g=reinterpret_cast<Grid*>(GetWindowLongPtrW(grid,GWLP_USERDATA));
@@ -474,6 +474,7 @@ void distributeEmbeddedStages(HWND grid){
         row[2]=std::to_string(100.*(i+1)/named.size());
         row[7]=row[8]="0";
         row[9]="1";
+        row[10]="1";
     }
     if(rows==g->rows)return;
     checkpoint(*g);

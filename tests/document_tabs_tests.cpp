@@ -731,7 +731,7 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(manager,WM_COMMAND,4403,0);
     const auto& arranged=doc.plots.front().stages;
     check(arranged.size()==arrowCount,"automatic arrangement keeps every arrow");
-    for(size_t i=0;i<arranged.size();++i)check(arranged[i].row==1&&
+    for(size_t i=0;i<arranged.size();++i)check(arranged[i].row==1&&arranged[i].levelRange&&
         std::abs(arranged[i].start-100.*i/arrowCount)<1e-5&&std::abs(arranged[i].end-100.*(i+1)/arrowCount)<1e-5,
         "automatic arrangement divides one row into equal parts");
     capture();check(snapshot.Save(L"graph-manager-reaction-arrows.png",&png,nullptr)==Ok,"capture the inline reaction table");

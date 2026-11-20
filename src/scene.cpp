@@ -611,7 +611,32 @@ Scene makeScene(const Document& d,const Measure& measure){
             }return wrapped;
         };
         const auto stateX=[&](size_t i){return x0+50+(w-100)*plotStateFraction(plot,i);};
+        double materialStart=x0,materialEnd=x0+w;
+        if(plot.states.size()>1){
+            materialStart=stateX(0);
+            materialEnd=stateX(plot.states.size()-1);
+            if(materialEnd<=materialStart){materialStart=x0;materialEnd=x0+w;}
+        }
+        const double materialSpan=materialEnd-materialStart;
+        const size_t stageCount=plot.stages.size();
+        bool uniformlySpaced=stageCount>0;
+        for(size_t i=0;i<stageCount&&uniformlySpaced;++i){
+            const auto& stage=plot.stages[i];
+            uniformlySpaced=stage.levelRange&&stage.row==1&&
+                std::abs(stage.start-100.*i/stageCount)<1e-5&&
+                std::abs(stage.end-100.*(i+1)/stageCount)<1e-5;
+        }
         auto stageRange=[&](const MechanismStage& stage){
+            if(stage.levelRange){
+                if(uniformlySpaced){
+                    const double gap=std::min(6.,materialSpan/stageCount*.12);
+                    const double length=(materialSpan-gap*(stageCount-1))/stageCount;
+                    const double a=materialStart+(length+gap)*(&stage-plot.stages.data());
+                    return std::pair{a,a+length};
+                }
+                return std::pair{materialStart+materialSpan*stage.start/100,
+                                 materialStart+materialSpan*stage.end/100};
+            }
             double a=x0+w*stage.start/100,b=x0+w*stage.end/100;
             if(stage.row==0&&plot.states.size()>1){
                 // Axis-edge ranges terminate at the outer level centers when they fit.

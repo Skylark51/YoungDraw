@@ -99,6 +99,7 @@ struct MechanismStage {
     bool captionBelow=false;
     Vec offset; // Move the arrow and caption together in plot points.
     int row=0; // 0 places non-overlapping ranges on the same row automatically.
+    bool levelRange=false; // Percentages span the outer material level centers.
 };
 // Empty color entries inherit the pathway color. Segment i joins states i and i+1.
 struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors,valueLabels; bool sharedStart=false; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };

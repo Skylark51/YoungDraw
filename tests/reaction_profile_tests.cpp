@@ -204,6 +204,25 @@ int main(){try{
         for(const auto& restored:{fromNative(toNative(arrows)),fromCdxml(toCdxml(arrows))})
             check(toNative(restored)==toNative(arrows),"reaction placement and offsets survive saving");
 #endif
+        arrows.plots[0].stages=mechanismStageData({
+            {"First","0","50","12","1","5","1","0","0","1","1"},
+            {"Second","50","100","12","1","5","1","0","0","1","1"}});
+        const auto measured=makeScene(arrows);
+        std::vector<double> tips;
+        for(const auto& item:measured.items)if(item.type==Primitive::Polygon&&item.color==graph.xColor)
+            tips.push_back(item.points.front().x);
+        const auto& snap=measured.plotSnapPoints.at(graph.id);
+        const auto xOf=[&](size_t state){
+            for(const auto& point:snap)if(size_t(point.state)==state&&point.edge==0)return point.p.x;
+            throw std::runtime_error("missing center point");
+        };
+        check(tips.size()==4&&std::abs(tips.front()-xOf(0))<1e-8&&
+              std::abs(tips.back()-xOf(arrows.plots[0].states.size()-1))<1e-8&&
+              std::abs((tips[1]-tips[0])-(tips[3]-tips[2]))<1e-8,
+              "equal arrows run from first material center to last material center");
+#ifdef TEST_CDXML
+        check(fromCdxml(toCdxml(arrows)).plots[0].stages[0].levelRange,"material center anchoring survives saving");
+#endif
         auto old=mechanismStageData({{"Legacy","0","100","14"}});check(old[0].arrowWidth==0&&old[0].arrowHeadSize==0,"older stage rows retain automatic arrow sizing");
         for(auto row:std::vector<std::vector<std::string>>{{"Bad","0","100","14","101","0"},{"Bad","0","100","14","nan","0"},{"Bad","0","100","14","1","41"}}){bool rejected=false;try{mechanismStageData({row});}catch(...){rejected=true;}check(rejected,"invalid reaction arrow dimensions are rejected");}
         std::ofstream("reaction-arrow-style-preview.svg")<<toSvg(makeScene(arrows));
