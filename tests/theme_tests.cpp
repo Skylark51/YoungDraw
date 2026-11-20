@@ -51,7 +51,8 @@ void CALLBACK inspectPlotSettings(HWND owner,UINT,UINT_PTR timer,DWORD){
  plotSettingsValid=plotSettingsValid&&TabCtrl_GetCurSel(tab)==2&&IsWindowVisible(offset);
 
  const auto& palette=appearance::palette();
- RECT bounds{},outer{},edit{};
+ RECT bounds{},outer{},edit{},tabBounds{};
+ GetClientRect(tab,&tabBounds);
  GetClientRect(dialog,&bounds);
  GetWindowRect(dialog,&outer);
  GetWindowRect(offset,&edit);
@@ -70,10 +71,12 @@ void CALLBACK inspectPlotSettings(HWND owner,UINT,UINT_PTR timer,DWORD){
  SendMessageW(dialog,WM_PRINT,(WPARAM)dc,PRF_CLIENT|PRF_CHILDREN);
  SetViewportOrgEx(dc,0,0,nullptr);
  const auto panel=GetPixel(dc,tabOrigin.x+625,tabOrigin.y+10);
- const auto underline=GetPixel(dc,tabOrigin.x+axisTab.left+3,tabOrigin.y+axisTab.bottom-1);
+ const int baseline=tabOrigin.y+tabBounds.bottom-1;
+ const auto activeSeam=GetPixel(dc,tabOrigin.x+(axisTab.left+axisTab.right)/2,baseline);
+ const auto divider=GetPixel(dc,tabOrigin.x+625,baseline);
  const auto edge=GetPixel(dc,editOrigin.x+30,editOrigin.y);
  graphics.ReleaseHDC(dc);
- if(panel!=palette.panel.ToCOLORREF()||underline!=palette.accent.ToCOLORREF()||edge!=palette.edge.ToCOLORREF()){
+ if(panel!=palette.panel.ToCOLORREF()||activeSeam!=panel||divider==panel||edge!=palette.edge.ToCOLORREF()){
   std::cerr<<"Graph settings theme colors differ for theme "<<requested<<'\n';
   plotSettingsValid=false;
  }

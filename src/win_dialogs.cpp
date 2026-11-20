@@ -359,35 +359,47 @@ static void drawFormTabs(HWND hwnd,HDC dc){
     RECT bounds{};
     GetClientRect(hwnd,&bounds);
     fill(bounds,palette.panel);
-    fill({0,bounds.bottom-1,bounds.right,bounds.bottom},palette.edge);
-
     if(auto font=SendMessageW(hwnd,WM_GETFONT,0,0))SelectObject(dc,reinterpret_cast<HFONT>(font));
     SetBkMode(dc,TRANSPARENT);
     const int selected=TabCtrl_GetCurSel(hwnd);
+    const bool keyboardFocus=GetFocus()==hwnd&&!(SendMessageW(hwnd,WM_QUERYUISTATE,0,0)&UISF_HIDEFOCUS);
+    RECT activeTab{};
+    const int baseline=bounds.bottom-1;
+    if(selected>=0&&TabCtrl_GetItemRect(hwnd,selected,&activeTab)){
+        using namespace Gdiplus;
+        Graphics graphics(dc);
+        graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+        const float left=float(activeTab.left+1),right=float(activeTab.right-1);
+        const float top=float(activeTab.top)+.5f,bottom=float(baseline);
+        constexpr float corner=8.f;
+        GraphicsPath outline;
+        outline.AddLine(0.f,bottom,left,bottom);
+        outline.AddLine(left,bottom,left,top+corner/2);
+        outline.AddArc(left,top,corner,corner,180,90);
+        outline.AddArc(right-corner,top,corner,corner,270,90);
+        outline.AddLine(right,top+corner/2,right,bottom);
+        outline.AddLine(right,bottom,float(bounds.right),bottom);
+        Pen edge(palette.edge,1.f);
+        graphics.DrawPath(&edge,&outline);
+    }else{
+        fill({0,baseline,bounds.right,bounds.bottom},palette.edge);
+    }
+
     for(int i=0;i<TabCtrl_GetItemCount(hwnd);++i){
         RECT tab{};
         if(!TabCtrl_GetItemRect(hwnd,i,&tab))continue;
         ++tab.left;
         --tab.right;
         const bool active=i==selected;
-        if(active){
-            fill(tab,palette.raised);
-            fill({tab.left,tab.bottom-2,tab.right,tab.bottom},palette.accent);
-        }
-
         wchar_t label[128]{};
         TCITEMW item{};
         item.mask=TCIF_TEXT;
         item.pszText=label;
         item.cchTextMax=int(std::size(label));
         TabCtrl_GetItem(hwnd,i,&item);
-        SetTextColor(dc,colorRef(active?palette.text:palette.muted));
+        const auto labelColor=active?(keyboardFocus?palette.accent:palette.text):palette.muted;
+        SetTextColor(dc,colorRef(labelColor));
         DrawTextW(dc,label,-1,&tab,DT_SINGLELINE|DT_CENTER|DT_VCENTER|DT_NOPREFIX);
-        if(active&&GetFocus()==hwnd&&!(SendMessageW(hwnd,WM_QUERYUISTATE,0,0)&UISF_HIDEFOCUS)){
-            InflateRect(&tab,-3,-3);
-            SetDCBrushColor(dc,colorRef(palette.accent));
-            FrameRect(dc,&tab,brush);
-        }
     }
     RestoreDC(dc,saved);
 }
@@ -400,7 +412,7 @@ static LRESULT CALLBACK formTabProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_
         EndPaint(hwnd,&paint);
         return 0;
     }
-    if(msg==WM_PRINTCLIENT){
+    if(msg==WM_PRINTCLIENT||(msg==WM_PRINT&&(lp&PRF_CLIENT))){
         drawFormTabs(hwnd,reinterpret_cast<HDC>(wp));
         return 0;
     }
@@ -579,7 +591,7 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             y=28;
         }
         if(!f->tabs.empty()){
-            f->tab=CreateWindowW(WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|TCS_OWNERDRAWFIXED,16,10,644,35,hwnd,nullptr,nullptr,nullptr);
+            f->tab=CreateWindowW(WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP,16,10,644,35,hwnd,nullptr,nullptr,nullptr);
             SendMessageW(f->tab,WM_SETFONT,WPARAM(f->font),TRUE);
             TabCtrl_SetPadding(f->tab,14,5);
             SetWindowSubclass(f->tab,formTabProc,1,0);
