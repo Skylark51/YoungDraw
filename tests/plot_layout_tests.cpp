@@ -610,6 +610,31 @@ int main(){try{
 
     }
     {
+        auto graph=sample();
+        graph.states[1].transitionState=true;
+        graph.states[3].transitionState=true;
+        Document labels;labels.plots={graph};
+        auto captionBaselines=[&](){
+            std::map<int,double> result;
+            for(const auto& item:makeScene(labels,measure).items)
+                if(item.textRole==6&&item.type==Primitive::Text&&item.text!="‡")
+                    result.emplace(item.textIndex,item.points.front().y);
+            return result;
+        };
+        const auto initial=captionBaselines();
+        check(initial.size()==5&&std::all_of(initial.begin(),initial.end(),[&](const auto& label){
+            return std::abs(label.second-initial.at(0))<1e-8;
+        }),"automatically decorated TS labels and plain names share the X-axis baseline");
+
+        Object obstruction;obstruction.id=2;obstruction.kind=ObjectKind::Text;obstruction.text="Structure note";
+        obstruction.points={{graph.p.x+96,initial.at(0)-2}};labels.objects.push_back(obstruction);
+        const auto moved=captionBaselines();
+        check(moved.size()==initial.size()&&moved.at(0)>initial.at(0)&&
+              std::all_of(moved.begin(),moved.end(),[&](const auto& label){
+                  return std::abs(label.second-moved.at(0))<1e-8;
+              }),"an obstruction shifts the entire X-axis name row together");
+    }
+    {
         auto scripted=publicationPlot(sample());scripted.states[0].label="I_{1}";scripted.states[1].label="TS^{+}_{2}";scripted.states[2].label="Fe^{III}";
         Document labels;labels.nextId=2;labels.plots={scripted};auto drawing=makeScene(labels,measure);
         std::map<int,std::vector<Primitive>> groups;for(auto& run:drawing.items)if(run.type==Primitive::Text&&run.textRole==6)groups[run.textIndex].push_back(run);

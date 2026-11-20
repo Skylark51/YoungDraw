@@ -1061,28 +1061,81 @@ Scene makeScene(const Document& d,const Measure& measure){
                 external.push_back({l,t-6,r-l+tickFont+8,b-t+6});
             }
         }
-        std::vector<Rect> stateBoxes;double stateBottom=axisY+10,stateScriptTop=0;
-        for(auto& state:plot.states)if(state.label.find("^{")!=std::string::npos)stateScriptTop=-stateFont*.4;
-        for(size_t i=0;i<plot.states.size();i++){
-            const auto& state=plot.states[i];if(state.labelPlacement>=3)continue;
-            bool onCurve=state.labelPlacement==1||state.labelPlacement==2;
-            if(onCurve&&(size_t(state.labelPath)>=paths.size()||!visible(paths[size_t(state.labelPath)],i)))continue;
-            std::string label=state.label;
-            if(state.transitionState&&state.above.empty()&&state.below.empty()&&!label.empty())label="["+label+"]^{‡}";
-            double x=stateX(i)+state.labelOffset.x,tw=scriptWidth(label,stateFont);
-            double scriptTop=label.find("^{")!=std::string::npos?-stateFont*.4:stateScriptTop;
-            double height=stateFont*1.3*(1+std::count(label.begin(),label.end(),'\n'))-scriptTop;
-            double y=axisY+10;
-            if(onCurve){double levelY=pointAt(i,paths[size_t(state.labelPath)].values[i]).y;y=state.labelPlacement==1?levelY-height-10:levelY+10;}
-            Rect box{x-tw/2,y+state.labelOffset.y,tw,height};
-            // Explicit offsets and curve placements are kept exactly as requested.
-            if(!onCurve&&state.labelOffset.x==0&&state.labelOffset.y==0)for(size_t pass=0;pass<=stateBoxes.size()+external.size();pass++){
-                bool moved=false;for(auto other:stateBoxes)if(overlaps(box,other)){box.y=other.y+other.h+5;moved=true;}
-                for(auto other:external)if(overlaps(box,other)){box.y=other.y+other.h+5;moved=true;}
-                if(!moved)break;
+        struct StateNameLayout {std::string text;double x=0;bool raised=false;};
+        std::vector<StateNameLayout> names(plot.states.size());
+        std::vector<size_t> automaticAxisNames;
+        for(size_t i=0;i<plot.states.size();++i){
+            const auto& state=plot.states[i];
+            if(state.labelPlacement>=3||state.label.empty())continue;
+            auto& name=names[i];
+            name.text=state.label;
+            if(state.transitionState&&state.above.empty()&&state.below.empty())
+                name.text="["+name.text+"]^{‡}";
+            name.x=stateX(i)+state.labelOffset.x;
+            for(const auto& run:scriptRuns(name.text))if(run.script==1)name.raised=true;
+            if(state.labelPlacement==0&&state.labelOffset.y==0)automaticAxisNames.push_back(i);
+        }
+
+        // Narrow plots wrap long captions while the first lines stay on one baseline.
+        double axisStateFont=stateFont;
+        auto ordered=automaticAxisNames;
+        std::sort(ordered.begin(),ordered.end(),[&](size_t a,size_t b){return names[a].x<names[b].x;});
+        std::vector<double> available(names.size(),std::numeric_limits<double>::infinity());
+        for(size_t j=1;j<ordered.size();++j){
+            const auto left=ordered[j-1],right=ordered[j];
+            const double gap=names[right].x-names[left].x;
+            const double width=std::max(.25,gap-1);
+            available[left]=std::min(available[left],width);
+            available[right]=std::min(available[right],width);
+            const double needed=(widthOf(names[left].text,1)+widthOf(names[right].text,1))/2;
+            if(needed>0)axisStateFont=std::min(axisStateFont,std::max(std::min(4.,width*.7),width/needed));
+        }
+        for(size_t i:ordered)if(widthOf(names[i].text,axisStateFont)>available[i])
+            names[i].text=wrapStage(names[i].text,axisStateFont,available[i]);
+        auto nameBox=[&](const StateNameLayout& name,double baseline,double font){
+            const double pad=name.raised?font*.4:0;
+            const double width=widthOf(name.text,font);
+            const double height=font*1.3*(1+std::count(name.text.begin(),name.text.end(),'\n'));
+            return Rect{name.x-width/2,baseline-pad,width,height+pad};
+        };
+        double axisNameBaseline=axisY+10;
+        for(size_t i=0;i<names.size();++i)if(plot.states[i].labelPlacement==0&&names[i].raised){
+            axisNameBaseline+=axisStateFont*.4;
+            break;
+        }
+        // If a structure occupies the row, lower the row as a unit.
+        for(size_t pass=0;pass<external.size();++pass){
+            double next=axisNameBaseline;
+            for(size_t i:automaticAxisNames){
+                const auto& name=names[i];
+                const auto box=nameBox(name,axisNameBaseline,axisStateFont);
+                for(const auto& outside:external)if(overlaps(box,outside))
+                    next=std::max(next,outside.y+outside.h+5+(name.raised?axisStateFont*.4:0));
             }
-            stateBoxes.push_back(box);if(!onCurve)stateBottom=std::max(stateBottom,box.y+box.h);
-            plotText(label,{x,box.y-scriptTop},stateFont,"#000000",true,6,int(i));
+            if(next==axisNameBaseline)break;
+            axisNameBaseline=next;
+        }
+        std::vector<Rect> stateBoxes;
+        double stateBottom=axisY+10;
+        for(size_t i=0;i<names.size();++i){
+            const auto& state=plot.states[i];
+            const auto& name=names[i];
+            if(name.text.empty())continue;
+            const bool onCurve=state.labelPlacement==1||state.labelPlacement==2;
+            const double font=onCurve?stateFont:axisStateFont;
+            double baseline=axisNameBaseline;
+            if(onCurve){
+                const size_t path=size_t(state.labelPath);
+                if(path>=paths.size()||!visible(paths[path],i))continue;
+                const double level=pointAt(i,paths[path].values[i]).y;
+                const double textHeight=font*1.3*(1+std::count(name.text.begin(),name.text.end(),'\n'));
+                baseline=state.labelPlacement==1?level-10-textHeight:level+10+(name.raised?font*.4:0);
+            }
+            baseline+=state.labelOffset.y;
+            const auto box=nameBox(name,baseline,font);
+            stateBoxes.push_back(box);
+            if(!onCurve)stateBottom=std::max(stateBottom,box.y+box.h);
+            plotText(name.text,{name.x,baseline},font,"#000000",true,6,int(i));
         }
         // Gaps use current data, so changing energies or units updates the annotation.
         for(size_t i=0;i<plot.states.size();++i){const auto& state=plot.states[i];
