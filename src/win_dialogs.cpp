@@ -278,8 +278,103 @@ static bool preview(Form& f){
     SetWindowTextW(f.error,error.empty()?L"미리보기가 갱신되었습니다. 취소하면 원래 그림으로 복원합니다.":error.c_str());
     EnableWindow(f.apply,error.empty());return error.empty();
 }
+static void drawFormTabs(HWND hwnd,HDC dc){
+    const auto& palette=appearance::palette();
+    auto brush=static_cast<HBRUSH>(GetStockObject(DC_BRUSH));
+    const int saved=SaveDC(dc);
+    auto fill=[&](const RECT& rect,Gdiplus::Color color){
+        SetDCBrushColor(dc,colorRef(color));
+        FillRect(dc,&rect,brush);
+    };
+    RECT bounds{};
+    GetClientRect(hwnd,&bounds);
+    fill(bounds,palette.panel);
+    fill({0,bounds.bottom-1,bounds.right,bounds.bottom},palette.edge);
+
+    if(auto font=SendMessageW(hwnd,WM_GETFONT,0,0))SelectObject(dc,reinterpret_cast<HFONT>(font));
+    SetBkMode(dc,TRANSPARENT);
+    const int selected=TabCtrl_GetCurSel(hwnd);
+    for(int i=0;i<TabCtrl_GetItemCount(hwnd);++i){
+        RECT tab{};
+        if(!TabCtrl_GetItemRect(hwnd,i,&tab))continue;
+        ++tab.left;
+        --tab.right;
+        const bool active=i==selected;
+        if(active){
+            fill(tab,palette.raised);
+            fill({tab.left,tab.bottom-2,tab.right,tab.bottom},palette.accent);
+        }
+
+        wchar_t label[128]{};
+        TCITEMW item{};
+        item.mask=TCIF_TEXT;
+        item.pszText=label;
+        item.cchTextMax=int(std::size(label));
+        TabCtrl_GetItem(hwnd,i,&item);
+        SetTextColor(dc,colorRef(active?palette.text:palette.muted));
+        DrawTextW(dc,label,-1,&tab,DT_SINGLELINE|DT_CENTER|DT_VCENTER|DT_NOPREFIX);
+        if(active&&GetFocus()==hwnd&&!(SendMessageW(hwnd,WM_QUERYUISTATE,0,0)&UISF_HIDEFOCUS)){
+            InflateRect(&tab,-3,-3);
+            SetDCBrushColor(dc,colorRef(palette.accent));
+            FrameRect(dc,&tab,brush);
+        }
+    }
+    RestoreDC(dc,saved);
+}
+
+static LRESULT CALLBACK formTabProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR){
+    if(msg==WM_ERASEBKGND)return 1;
+    if(msg==WM_PAINT){
+        PAINTSTRUCT paint{};
+        drawFormTabs(hwnd,BeginPaint(hwnd,&paint));
+        EndPaint(hwnd,&paint);
+        return 0;
+    }
+    if(msg==WM_PRINTCLIENT){
+        drawFormTabs(hwnd,reinterpret_cast<HDC>(wp));
+        return 0;
+    }
+    const auto result=DefSubclassProc(hwnd,msg,wp,lp);
+    if(msg==TCM_SETCURSEL||msg==WM_SETFOCUS||msg==WM_KILLFOCUS||msg==WM_UPDATEUISTATE||
+        msg==WM_KEYDOWN||msg==WM_LBUTTONDOWN||msg==WM_LBUTTONUP)InvalidateRect(hwnd,nullptr,FALSE);
+    return result;
+}
+
+static void drawFormEditEdge(HWND hwnd,HDC dc){
+    const auto& palette=appearance::palette();
+    RECT outer{};
+    GetWindowRect(hwnd,&outer);
+    OffsetRect(&outer,-outer.left,-outer.top);
+    auto brush=static_cast<HBRUSH>(GetStockObject(DC_BRUSH));
+    const int saved=SaveDC(dc);
+    RECT inner=outer;
+    InflateRect(&inner,-GetSystemMetrics(SM_CXEDGE),-GetSystemMetrics(SM_CYEDGE));
+    ExcludeClipRect(dc,inner.left,inner.top,inner.right,inner.bottom);
+    SetDCBrushColor(dc,colorRef(palette.raised));
+    FillRect(dc,&outer,brush);
+    SetDCBrushColor(dc,colorRef(GetFocus()==hwnd?palette.accent:palette.edge));
+    FrameRect(dc,&outer,brush);
+    RestoreDC(dc,saved);
+}
+
+static LRESULT CALLBACK formEditEdgeProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR){
+    const auto result=DefSubclassProc(hwnd,msg,wp,lp);
+    if(msg==WM_NCPAINT){
+        if(auto dc=GetWindowDC(hwnd)){
+            drawFormEditEdge(hwnd,dc);
+            ReleaseDC(hwnd,dc);
+        }
+    }else if(msg==WM_PRINT&&(lp&PRF_NONCLIENT)){
+        drawFormEditEdge(hwnd,reinterpret_cast<HDC>(wp));
+    }else if(msg==WM_SETFOCUS||msg==WM_KILLFOCUS){
+        RedrawWindow(hwnd,nullptr,nullptr,RDW_INVALIDATE|RDW_FRAME);
+    }
+    return result;
+}
+
 static void layoutFormTabs(Form& f){
     const int active=TabCtrl_GetCurSel(f.tab);
+    if(active<0||size_t(active)>=f.tabs.size())return;
     int y=52;
     for(size_t i=0;i<f.rows.size();++i)for(HWND control:f.rows[i])ShowWindow(control,SW_HIDE);
     for(size_t i:f.tabs.at(active).second){
@@ -298,8 +393,10 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         f=static_cast<Form*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(f));
         f->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());int y=16;
         if(!f->tabs.empty()){
-            f->tab=CreateWindowW(WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP,16,10,644,35,hwnd,nullptr,nullptr,nullptr);
+            f->tab=CreateWindowW(WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|TCS_OWNERDRAWFIXED,16,10,644,35,hwnd,nullptr,nullptr,nullptr);
             SendMessageW(f->tab,WM_SETFONT,WPARAM(f->font),TRUE);
+            TabCtrl_SetPadding(f->tab,14,5);
+            SetWindowSubclass(f->tab,formTabProc,1,0);
             for(auto& group:f->tabs){
                 TCITEMW item{};item.mask=TCIF_TEXT;item.pszText=group.first.data();
                 TabCtrl_InsertItem(f->tab,TabCtrl_GetItemCount(f->tab),&item);
@@ -314,7 +411,13 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 for(auto& c:field.choices)SendMessageW(edit,CB_ADDSTRING,0,(LPARAM)c.c_str());
                 if(field.editableChoices)SetWindowTextW(edit,wide(field.value).c_str());else SendMessageW(edit,CB_SETCURSEL,std::stoi(field.value),0);
             }else edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",wide(field.value).c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|(field.multiline?ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_VSCROLL:ES_AUTOHSCROLL),230,y,field.scripts?330:field.color?385:430,height,hwnd,(HMENU)(INT_PTR)(100+i),nullptr,nullptr);
-            SendMessageW(edit,WM_SETFONT,(WPARAM)f->font,TRUE);SendMessageW(edit,EM_SETLIMITTEXT,100000,0);f->edits.push_back(edit);f->rows.push_back({label,edit});
+            if(f->tab&&field.choices.empty()){
+                SetWindowSubclass(edit,formEditEdgeProc,2,0);
+                SendMessageW(edit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(6,6));
+            }
+            SendMessageW(edit,WM_SETFONT,(WPARAM)f->font,TRUE);
+            SendMessageW(edit,EM_SETLIMITTEXT,100000,0);
+            f->edits.push_back(edit);f->rows.push_back({label,edit});
             if(field.color){HWND b=CreateWindowW(L"BUTTON",L"...",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,621,y,39,29,hwnd,(HMENU)(INT_PTR)(500+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);f->rows.back().push_back(b);}
             if(field.choices.empty()||field.editableChoices)SetWindowSubclass(editSurface(edit),scriptEditProc,1,reinterpret_cast<DWORD_PTR>(&field));
             if(field.scripts)for(int k=0;k<2;k++){HWND b=CreateWindowW(L"BUTTON",k?L"x₂":L"x²",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,565+k*48,y,44,29,hwnd,(HMENU)(INT_PTR)((k?800:700)+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);f->rows.back().push_back(b);}
