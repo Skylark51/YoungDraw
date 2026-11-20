@@ -73,7 +73,12 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIA
      LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return result;
  }
  if(argc==4&&std::wstring(argv[1])==L"--convert"){try{doc=fromCdxml(readFile(argv[2]));writeFile(std::wstring(argv[3])+L".ydraw",toNative(doc));writeFile(std::wstring(argv[3])+L".cdxml",toCdxml(doc));writeFile(std::wstring(argv[3])+L".svg",toSvg(scene()));LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(const std::exception& e){try{writeFile(std::wstring(argv[3])+L".error.txt",e.what());}catch(...){} LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
- isolatedStructureEditing=argc==4&&std::wstring(argv[1])==L"--edit-structure";if(isolatedStructureEditing)isolatedStructureResult=argv[3];
+ isolatedStructureEditing=(argc==4||argc==5)&&std::wstring(argv[1])==L"--edit-structure";
+ HWND structureHost=nullptr;
+ if(isolatedStructureEditing){
+     isolatedStructureResult=argv[3];
+     if(argc==5){structureHost=reinterpret_cast<HWND>(_wcstoui64(argv[4],nullptr,10));if(!IsWindow(structureHost))return 1;}
+ }
  const bool powerPointImport=argc==2&&std::wstring(argv[1])==L"--open-powerpoint-chemdraw";
  std::vector<std::pair<Document,std::wstring>> startupDocuments;
  if(powerPointImport){
@@ -99,7 +104,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIA
      if(startup.dwFlags&STARTF_USEPOSITION){x=static_cast<LONG>(startup.dwX);y=static_cast<LONG>(startup.dwY);}
      if(startup.dwFlags&STARTF_USESIZE){width=int(startup.dwXSize);height=int(startup.dwYSize);}
  }
- LocalFree(argv);WNDCLASSW wc{};wc.style=CS_DBLCLKS;wc.lpfnWndProc=proc;wc.hInstance=instance;wc.lpszClassName=L"YoungDrawWindow";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(101));RegisterClassW(&wc);HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"YoungDraw",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,x,y,width,height,nullptr,nullptr,instance,nullptr);if(!hwnd)return 1;SendMessageW(hwnd,WM_SETICON,ICON_SMALL,reinterpret_cast<LPARAM>(LoadImageW(instance,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_SHARED)));fit();for(size_t i=1;i<startupDocuments.size();i++)newDocumentTab(std::move(startupDocuments[i].first),startupDocuments[i].second);if(!isolatedStructureEditing&&FAILED(office::start({hwnd,[](const Document& d){storeDocumentTab();for(auto& tab:documents)tab.office=false;officeDocument=false;newDocumentTab(d,L"",true);},[](){return officeCurrentDocument();},officePicture},embedding)))MessageBoxW(hwnd,L"Office 편집 개체를 등록하지 못했습니다.",L"YoungDraw",MB_OK|MB_ICONWARNING);if(!embedding)splash.finish(hwnd,show);if(!embedding&&!isolatedStructureEditing)startRecovery();fit();UpdateWindow(hwnd);ACCEL commandSearch{FVIRTKEY|FCONTROL|FSHIFT,'F',230};
+ if(structureHost){RECT r{};GetClientRect(structureHost,&r);x=0;y=0;width=r.right;height=std::max(1L,r.bottom-42);}
+ LocalFree(argv);WNDCLASSW wc{};wc.style=CS_DBLCLKS;wc.lpfnWndProc=proc;wc.hInstance=instance;wc.lpszClassName=L"YoungDrawWindow";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(101));RegisterClassW(&wc);HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"YoungDraw",(structureHost?WS_CHILD:WS_OVERLAPPEDWINDOW)|WS_CLIPCHILDREN,x,y,width,height,structureHost,nullptr,instance,nullptr);if(!hwnd)return 1;SendMessageW(hwnd,WM_SETICON,ICON_SMALL,reinterpret_cast<LPARAM>(LoadImageW(instance,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_SHARED)));fit();for(size_t i=1;i<startupDocuments.size();i++)newDocumentTab(std::move(startupDocuments[i].first),startupDocuments[i].second);if(!isolatedStructureEditing&&FAILED(office::start({hwnd,[](const Document& d){storeDocumentTab();for(auto& tab:documents)tab.office=false;officeDocument=false;newDocumentTab(d,L"",true);},[](){return officeCurrentDocument();},officePicture},embedding)))MessageBoxW(hwnd,L"Office 편집 개체를 등록하지 못했습니다.",L"YoungDraw",MB_OK|MB_ICONWARNING);if(structureHost)ShowWindow(hwnd,SW_SHOW);else if(!embedding)splash.finish(hwnd,show);if(!embedding&&!isolatedStructureEditing)startRecovery();fit();UpdateWindow(hwnd);ACCEL commandSearch{FVIRTKEY|FCONTROL|FSHIFT,'F',230};
  auto accelerators=CreateAcceleratorTableW(&commandSearch,1);
  MSG msg{};
  while(GetMessageW(&msg,nullptr,0,0)>0){

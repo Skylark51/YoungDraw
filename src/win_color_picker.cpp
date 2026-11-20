@@ -165,7 +165,7 @@ LRESULT CALLBACK colorProc(HWND window,UINT msg,WPARAM wp,LPARAM lp){
     }
     if(!p)return DefWindowProcW(window,msg,wp,lp);
     switch(msg){
-    case WM_ERASEBKGND:return 1;
+    case WM_ERASEBKGND:{RECT bounds{};GetClientRect(window,&bounds);FillRect(reinterpret_cast<HDC>(wp),&bounds,p->colors.panel);return 1;}
     case WM_PAINT:{PAINTSTRUCT ps{};p->paint(window,BeginPaint(window,&ps));EndPaint(window,&ps);return 0;}
     case WM_PRINTCLIENT:p->paint(window,reinterpret_cast<HDC>(wp));return 0;
     case WM_CTLCOLOREDIT:case WM_CTLCOLORSTATIC:return p->colors.control(msg,reinterpret_cast<HDC>(wp));
@@ -226,6 +226,14 @@ std::optional<COLORREF> chooseColor(HWND parent,COLORREF initial){
     WNDCLASSW wc{};wc.lpfnWndProc=colorProc;wc.hInstance=GetModuleHandleW(nullptr);
     wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.lpszClassName=L"YoungDrawColorPicker";
     RegisterClassW(&wc);
+    if(auto* host=inlineDialogHost()){
+        auto panel=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"색 선택",WS_CHILD|WS_CLIPCHILDREN,
+            0,0,560,306,host->window,nullptr,wc.hInstance,&picker);
+        if(!panel)return {};
+        appearance::nativeControl(GetDlgItem(panel,hexInput));
+        runInlineDialog(panel,306,picker.done,GetDlgItem(panel,hexInput));
+        return picker.accepted?std::optional<COLORREF>{picker.current}:std::nullopt;
+    }
     constexpr DWORD style=WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN;
     RECT size{0,0,560,306};
     AdjustWindowRect(&size,style,FALSE);

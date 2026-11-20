@@ -11,6 +11,7 @@
 #include "cdxml.h"
 #include "win_dialogs.h"
 #include "win_dialog_style.h"
+#include "win_dialog_style.h"
 #include "win_scripts.h"
 #include "win_ui.h"
 #include <commdlg.h>
@@ -276,6 +277,39 @@ bool activeStructureTarget(){
     if(auto* p=plot(targetContainer))return targetSlot<p->states.size();
     return false;
 }
+namespace {
+LRESULT CALLBACK structureViewportProc(HWND window,UINT message,WPARAM wp,LPARAM lp){
+    auto* colors=reinterpret_cast<ui::DialogColors*>(GetWindowLongPtrW(window,GWLP_USERDATA));
+    if(message==WM_CREATE){
+        colors=static_cast<ui::DialogColors*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+        SetWindowLongPtrW(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(colors));
+        for(int i=0;i<2;++i){
+            auto button=CreateWindowW(L"BUTTON",i?L"취소":L"적용",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
+                0,0,100,30,window,reinterpret_cast<HMENU>(INT_PTR(186+i)),nullptr,nullptr);
+            SendMessageW(button,WM_SETFONT,WPARAM(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
+        }
+        return 0;
+    }
+    if(message==WM_SIZE){
+        RECT bounds{};GetClientRect(window,&bounds);
+        for(int i=0;i<2;++i)MoveWindow(GetDlgItem(window,186+i),int(bounds.right)-214+i*108,
+            std::max(0,int(bounds.bottom)-36),100,30,TRUE);
+        return 0;
+    }
+    if(message==WM_ERASEBKGND&&colors){
+        RECT bounds{};GetClientRect(window,&bounds);FillRect(reinterpret_cast<HDC>(wp),&bounds,colors->panel);return 1;
+    }
+    if(message==WM_DRAWITEM&&colors){
+        const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);colors->draw(item,item.CtlID==186);return TRUE;
+    }
+    if(message==WM_COMMAND&&(LOWORD(wp)==186||LOWORD(wp)==187)){
+        if(auto editor=FindWindowExW(window,nullptr,L"YoungDrawWindow",nullptr))
+            PostMessageW(editor,WM_COMMAND,LOWORD(wp),0);
+        return 0;
+    }
+    return DefWindowProcW(window,message,wp,lp);
+}
+}
 std::optional<Document> runStructureEditor(const Document& fragment,HWND owner){
     wchar_t temporary[32768]{},name[32768]{},exe[32768]{};
     if(!GetTempPathW(32768,temporary)||!GetTempFileNameW(temporary,L"YDS",0,name)||!GetModuleFileNameW(nullptr,exe,32768))throw std::runtime_error("구조 편집용 임시 파일을 만들 수 없습니다.");
@@ -289,6 +323,23 @@ std::optional<Document> runStructureEditor(const Document& fragment,HWND owner){
         width=std::min(width,int(monitor.rcWork.right-monitor.rcWork.left));
         height=std::min(height,int(monitor.rcWork.bottom-monitor.rcWork.top));
     }
+    auto* host=ui::inlineDialogHost();
+    HWND viewport=nullptr;
+    ui::DialogColors viewportColors;
+    if(host){
+        WNDCLASSW wc{};wc.lpfnWndProc=structureViewportProc;wc.hInstance=GetModuleHandleW(nullptr);
+        wc.lpszClassName=L"YoungDrawStructurePane";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
+        viewport=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"구조 편집",
+            WS_CHILD|WS_CLIPCHILDREN,0,0,1,1,host->window,nullptr,wc.hInstance,&viewportColors);
+        if(!viewport)throw std::runtime_error("구조 편집 영역을 만들 수 없습니다.");
+        host->mount(viewport,450);
+        commandLine+=L" "+std::to_wstring(reinterpret_cast<UINT_PTR>(viewport));
+    }
+    struct ViewportGuard {
+        HWND child;
+        ui::InlineDialogHost* host;
+        ~ViewportGuard(){if(child){DestroyWindow(child);host->mount(nullptr,0);}}
+    } viewportGuard{viewport,host};
     const RECT placement=ui::ownedWindowRect(owner,width,height);
     STARTUPINFOW startup{};startup.cb=sizeof(startup);
     startup.dwFlags=STARTF_USESHOWWINDOW|STARTF_USEPOSITION|STARTF_USESIZE;
@@ -296,15 +347,26 @@ std::optional<Document> runStructureEditor(const Document& fragment,HWND owner){
     startup.dwXSize=width;startup.dwYSize=height;
     PROCESS_INFORMATION process{};
     if(!CreateProcessW(exe,commandLine.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,&startup,&process))throw std::runtime_error("독립 구조 편집 창을 열 수 없습니다.");
-    CloseHandle(process.hThread);EnableWindow(owner,FALSE);
+    CloseHandle(process.hThread);
+    const bool enabled=IsWindowEnabled(owner)!=FALSE;
+    if(enabled)EnableWindow(owner,FALSE);
     bool quit=false;int quitCode=0;
     while(WaitForSingleObject(process.hProcess,0)==WAIT_TIMEOUT){
+        if(viewport)if(auto editor=FindWindowExW(viewport,nullptr,L"YoungDrawWindow",nullptr)){
+            RECT fitted{},current{};
+            GetClientRect(viewport,&fitted);GetClientRect(editor,&current);
+            fitted.bottom=std::max(1L,fitted.bottom-42);
+            if(fitted.right!=current.right||fitted.bottom!=current.bottom)
+                SetWindowPos(editor,nullptr,0,0,fitted.right,fitted.bottom,SWP_NOZORDER|SWP_NOACTIVATE|SWP_ASYNCWINDOWPOS);
+        }
         if(MsgWaitForMultipleObjects(1,&process.hProcess,FALSE,100,QS_ALLINPUT)==WAIT_OBJECT_0+1){MSG message;while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){
             if(message.message==WM_QUIT){quit=true;quitCode=int(message.wParam);continue;}
             TranslateMessage(&message);DispatchMessageW(&message);
         }}
     }
-    DWORD exitCode=0;GetExitCodeProcess(process.hProcess,&exitCode);CloseHandle(process.hProcess);EnableWindow(owner,TRUE);SetForegroundWindow(owner);SetFocus(owner);
+    DWORD exitCode=0;GetExitCodeProcess(process.hProcess,&exitCode);CloseHandle(process.hProcess);
+    if(enabled)EnableWindow(owner,TRUE);
+    if(!viewport){SetForegroundWindow(owner);SetFocus(owner);}
     if(quit)PostQuitMessage(quitCode);
     if(exitCode)throw std::runtime_error("구조 편집 창이 종료되었습니다. 원래 메커니즘은 유지됩니다.");
     if(!fs::exists(result))return {};return fromNative(readFile(result.wstring()));
@@ -321,7 +383,6 @@ void editTargetStructure(){
     if(!finishInline(true))return;
     const int container=targetContainer;const size_t slot=targetSlot;const bool above=targetAbove;
     const Document before=doc;const auto fragment=structureInSlot(before,container,slot,above);
-    if(plot(container)&&fragment.allIds().empty())throw std::runtime_error("선택한 단계의 이 영역에는 구조가 없습니다. 위·아래 영역을 확인하거나 구조를 먼저 삽입하세요.");
     auto result=structureEditor(fragment);if(!result||toNative(*result)==toNative(fragment))return;
     Document candidate=before;replaceSlotStructure(candidate,*result,container,slot,above);
     history.checkpoint(before);doc=std::move(candidate);selection={container};targetContainer=container;targetSlot=slot;targetAbove=above;
@@ -367,10 +428,51 @@ void pasteClipboard(){
     if(auto fragment=clipboardDocument())pasteStructure(*fragment);
     else {status=L"클립보드에 구조 또는 GIF 원본이 없습니다. GIF 파일을 복사하거나 이미지 삽입을 사용하세요.";redraw();}
 }
+static std::optional<std::wstring> chooseStructureFile(){
+    std::error_code error;
+    auto folder=filePath.empty()?fs::current_path(error):fs::path(filePath).parent_path();
+    if(folder.empty())folder=fs::current_path(error);
+    for(;;){
+        std::vector<std::wstring> entries;
+        if(folder.has_parent_path()&&folder.parent_path()!=folder)entries.push_back(L"..");
+        std::vector<std::wstring> folders,files;
+        for(fs::directory_iterator it(folder,fs::directory_options::skip_permission_denied,error),end;it!=end;it.increment(error)){
+            if(error)break;
+            std::error_code check;
+            if(it->is_directory(check))folders.push_back(it->path().filename().wstring());
+            else if(it->is_regular_file(check)){
+                auto extension=it->path().extension().wstring();
+                CharLowerBuffW(extension.data(),DWORD(extension.size()));
+                if(extension==L".cdxml"||extension==L".ydraw"||extension==L".gif"||extension==L".png"||
+                   extension==L".jpg"||extension==L".jpeg")files.push_back(it->path().filename().wstring());
+            }
+        }
+        std::sort(folders.begin(),folders.end());std::sort(files.begin(),files.end());
+        entries.insert(entries.end(),folders.begin(),folders.end());
+        entries.insert(entries.end(),files.begin(),files.end());
+        auto chosen=ui::form(win,L"구조 파일 삽입",{
+            {L"현재 폴더",ui::utf8(folder.wstring())},
+            {L"파일·폴더 이름 또는 경로","",false,std::move(entries),false,4,false,true}
+        },[](const auto& values)->std::wstring{
+            std::error_code pathError;
+            auto path=fs::path(ui::wide(values[1]));
+            if(path.empty())return L"파일 또는 폴더를 선택하세요.";
+            if(path.is_relative())path=fs::path(ui::wide(values[0]))/path;
+            if(fs::exists(path,pathError))return {};
+            return L"입력한 경로를 찾을 수 없습니다.";
+        });
+        if(!chosen)return {};
+        auto path=fs::path(ui::wide((*chosen)[1]));
+        if(path.is_relative())path=fs::path(ui::wide((*chosen)[0]))/path;
+        path=path.lexically_normal();
+        if(fs::is_directory(path,error)){folder=path;continue;}
+        return path.wstring();
+    }
+}
 void fillTarget(bool file){
     if(!targetContainer)throw std::runtime_error("먼저 구조 삽입 영역을 클릭하세요.");
     std::optional<Document> fragment;
-    if(file){auto path=fileDialog(false,4);if(!path)return;auto bytes=readFile(*path);fragment=imageMime(bytes).empty()?fromCdxml(bytes):imageDocument(bytes);}else fragment=clipboardDocument();
+    if(file){auto path=ui::inlineDialogHost()?chooseStructureFile():fileDialog(false,4);if(!path)return;auto bytes=readFile(*path);fragment=imageMime(bytes).empty()?fromCdxml(bytes):imageDocument(bytes);}else fragment=clipboardDocument();
     if(!fragment)throw std::runtime_error("구조 또는 GIF 파일을 복사한 뒤 붙여넣거나 구조·이미지 파일을 선택하세요.");
     insertStructureTarget(*fragment);
 }

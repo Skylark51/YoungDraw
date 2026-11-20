@@ -192,6 +192,11 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
         for(size_t i=0;i<n;i++)if(i<path.levelColors.size())levels[n-1+i]=path.levelColors[i];
         for(size_t i=0;i+1<n;i++)if(i<path.segmentColors.size())segments[n-1+i]=path.segmentColors[i];
         path.levelColors=std::move(levels);path.segmentColors=std::move(segments);path.dash=1;
+        if(!path.valueLabels.empty()){
+            std::vector<std::string> labels(2*n-1);
+            for(size_t i=0;i<n;i++)labels[n-1+i]=energyCellText(path,i,{});
+            path.valueLabels=std::move(labels);
+        }
         path.values=std::move(values);path.present=std::move(present);
     }
     auto source=left;left.name=leftName;
@@ -200,6 +205,10 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     }
     left.values.assign(2*n-1,0);left.present.assign(2*n-1,false);
     for(size_t i=0;i<n;i++)if(source.hasValue(i)){left.values[n-1-i]=source.values[i];left.present[n-1-i]=true;}
+    if(!source.valueLabels.empty()){
+        left.valueLabels.assign(2*n-1,{});
+        for(size_t i=0;i<n;i++)left.valueLabels[n-1-i]=energyCellText(source,i,{});
+    }
     left.levelColors.assign(2*n-1,{});left.segmentColors.assign(2*n-2,{});left.dash=1;
     for(size_t i=0;i<n;i++)if(i<source.levelColors.size())left.levelColors[n-1-i]=source.levelColors[i];
     for(size_t i=0;i+1<n;i++)if(i<source.segmentColors.size())left.segmentColors[n-2-i]=source.segmentColors[i];
@@ -331,13 +340,17 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
     for(size_t i=0;i<rows.size();i++)if(mapping[i]<0&&i<old.states.size()&&!used.count(i)){mapping[i]=int(i);used.insert(i);}
     std::vector<EnergyState> states;for(size_t i=0;i<rows.size();i++){EnergyState s;if(mapping[i]>=0)s=old.states[size_t(mapping[i])];setEnergyStateLabel(s,rows[i].label);s.energy=rows[i].energy;if(!preserveMarkers)s.marker=rows[i].marker;states.push_back(s);}
     auto series=old.series;if(series.empty())series.push_back({});
-    for(size_t k=0;k<series.size();k++){std::vector<double> values;for(size_t i=0;i<rows.size();i++){int j=mapping[i];values.push_back(k==0?rows[i].energy:j>=0&&size_t(j)<old.series[k].values.size()?old.series[k].values[size_t(j)]:rows[i].energy);}std::vector<bool> present;for(size_t i=0;i<rows.size();i++){int j=mapping[i];present.push_back(k==0||j<0||old.series.empty()||old.series[k].hasValue(size_t(j)));}std::vector<std::string> levels(rows.size()),segments(rows.empty()?0:rows.size()-1);
+    for(size_t k=0;k<series.size();k++){std::vector<double> values;for(size_t i=0;i<rows.size();i++){int j=mapping[i];values.push_back(k==0?rows[i].energy:j>=0&&size_t(j)<old.series[k].values.size()?old.series[k].values[size_t(j)]:rows[i].energy);}std::vector<bool> present;for(size_t i=0;i<rows.size();i++){int j=mapping[i];present.push_back(k==0||j<0||old.series.empty()||old.series[k].hasValue(size_t(j)));}std::vector<std::string> levels(rows.size()),segments(rows.empty()?0:rows.size()-1),labels;
         for(size_t i=0;i<rows.size();i++){
             int j=mapping[i];if(j>=0&&size_t(j)<series[k].levelColors.size())levels[i]=series[k].levelColors[size_t(j)];
+            if(j>=0&&!series[k].valueLabels.empty()){
+                auto text=energyCellText(series[k],size_t(j),{});
+                if(!text.empty()&&series[k].values[size_t(j)]==values[i]){labels.resize(i+1);labels[i]=std::move(text);}
+            }
             if(i+1<rows.size()&&j>=0&&mapping[i+1]==j+1&&size_t(j)<series[k].segmentColors.size())segments[i]=series[k].segmentColors[size_t(j)];
         }
         series[k].levelColors=std::move(levels);series[k].segmentColors=std::move(segments);
-        series[k].present=std::move(present);series[k].values=std::move(values);}
+        series[k].present=std::move(present);series[k].values=std::move(values);series[k].valueLabels=std::move(labels);}
     bool sameOrder=rows.size()==old.states.size();
     for(size_t i=0;i<mapping.size();++i)sameOrder&=mapping[i]==int(i);
     if(!sameOrder)for(auto& state:states)state.position.reset();
@@ -357,8 +370,14 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
     }
 }
 // Empty cells represent missing points, including in the first pathway.
-static std::optional<double> parseGridEnergy(const std::string& text){
+static std::optional<double> parseGridEnergy(std::string text){
     if(text.empty())return 0.;
+    if(text.find("~{")!=std::string::npos){
+        std::string numeric;
+        for(const auto& run:scriptRuns(text)){if(run.script)return {};numeric+=run.text;}
+        if(numeric.empty())return {};
+        text=std::move(numeric);
+    }
     try{
         size_t end=0;
         double energy=std::stod(text,&end);
@@ -369,10 +388,16 @@ static std::optional<double> parseGridEnergy(const std::string& text){
 bool validEnergyGridValue(const std::string& text){
     return parseGridEnergy(trim(text)).has_value();
 }
+std::string energyCellText(const EnergySeries& path,size_t index,const std::string& fallback){
+    if(index<path.valueLabels.size()&&index<path.values.size()&&!path.valueLabels[index].empty())
+        if(auto value=parseGridEnergy(path.valueLabels[index]);value&&*value==path.values[index])return path.valueLabels[index];
+    return fallback;
+}
 EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vector<std::string>>& data){
     if(data.size()<2||data.size()>100)throw std::runtime_error("에너지 그래프에는 2~100개 상태가 필요합니다.");
     size_t paths=std::max(size_t(1),original.series.size());
     std::vector<EnergyRow> states;std::vector<std::vector<double>> energies(paths);std::vector<std::vector<bool>> present(paths);
+    std::vector<std::vector<std::string>> valueLabels(paths);
     for(size_t r=0;r<data.size();r++){
         auto prefix=std::to_string(r+1)+"행 · ";
         if(data[r].size()!=paths+1)throw std::runtime_error(prefix+"상태 이름과 모든 경로의 에너지를 입력하세요.");
@@ -383,11 +408,14 @@ EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vect
             present[k].push_back(!text.empty());
             if(!energy){auto name=k<original.series.size()?original.series[k].name:"Path 1";throw std::runtime_error(prefix+name+": 에너지를 숫자로 입력하세요 (−1000000~1000000).");}
             energies[k].push_back(*energy);
+            if(text.find("~{")!=std::string::npos){
+                if(text.size()>256)throw std::runtime_error(prefix+"서식이 지정된 에너지 값이 너무 깁니다.");
+                valueLabels[k].resize(r+1);valueLabels[k][r]=std::move(text);}
         }
         states.push_back({label,energies[0].back(),-1});
     }
     EnergyPlot candidate=original;setEnergyData(candidate,states,true);
-    for(size_t k=0;k<paths;k++){candidate.series[k].values=std::move(energies[k]);candidate.series[k].present=std::move(present[k]);}
+    for(size_t k=0;k<paths;k++){candidate.series[k].values=std::move(energies[k]);candidate.series[k].present=std::move(present[k]);candidate.series[k].valueLabels=std::move(valueLabels[k]);}
     candidate.width=std::max(candidate.width,114.+(std::max(size_t(1),data.size())-1)*70);
     return candidate;
 }

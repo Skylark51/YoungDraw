@@ -20,7 +20,7 @@ struct Primitive {
     bool closed=false,filled=false,flatEnd=false,flatStart=false;
 };
 using Measure = std::function<double(const std::string&,double,const std::string&,int)>;
-struct ScriptRun {std::string text;int script=0;};
+struct ScriptRun {std::string text;int script=0;bool italic=false;};
 std::vector<ScriptRun> scriptRuns(const std::string& input);
 struct PlotSnapPoint { Vec p; double percent=0; int state=0,path=0,edge=0; }; // edge: -1 left, 0 center, 1 right
 struct PlotDragScale { double unitsPerPoint, low, high; };

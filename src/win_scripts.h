@@ -13,10 +13,12 @@ inline bool multilineShortcut(HWND editor,UINT message,WPARAM key){
 struct ScriptChange {std::wstring text;size_t start=0,end=0;};
 // Word-style formatting for source-backed editable text: selected text toggles,
 // an empty selection starts a script run, and the same shortcut exits that run.
-inline ScriptChange scriptChange(std::wstring text,size_t start,size_t end,bool superscript){
-    start=std::min(start,text.size());end=std::clamp(end,start,text.size());wchar_t kind=superscript?L'^':L'_';
-    for(size_t open=0;open+1<text.size();open++)if((text[open]==L'^'||text[open]==L'_')&&text[open+1]==L'{'){
-        size_t close=text.find(L'}',open+2);if(close==std::wstring::npos)break;
+inline ScriptChange markedChange(std::wstring text,size_t start,size_t end,wchar_t kind){
+    start=std::min(start,text.size());end=std::clamp(end,start,text.size());
+    for(size_t open=0;open+1<text.size();open++)if((kind==L'~'?text[open]==L'~':text[open]==L'^'||text[open]==L'_')&&text[open+1]==L'{'){
+        size_t close=open+2;int depth=1;
+        for(;close<text.size();close++){if(text[close]==L'{')++depth;if(text[close]==L'}'&&!--depth)break;}
+        if(close==text.size())break;
         if(start>=open+2&&end<=close){
             if(start==end){
                 if(text[open]!=kind){text[open]=kind;return {text,start,end};}
@@ -33,13 +35,23 @@ inline ScriptChange scriptChange(std::wstring text,size_t start,size_t end,bool 
     auto selected=text.substr(start,end-start);text.replace(start,end-start,std::wstring(1,kind)+L"{"+selected+L"}");
     return {text,start+2,start+2+selected.size()};
 }
-inline void toggleScript(HWND editor,bool superscript){
+inline ScriptChange scriptChange(std::wstring text,size_t start,size_t end,bool superscript){
+    return markedChange(std::move(text),start,end,superscript?L'^':L'_');
+}
+inline void toggleMark(HWND editor,wchar_t marker){
     int length=GetWindowTextLengthW(editor);std::wstring text(length+1,0);GetWindowTextW(editor,text.data(),length+1);text.resize(length);
-    DWORD start=0,end=0;SendMessageW(editor,EM_GETSEL,(WPARAM)&start,(LPARAM)&end);auto change=scriptChange(text,start,end,superscript);
+    DWORD start=0,end=0;SendMessageW(editor,EM_GETSEL,(WPARAM)&start,(LPARAM)&end);auto change=markedChange(text,start,end,marker);
     if(change.text!=text){SendMessageW(editor,EM_SETSEL,0,-1);SendMessageW(editor,EM_REPLACESEL,TRUE,(LPARAM)change.text.c_str());}
     SendMessageW(editor,EM_SETSEL,change.start,change.end);SetFocus(editor);
 }
+inline void toggleScript(HWND editor,bool superscript){toggleMark(editor,superscript?L'^':L'_');}
+inline bool italicShortcut(HWND editor,UINT message,WPARAM key){
+    if(!(GetKeyState(VK_CONTROL)&0x8000))return false;
+    if(message==WM_KEYDOWN&&key=='I'){toggleMark(editor,L'~');return true;}
+    return message==WM_CHAR&&key==9;
+}
 inline bool scriptShortcut(HWND editor,UINT message,WPARAM key){
+    if(italicShortcut(editor,message,key))return true;
     bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0;
     if(message==WM_KEYDOWN&&(key==VK_F9||key==VK_F10)){toggleScript(editor,key==VK_F10);return true;}
     if(message==WM_KEYDOWN&&ctrl&&(key==VK_OEM_PLUS||key==VK_ADD)){toggleScript(editor,(GetKeyState(VK_SHIFT)&0x8000)!=0);return true;}

@@ -25,14 +25,17 @@ const std::vector<std::vector<Card>> pages={
     {{131,131,L"데이터 표",L"상태·에너지 입력"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"}},
     {{137,137,L"제목·축 설정",L"표시·범위·단위·눈금"},{plotAxisLengthsCommand,239,L"축 길이",L"가로·세로 길이"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{240,240,L"상태 이름 크기",L"축 아래 이름"},{241,241,L"데이터 값 크기",L"에너지 숫자"},{246,246,L"Y축 제목 간격",L"제목과 축 사이 여백"},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치",7}},
     {{139,139,L"반응 이름·화살표",L"범위·글자·화살촉"},{136,136,L"화살표 자석 배치",L"캔버스에서 두 점 선택"},{plotAnnotationsCommand,236,L"TS·이름 위치",L"생략·갭·라벨 위치"},{addEnergyGapCommand,237,L"에너지 갭 추가",L"캔버스에 지시선 배치"},{151,151,L"스핀 교차점",L"교차 에너지·라벨"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"}},
-    {{editStructure,186,L"구조 독립 편집",L"선택 상태의 구조만"},{pasteStructure,123,L"구조 붙여넣기",L"클립보드에서 삽입"},{fileStructure,124,L"구조 파일 삽입",L"CDXML·이미지 파일"},{sizeStructure,165,L"구조 크기",L"선택 구조 확대·축소"},{removeStructure,144,L"구조 제거",L"선택 영역만 비우기"}},
+    {{editStructure,186,L"구조 그리기·편집",L"선택한 위·아래 영역"},{pasteStructure,123,L"구조 붙여넣기",L"클립보드에서 삽입"},{fileStructure,124,L"구조 파일 삽입",L"CDXML·이미지 파일"},{sizeStructure,165,L"구조 크기",L"선택 구조 확대·축소"},{removeStructure,144,L"구조 제거",L"선택 영역만 비우기"}},
     {{242,242,L"X축 표시·굵기",L"숨김 또는 획 조절"},{243,243,L"Y축 표시·굵기",L"숨김 또는 획 조절"},{244,244,L"곡선 굵기",L"경로 선 굵기"},{245,245,L"그림 선 굵기",L"선택 후 + / - 조절"},{plotWaveWidthCommand,250,L"물결 굵기",L"선택 후 + / - 조절"},{plotWaveGapCommand,251,L"물결·곡선 간격",L"본선 절단 여백"}}
 };
 struct Manager{
     HWND window=nullptr;int owner=0,page=0;bool busy=false;
     struct View {double scale;Vec origin;};
     struct LegendDrag {Vec start,offset;View view;};
-    HWND grid=nullptr,form=nullptr;
+    HWND grid=nullptr,form=nullptr,subpane=nullptr;
+    int subpaneHeight=0;
+    std::vector<std::pair<HWND,int>> panes;
+    std::wstring notice;
     int panel=0;
     std::optional<EnergyPlot> draft;
     std::optional<LegendDrag> legendDrag;
@@ -48,13 +51,30 @@ struct Manager{
         if(targetContainer==owner)SendDlgItemMessageW(window,sideControl,CB_SETCURSEL,targetAbove?0:1,0);
     }
     bool flushGrid(){return !grid||ui::commitEmbeddedTable(grid);}
+    void mount(HWND child,int height){
+        if(subpane&&IsWindow(subpane))ShowWindow(subpane,SW_HIDE);
+        if(child)panes.emplace_back(child,height);
+        else if(!panes.empty())panes.pop_back();
+        subpane=panes.empty()?nullptr:panes.back().first;
+        subpaneHeight=panes.empty()?0:panes.back().second;
+        layout();
+    }
+    void runTool(int action){
+        struct OwnerGuard {
+            HWND owner;bool enabled;
+            explicit OwnerGuard(HWND h):owner(h),enabled(IsWindowEnabled(h)!=FALSE){if(enabled)EnableWindow(owner,FALSE);}
+            ~OwnerGuard(){if(enabled&&IsWindow(owner))EnableWindow(owner,TRUE);}
+        } guard(win);
+        ui::InlineDialogHost host(window,[this](HWND child,int height){mount(child,height);});
+        act(action);
+    }
     void openData(){
         if(panel==131&&grid){layout();SetFocus(GetDlgItem(grid,10));return;}
         clearPanel();
         auto* p=graph();if(!p)return;EnergyPlot original=*p;
         if(original.series.empty()){EnergySeries path;path.name="Path 1";for(auto& state:original.states)path.values.push_back(state.energy);original.series.push_back(path);}
         std::vector<std::wstring> columns={L"단계명"};for(auto& path:original.series)columns.push_back(ui::wide(path.name));
-        ui::Table rows;for(size_t i=0;i<original.states.size();i++){std::vector<std::string> row={original.states[i].label};for(auto& path:original.series)row.push_back(path.hasValue(i)?number(path.values[i]):"");rows.push_back(row);}
+        ui::Table rows;for(size_t i=0;i<original.states.size();i++){std::vector<std::string> row={original.states[i].label};for(auto& path:original.series)row.push_back(path.hasValue(i)?energyCellText(path,i,number(path.values[i])):"");rows.push_back(row);}
         grid=ui::embeddedTable(window,columns,rows,[this,last=rows](const ui::Table& data) mutable ->std::wstring{
             if(data==last)return {};
             try{auto* current=graph();if(!current)return L"그래프가 없습니다.";if(doc.isLocked(owner))return L"그래프 잠금을 해제하세요.";
@@ -63,6 +83,7 @@ struct Manager{
             }catch(const std::exception& e){return ui::wide(e.what());}
         },[](size_t column,const std::string& value)->std::wstring{return column==0||validEnergyGridValue(value)?L"":L"에너지를 숫자로 입력하세요. 빈칸은 생략됩니다.";},[this](HWND,size_t column)->std::optional<std::wstring>{
             if(!column||!graph())return {};auto* p=graph();if(column>p->series.size())return {};
+            ui::InlineDialogHost host(window,[this](HWND child,int height){mount(child,height);});
             auto result=ui::form(window,L"경로 이름 변경",{{L"경로 이름",p->series[column-1].name,false,{},false,4,true}});if(!result)return {};
             if(!graph()||doc.isLocked(owner))return {};Document before=doc;graph()->series[column-1].name=result->front();if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}return ui::wide(result->front());
         });
@@ -129,7 +150,11 @@ struct Manager{
         form=ui::embeddedForm(window,title,fields,
             [update](const auto& values){return update(values,false);},
             [update](const auto& values){return update(values,true);},
-            [this](){SendMessageW(window,WM_COMMAND,panelBack,0);});
+            [this](){SendMessageW(window,WM_COMMAND,panelBack,0);},
+            [this](COLORREF color){
+                ui::InlineDialogHost host(window,[this](HWND child,int height){mount(child,height);});
+                return ui::chooseColor(window,color);
+            });
         if(!form)throw std::runtime_error("관리창 편집을 열 수 없습니다.");
         panel=action;layout();SetFocus(GetDlgItem(form,100));ui::attachWindowHelp(window);
     }
@@ -266,31 +291,37 @@ struct Manager{
 
     void layout(){
         RECT client{};GetClientRect(window,&client);const int width=client.right,height=client.bottom;
-        const bool expanded=panelVisible();
-        const bool showForm=form&&expanded;
-        const int panelTop=expanded?std::max(218,height-(showForm?320:408)):std::max(250,height-352);
+        const bool expanded=panelVisible()||subpane;
+        const bool showForm=form&&expanded&&!subpane;
+        const int panelTop=subpane?std::max(150,height-subpaneHeight-101):
+            expanded?std::max(218,height-(showForm?320:408)):std::max(250,height-352);
         const int gap=10;
         preview={20.f,88.f,float(width-40),float(panelTop-110)};
         const int tabWidth=(width-40-4*6)/5;
         auto batch=BeginDeferWindowPos(48);
         auto place=[&](HWND h,int x,int y,int w,int ht,bool visible=true){batch=DeferWindowPos(batch,h,nullptr,x,y,w,ht,SWP_NOZORDER|SWP_NOACTIVATE|(visible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));};
-        for(int i=0;i<5;i++)place(GetDlgItem(window,tabFirst+i),20+i*(tabWidth+6),panelTop,tabWidth,34);
-        place(GetDlgItem(window,slotControl),20,panelTop+46,width-192,28,page==3);place(GetDlgItem(window,sideControl),width-162,panelTop+46,142,28,page==3);
+        for(int i=0;i<5;i++){
+            auto tab=GetDlgItem(window,tabFirst+i);
+            place(tab,20+i*(tabWidth+6),panelTop,tabWidth,34);
+            EnableWindow(tab,!subpane);
+        }
+        place(GetDlgItem(window,slotControl),20,panelTop+46,width-192,28,page==3&&!subpane);place(GetDlgItem(window,sideControl),width-162,panelTop+46,142,28,page==3&&!subpane);
         const int start=panelTop+(page==3?84:46)+transitionOffset,columns=4,cardWidth=(width-40-(columns-1)*gap)/columns;
         for(auto& category:pages)for(auto& card:category){auto h=GetDlgItem(window,card.action);auto found=std::find_if(pages[size_t(page)].begin(),pages[size_t(page)].end(),[&](const Card& c){return c.action==card.action;});bool show=found!=pages[size_t(page)].end()&&!expanded;int i=show?(card.slot>=0?card.slot:int(found-pages[size_t(page)].begin())):0;place(h,20+(i%columns)*(cardWidth+gap),start+(i/columns)*100,cardWidth,90,show);}
         if(grid){
             const int gridTop=panel==139?64:44;
-            place(grid,20,panelTop+gridTop,width-40,height-panelTop-gridTop-56,expanded);
+            place(grid,20,panelTop+gridTop,width-40,height-panelTop-gridTop-56,expanded&&!subpane);
         }
         if(form)place(form,20,panelTop+44,width-40,height-panelTop-100,showForm);
+        if(subpane)place(subpane,20,panelTop+43,width-40,height-panelTop-51);
         place(GetDlgItem(window,pathControl),width-190,panelTop+44,170,190,showForm&&panel==133&&graph()&&graph()->series.size()>1);
-        place(GetDlgItem(window,104),20,height-46,104,30);place(GetDlgItem(window,105),132,height-46,104,30);
-        place(GetDlgItem(window,panelBack),width-244,height-46,112,30,expanded&&!showForm);
-        place(GetDlgItem(window,IDCANCEL),width-124,height-46,104,30);
+        place(GetDlgItem(window,104),20,height-46,104,30,!subpane);place(GetDlgItem(window,105),132,height-46,104,30,!subpane);
+        place(GetDlgItem(window,panelBack),width-244,height-46,112,30,expanded&&!showForm&&!subpane);
+        place(GetDlgItem(window,IDCANCEL),width-124,height-46,104,30,!subpane);
         EndDeferWindowPos(batch);InvalidateRect(window,nullptr,FALSE);
     }
     void selectPage(int selected){
-        if(!flushGrid())return;
+        if(subpane||!flushGrid())return;
         if(page!=selected){BOOL effects=TRUE;SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&effects,0);transitionStart=GetTickCount64();transitionOffset=effects?8:0;if(effects)SetTimer(window,1,16,nullptr);}
         page=selected;cachedScene.reset();targets();layout();for(int i=0;i<5;i++)InvalidateRect(GetDlgItem(window,tabFirst+i),nullptr,FALSE);
     }
@@ -299,7 +330,7 @@ struct Manager{
         selectPage(0);ui::attachWindowHelp(window);
     }
     void stepWeight(bool increase){
-        if(page==4)stepPlotAppearance(owner,weightAction,increase?1:-1);
+        if(!subpane&&page==4)stepPlotAppearance(owner,weightAction,increase?1:-1);
     }
     void wheel(POINT cursor,int delta){
         if(busy||panelVisible())return;
@@ -352,14 +383,15 @@ struct Manager{
             g.Restore(saved);
         }catch(const std::exception&){text(g,L"미리보기를 표시할 수 없습니다.",preview.X+16,preview.Y+24,12,palette.muted);}
         else text(g,L"그래프가 삭제되었습니다. 창을 닫고 다시 선택하세요.",preview.X+12,preview.Y+24,12,palette.muted);
-        if(panelVisible()&&panel==139){
+        if(!subpane&&panelVisible()&&panel==139){
             RECT tabs{};
             GetWindowRect(GetDlgItem(window,tabFirst),&tabs);
             POINT at{tabs.left,tabs.top};
             ScreenToClient(window,&at);
             text(g,L"반응 이름·화살표",20,float(at.y+42),14,palette.text,true);
         }
-        if(!panelVisible()&&page!=2)text(g,page==4?L"크기·굵기 위에서 휠로 조절 · Ctrl+Z: 실행 취소":page==1?L"크기·간격 위에서 휠로 조절할 수 있습니다.":page==3?L"상태·위/아래 영역 선택 → 삽입된 해당 구조만 편집합니다.":L"데이터 표는 하단 패널에서 입력하고 그래프에 즉시 반영합니다.",20,float(client.bottom-70),11,palette.muted);
+        if(!notice.empty()&&!subpane)text(g,notice,20,float(client.bottom-73),13,palette.accent);
+        else if(!subpane&&!panelVisible()&&page!=2)text(g,page==4?L"크기·굵기 위에서 휠로 조절 · Ctrl+Z: 실행 취소":page==1?L"크기·간격 위에서 휠로 조절할 수 있습니다.":page==3?L"상태와 위·아래 영역을 고른 뒤 구조를 그리거나 편집하세요.":L"데이터 표는 하단 패널에서 입력하고 그래프에 즉시 반영합니다.",20,float(client.bottom-70),11,palette.muted);
     }
     void act(int action){
         if(!flushGrid())return;
@@ -370,13 +402,14 @@ struct Manager{
         if(action==104||action==105){command(action);targets();InvalidateRect(window,nullptr,FALSE);for(auto h:cards)InvalidateRect(h,nullptr,FALSE);return;}
         if(!graph())throw std::runtime_error("편집할 그래프가 없습니다.");if(doc.isLocked(owner))throw std::runtime_error("그래프 잠금을 해제한 뒤 편집하세요.");
         selection={owner};
+        if(action==137){plotSettings(owner);return;}
         if(action==139){openStages();return;}
         if(action==plotLegendCommand){openLegend();return;}
         if(action==132||action==133){openSeries(action==132);return;}
         if(action>=editStructure&&action<=removeStructure){
             const int index=int(SendDlgItemMessageW(window,slotControl,CB_GETCURSEL,0,0));if(index<0||size_t(index)>=graph()->states.size())throw std::runtime_error("구조를 넣을 상태를 먼저 선택하세요.");
             targetContainer=owner;targetSlot=size_t(index);targetAbove=SendDlgItemMessageW(window,sideControl,CB_GETCURSEL,0,0)==0;
-            if(action==editStructure){auto* p=graph();auto& state=p->states[targetSlot];if((targetAbove?state.above:state.below).empty()&&!(targetAbove?state.below:state.above).empty()){targetAbove=!targetAbove;SendDlgItemMessageW(window,sideControl,CB_SETCURSEL,targetAbove?0:1,0);}editTargetStructure();}else if(action==pasteStructure)fillTarget(false);else if(action==fileStructure)fillTarget(true);else if(action==sizeStructure)resizeSelected();
+            if(action==editStructure){editTargetStructure();}else if(action==pasteStructure)fillTarget(false);else if(action==fileStructure)fillTarget(true);else if(action==sizeStructure)resizeSelected();
             else{Document before=doc,candidate=doc;Document empty;replaceSlotStructure(candidate,empty,owner,targetSlot,targetAbove);if(toNative(candidate)!=toNative(before)){history.checkpoint(before);doc=std::move(candidate);changed();}}
         }else command(action);
         targets();InvalidateRect(window,nullptr,FALSE);for(auto h:cards)InvalidateRect(h,nullptr,FALSE);
@@ -387,12 +420,12 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_NCCREATE){self=static_cast<Manager*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);self->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}
     if(!self)return DefWindowProcW(h,message,wp,lp);
     switch(message){
-    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"데이터·경로",L"축·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i=0;i<5;i++)self->button(tabFirst+i,tabs[i]);self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"도구로 돌아가기");
+    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"데이터·경로",L"축·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i=0;i<5;i++)self->button(tabFirst+i,tabs[i]);self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");
         auto path=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
             0,0,170,180,h,reinterpret_cast<HMENU>(INT_PTR(pathControl)),nullptr,nullptr);
-        SendMessageW(path,WM_SETFONT,(WPARAM)self->font,TRUE);
+        SendMessageW(path,WM_SETFONT,(WPARAM)self->font,TRUE);ui::themeCombo(path);
         SetWindowPos(path,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
-        auto slot=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,100,300,h,(HMENU)slotControl,GetModuleHandleW(nullptr),nullptr);auto side=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST,0,0,100,140,h,(HMENU)sideControl,GetModuleHandleW(nullptr),nullptr);SendMessageW(slot,WM_SETFONT,(WPARAM)self->font,TRUE);SendMessageW(side,WM_SETFONT,(WPARAM)self->font,TRUE);SendMessageW(side,CB_ADDSTRING,0,(LPARAM)L"상태 위 구조");SendMessageW(side,CB_ADDSTRING,0,(LPARAM)L"상태 아래 구조");SendMessageW(side,CB_SETCURSEL,0,0);self->initializeCards();appearance::titlebar(h);return 0;}
+        auto slot=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,100,300,h,reinterpret_cast<HMENU>(INT_PTR(slotControl)),GetModuleHandleW(nullptr),nullptr);auto side=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST,0,0,100,140,h,reinterpret_cast<HMENU>(INT_PTR(sideControl)),GetModuleHandleW(nullptr),nullptr);SendMessageW(slot,WM_SETFONT,(WPARAM)self->font,TRUE);SendMessageW(side,WM_SETFONT,(WPARAM)self->font,TRUE);SendMessageW(side,CB_ADDSTRING,0,(LPARAM)L"상태 위 구조");SendMessageW(side,CB_ADDSTRING,0,(LPARAM)L"상태 아래 구조");SendMessageW(side,CB_SETCURSEL,0,0);ui::themeCombo(slot);ui::themeCombo(side);self->initializeCards();appearance::titlebar(h);return 0;}
     case WM_SIZE:self->layout();return 0;
     case WM_TIMER:if(wp==1){double t=std::min(1.,double(GetTickCount64()-self->transitionStart)/120.);self->transitionOffset=int(std::round(8*std::pow(1-t,3)));self->layout();if(t>=1)KillTimer(h,1);return 0;}break;
     case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={900,640};return 0;
@@ -406,21 +439,27 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     case WM_LBUTTONUP:self->endLegendDrag();return 0;
     case WM_CAPTURECHANGED:self->endLegendDrag();return 0;
     case WM_COMMAND:{int action=LOWORD(wp);
+        if(self->subpane||self->busy)return 0;
         if(action==pathControl){
             const auto index=SendDlgItemMessageW(h,pathControl,CB_GETCURSEL,0,0);
             if(HIWORD(wp)==CBN_SELCHANGE&&index>=0&&self->panel==133&&self->graph()&&size_t(index)<self->graph()->series.size()){
                 self->clearPanel();
                 try{self->openSeries(false,size_t(index));SetFocus(GetDlgItem(h,pathControl));}
-                catch(const std::exception& error){self->layout();MessageBoxW(h,ui::wide(error.what()).c_str(),L"그래프 관리",MB_OK);}
+                catch(const std::exception& error){self->notice=ui::wide(error.what());self->layout();}
             }
             return 0;
         }
         if(action==IDCANCEL){if(!self->flushGrid())return 0;DestroyWindow(h);return 0;}if(action>=tabFirst&&action<tabFirst+5){self->selectPage(action-tabFirst);return 0;}if(action==slotControl||action==sideControl){targetContainer=self->owner;targetSlot=size_t(SendDlgItemMessageW(h,slotControl,CB_GETCURSEL,0,0));targetAbove=SendDlgItemMessageW(h,sideControl,CB_GETCURSEL,0,0)==0;return 0;}if(self->busy)return 0;
-        const auto previousFocus=GetFocus();const bool modal=action!=131&&action!=132&&action!=133&&action!=139&&action!=plotLegendCommand&&action!=panelBack&&action!=104&&action!=105;self->busy=true;if(modal)EnableWindow(h,FALSE);try{self->act(action);}catch(const std::exception& error){MessageBoxW(h,ui::wide(error.what()).c_str(),L"그래프 관리",MB_OK|MB_ICONINFORMATION);}self->busy=false;if(modal)EnableWindow(h,TRUE);
-        if(action==136||action==addEnergyGapCommand){DestroyWindow(h);SetForegroundWindow(win);SetFocus(win);}else if(modal&&IsWindowVisible(h)){SetActiveWindow(h);if(previousFocus&&(previousFocus==h||IsChild(h,previousFocus))&&IsWindowVisible(previousFocus))SetFocus(previousFocus);}return 0;}
+        self->busy=true;self->notice.clear();
+        try{self->runTool(action);}catch(const std::exception& error){self->notice=ui::wide(error.what());InvalidateRect(h,nullptr,FALSE);}
+        self->busy=false;
+        if((action==136&&snapPlot)||(action==addEnergyGapCommand&&pendingEnergyGap)){
+            DestroyWindow(h);SetForegroundWindow(win);SetFocus(win);
+        }else if(!GetFocus()&&IsWindowVisible(h))SetFocus(GetDlgItem(h,tabFirst+self->page));
+        return 0;}
     case WM_MOUSEWHEEL:self->wheel({GET_X_LPARAM(lp),GET_Y_LPARAM(lp)},GET_WHEEL_DELTA_WPARAM(wp));return 0;
     case WM_KEYDOWN:if(wp==VK_ADD||wp==VK_OEM_PLUS||wp==VK_SUBTRACT||wp==VK_OEM_MINUS){self->stepWeight(wp==VK_ADD||wp==VK_OEM_PLUS);return 0;}break;
-    case WM_CLOSE:if(!self->flushGrid())return 0;DestroyWindow(h);return 0;
+    case WM_CLOSE:if(self->subpane||self->busy||!self->flushGrid())return 0;DestroyWindow(h);return 0;
     case WM_NCDESTROY:if(plotManagerWindow==h)plotManagerWindow=nullptr;SetWindowLongPtrW(h,GWLP_USERDATA,0);delete self;return DefWindowProcW(h,message,wp,lp);
     }
     return DefWindowProcW(h,message,wp,lp);
@@ -438,7 +477,7 @@ void openPlotManagerTool(int id,int action){
     managePlot(id);
     auto* manager=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));
     if(!manager||manager->owner!=id||!manager->flushGrid())return;
-    manager->selectPage(action==139?2:action==plotLegendCommand?1:0);
+    manager->selectPage(action==139?2:(action==137||action==plotLegendCommand)?1:0);
     SendMessageW(plotManagerWindow,WM_COMMAND,action,0);
 }
 void closePlotManager(){if(plotManagerWindow)DestroyWindow(plotManagerWindow);}
@@ -455,7 +494,7 @@ bool handlePlotManagerMessage(MSG& message){
     }
     if(message.message==WM_KEYDOWN){
         const auto k=message.wParam;
-        if(manager->page==4&&(k==VK_ADD||k==VK_OEM_PLUS||k==VK_SUBTRACT||k==VK_OEM_MINUS)){
+        if(!manager->subpane&&manager->page==4&&(k==VK_ADD||k==VK_OEM_PLUS||k==VK_SUBTRACT||k==VK_OEM_MINUS)){
             manager->stepWeight(k==VK_ADD||k==VK_OEM_PLUS);return true;
         }
         if(inForm&&(k==VK_ESCAPE||k==VK_RETURN)){

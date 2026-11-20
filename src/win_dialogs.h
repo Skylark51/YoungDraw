@@ -8,6 +8,17 @@ namespace yd { enum class MechanismTemplate; }
 namespace ui {
 inline std::wstring wide(const std::string& s){if(s.empty())return {};int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),w.data(),n);return w;}
 inline std::string utf8(const std::wstring& w){if(w.empty())return {};int n=WideCharToMultiByte(CP_UTF8,0,w.data(),int(w.size()),nullptr,0,nullptr,nullptr);std::string s(n,0);WideCharToMultiByte(CP_UTF8,0,w.data(),int(w.size()),s.data(),n,nullptr,nullptr);return s;}
+// Routes an existing dialog workflow to a child panel while its caller retains the edit transaction.
+struct InlineDialogHost {
+    HWND window;
+    std::function<void(HWND,int)> mount;
+    InlineDialogHost* previous;
+    InlineDialogHost(HWND window,std::function<void(HWND,int)> mount);
+    ~InlineDialogHost();
+};
+InlineDialogHost* inlineDialogHost();
+void runInlineDialog(HWND child,int height,const bool& done,HWND focus);
+void themeCombo(HWND combo);
 struct GraphChoice {int mode=0;bool freeEnergy=true;};
 std::optional<GraphChoice> graphChoice(HWND owner,int initialMode=0,bool editStyle=false,const std::function<void(int)>& preview={});
 std::optional<yd::MechanismTemplate> mechanismChoice(HWND owner);
@@ -28,7 +39,8 @@ HWND embeddedStageTable(HWND parent,const Table& rows,const TablePreview& previe
 std::optional<COLORREF> chooseColor(HWND parent,COLORREF initial);
 using Preview = std::function<std::wstring(const std::vector<std::string>&)>;
 HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fields,const Preview& preview,
-    const Preview& apply,const std::function<void()>& dismiss);
+    const Preview& apply,const std::function<void()>& dismiss,
+    const std::function<std::optional<COLORREF>(COLORREF)>& pickColor={});
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& preview={},
     const std::vector<std::pair<std::wstring,std::vector<size_t>>>& tabs={},
     const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration={});

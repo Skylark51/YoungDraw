@@ -65,22 +65,40 @@ bool hitObject(const Scene& scene,int owner,Vec point,double tolerance){
     }return false;
 }
 std::vector<ScriptRun> scriptRuns(const std::string& input){
-    auto value=chemicalScripts(input);
-    std::vector<ScriptRun> runs;std::string normal;
-    for(size_t i=0;i<value.size();){
-        if((value[i]=='^'||value[i]=='_')&&i+1<value.size()&&value[i+1]=='{'){
-            auto end=value.find('}',i+2);if(end!=std::string::npos){if(!normal.empty()){runs.push_back({normal,0});normal.clear();}runs.push_back({value.substr(i+2,end-i-2),value[i]=='^'?1:-1});i=end+1;continue;}
-        }normal+=value[i++];
-    }if(!normal.empty())runs.push_back({normal,0});return runs;
+    const auto value=chemicalScripts(input);
+    std::vector<ScriptRun> runs;
+    auto parse=[&](auto&& self,size_t first,size_t last,int script,bool italic,int depth)->void{
+        auto append=[&](size_t a,size_t b){
+            if(a<b)runs.push_back({value.substr(a,b-a),script,italic});
+        };
+        size_t plain=first;
+        for(size_t i=first;i+1<last&&depth<24;){
+            const char marker=value[i];
+            if((marker!='^'&&marker!='_'&&marker!='~')||value[i+1]!='{'){++i;continue;}
+            size_t close=i+2;int braces=1;
+            for(;close<last;close++){
+                if(value[close]=='{')++braces;
+                if(value[close]=='}'&&!--braces)break;
+            }
+            if(close==last)break;
+            append(plain,i);
+            const int nextScript=marker=='~'?script:marker=='^'?1:-1;
+            self(self,i+2,close,nextScript,italic||marker=='~',depth+1);
+            i=plain=close+1;
+        }
+        append(plain,last);
+    };
+    parse(parse,0,value.size(),0,false,0);
+    return runs;
 }
 static double textWidth(const Measure& m,const std::string& s,double size,const std::string& font="Arial",int face=1){
-    double width=0;std::istringstream lines(s);std::string line;while(std::getline(lines,line)){if(!line.empty()&&line.back()=='\r')line.pop_back();double row=0;for(auto& run:scriptRuns(line)){double fs=size*(run.script?(run.script==1?chemicalScriptScale(run.text):.7):1);size_t chars=0;for(unsigned char c:run.text)if((c&0xc0)!=0x80)chars++;row+=m?m(run.text,fs,font,face):chars*fs*(face&1?.62:.56);}width=std::max(width,row);}return width;
+    double width=0;std::istringstream lines(s);std::string line;while(std::getline(lines,line)){if(!line.empty()&&line.back()=='\r')line.pop_back();double row=0;for(auto& run:scriptRuns(line)){double fs=size*(run.script?(run.script==1?chemicalScriptScale(run.text):.7):1);size_t chars=0;for(unsigned char c:run.text)if((c&0xc0)!=0x80)chars++;row+=m?m(run.text,fs,font,run.italic?face|2:face):chars*fs*(face&1?.62:.56);}width=std::max(width,row);}return width;
 }
 static void emitText(std::vector<Primitive>& items,Primitive base,Vec at,bool center,const Measure& measure){
     auto value=base.text;std::istringstream rows(value);std::string row;size_t line=0;
     while(std::getline(rows,row)){
         if(!row.empty()&&row.back()=='\r')row.pop_back();double x=at.x-(center?textWidth(measure,row,base.fontSize,base.font,base.face)/2:0),y=at.y+line++*base.fontSize*1.3;
-        for(auto& run:scriptRuns(row)){auto t=base;t.text=run.text;t.fontSize*=run.script?(run.script==1?chemicalScriptScale(run.text):.7):1;t.points={{x,y+(run.script==1?-base.fontSize*.35:run.script==-1?base.fontSize*.3:0)}};items.push_back(t);x+=textWidth(measure,run.text,t.fontSize,t.font,t.face);}
+        for(auto& run:scriptRuns(row)){auto t=base;t.text=run.text;if(run.italic)t.face|=2;t.fontSize*=run.script?(run.script==1?chemicalScriptScale(run.text):.7):1;t.points={{x,y+(run.script==1?-base.fontSize*.35:run.script==-1?base.fontSize*.3:0)}};items.push_back(t);x+=textWidth(measure,run.text,t.fontSize,t.font,t.face);}
     }if(value.empty()){base.points={at};items.push_back(base);}
 }
 // Find a shortest alternate path. Its centroid chooses the inside of a ring.
@@ -512,19 +530,17 @@ Scene makeScene(const Document& d,const Measure& measure){
         };
         // Axis captions accept x^{2}, H_{2} and Unicode scripts. Each run stays vector text.
         auto axisText=[&](const std::string& value,Vec anchor,double size,const std::string& color,bool vertical,int role=0,int index=-1){
-            struct Run{std::string text;int script;};std::vector<Run> runs;std::string normal;
-            for(size_t i=0;i<value.size();){if((value[i]=='^'||value[i]=='_')&&i+1<value.size()&&value[i+1]=='{'){if(!normal.empty()){runs.push_back({normal,0});normal.clear();}int script=value[i]=='^'?1:-1;size_t end=value.find('}',i+2);if(end==std::string::npos){normal+=value.substr(i);break;}runs.push_back({value.substr(i+2,end-i-2),script});i=end+1;}else normal+=value[i++];}if(!normal.empty())runs.push_back({normal,0});
-            double total=0;for(auto& r:runs)total+=textWidth(measure,r.text,size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),graphFont(r.text),faceFor(value));double cursor=-total/2;
-            for(auto& r:runs){double fs=size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),offset=r.script==1?-size*.4:r.script==-1?size*.35:0;Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=r.text;t.font=graphFont(r.text);t.fontSize=fs;t.face=faceFor(value);t.color=color;t.rotation=vertical?-90:0;t.points={vertical?anchor+Vec{offset,-cursor}:anchor+Vec{cursor,offset}};s.items.push_back(t);cursor+=textWidth(measure,r.text,fs,t.font,t.face);}
+            const auto runs=scriptRuns(value);
+            double total=0;for(auto& r:runs)total+=textWidth(measure,r.text,size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),graphFont(r.text),r.italic?faceFor(value)|2:faceFor(value));double cursor=-total/2;
+            for(auto& r:runs){double fs=size*(r.script?(r.script==1?chemicalScriptScale(r.text):.7):1),offset=r.script==1?-size*.4:r.script==-1?size*.35:0;Primitive t;t.type=Primitive::Text;t.owner=owner;t.textRole=role;t.textIndex=index;t.text=r.text;t.font=graphFont(r.text);t.fontSize=fs;t.face=r.italic?faceFor(value)|2:faceFor(value);t.color=color;t.rotation=vertical?-90:0;t.points={vertical?anchor+Vec{offset,-cursor}:anchor+Vec{cursor,offset}};s.items.push_back(t);cursor+=textWidth(measure,r.text,fs,t.font,t.face);}
         };
         auto scriptWidth=[&](const std::string& text,double size){
-            double width=0;for(size_t i=0;i<text.size();){
-                if((text[i]=='^'||text[i]=='_')&&i+1<text.size()&&text[i+1]=='{'){
-                    size_t end=text.find('}',i+2);if(end!=std::string::npos){width+=textWidth(measure,text.substr(i+2,end-i-2),size*(text[i]=='^'?chemicalScriptScale(text.substr(i+2,end-i-2)):.7),graphFont(text.substr(i+2,end-i-2)),faceFor(text));i=end+1;continue;}
-                }
-                size_t end=i+1;while(end<text.size()&&!(end+1<text.size()&&(text[end]=='^'||text[end]=='_')&&text[end+1]=='{'))end++;
-                width+=textWidth(measure,text.substr(i,end-i),size,graphFont(text.substr(i,end-i)),faceFor(text));i=end;
-            }return width;
+            double width=0;
+            for(const auto& run:scriptRuns(text)){
+                const double scale=run.script?(run.script==1?chemicalScriptScale(run.text):.7):1;
+                width+=textWidth(measure,run.text,size*scale,graphFont(run.text),run.italic?faceFor(text)|2:faceFor(text));
+            }
+            return width;
         };
         owner=plot.id;auto axis=energyAxis(plot);double low=axis.low,high=axis.high;
         const auto displayBands=energyDisplayBands(plot);const double displayLow=displayEnergy(displayBands,low),displayHigh=displayEnergy(displayBands,high);
@@ -1028,7 +1044,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         if(plot.showValues)for(size_t k=0;k<paths.size();k++)for(size_t i=0;i<paths[k].values.size();i++)if(visible(paths[k],i)){
             std::ostringstream out;out.imbue(std::locale::classic());out<<std::fixed<<std::setprecision(1)<<paths[k].values[i];
             Vec anchor=pointAt(i,paths[k].values[i]);
-            captions.push_back({anchor,out.str(),i<paths[k].levelColors.size()&&!paths[k].levelColors[i].empty()?paths[k].levelColors[i]:paths[k].color,k,i,{}});
+            captions.push_back({anchor,energyCellText(paths[k],i,out.str()),i<paths[k].levelColors.size()&&!paths[k].levelColors[i].empty()?paths[k].levelColors[i]:paths[k].color,k,i,{}});
         }
         // A state's labels always follow its numerical energy order, irrespective of path order.
         std::stable_sort(captions.begin(),captions.end(),[&](const ValueCaption& a,const ValueCaption& b){

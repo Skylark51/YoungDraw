@@ -3,6 +3,7 @@
 #include "win_ui.h"
 #include "win_dialog_style.h"
 #include "win_scripts.h"
+#include "scene.h"
 #include <commctrl.h>
 #include <algorithm>
 #include <set>
@@ -19,7 +20,7 @@ struct Grid {
     TableColumnEdit columnEdit;
     std::vector<std::wstring> originalColumns;
     std::set<std::pair<int,int>> invalidCells;
-    HWND win=nullptr,list=nullptr,edit=nullptr,error=nullptr,apply=nullptr; HFONT font=nullptr;
+    HWND win=nullptr,list=nullptr,edit=nullptr,error=nullptr,apply=nullptr; HFONT font=nullptr,italicFont=nullptr;
     int row=0,col=0,anchorRow=0,anchorCol=0,scriptColumn=-1;
     HIMAGELIST rowHeight=nullptr;
     bool embedded=false,reactionStages=false;
@@ -203,6 +204,7 @@ LRESULT CALLBACK editProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_
     if(msg==WM_IME_ENDCOMPOSITION)g.composing=false;
     if(msg==WM_KILLFOCUS)PostMessageW(g.win,CommitFocus,0,0);
     if(!g.composing&&multilineShortcut(hwnd,msg,wp))return 0;
+    if(!g.composing&&g.embedded&&(!g.reactionStages||g.col==0)&&italicShortcut(hwnd,msg,wp))return 0;
     if(!g.composing&&g.scripts&&g.col==g.scriptColumn&&scriptShortcut(hwnd,msg,wp))return 0;
     if(msg==WM_KEYDOWN&&!g.composing&&wp!=VK_PROCESSKEY){
         bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0,shift=(GetKeyState(VK_SHIFT)&0x8000)!=0;
@@ -222,6 +224,24 @@ void editCell(Grid& g,bool replace){
     g.edit=CreateWindowExW(0,L"EDIT",replace?L"":wide(g.rows[g.row][g.col]).c_str(),WS_CHILD|WS_VISIBLE|ES_MULTILINE|ES_AUTOVSCROLL|ES_AUTOHSCROLL|ES_WANTRETURN|ES_NOHIDESEL,r.left+1,r.top+1,r.right-r.left-2,r.bottom-r.top-2,g.list,nullptr,nullptr,nullptr);
     SendMessageW(g.edit,WM_SETFONT,(WPARAM)g.font,TRUE);SetWindowSubclass(g.edit,editProc,1,(DWORD_PTR)&g);
     sizeEditor(g);SetFocus(g.edit);int caret=GetWindowTextLengthW(g.edit);SendMessageW(g.edit,EM_SETSEL,caret,caret);
+}
+void drawGridText(const Grid& grid,HDC dc,const std::wstring& value,RECT cell){
+    const auto input=utf8(value);
+    if(input.find("~{")==std::string::npos){
+        DrawTextW(dc,value.c_str(),-1,&cell,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);
+        return;
+    }
+    const int saved=SaveDC(dc);
+    IntersectClipRect(dc,cell.left,cell.top,cell.right,cell.bottom);
+    for(const auto& run:yd::scriptRuns(input)){
+        const auto text=wide(run.text);
+        SelectObject(dc,run.italic?grid.italicFont:grid.font);
+        SIZE size{};GetTextExtentPoint32W(dc,text.c_str(),int(text.size()),&size);
+        DrawTextW(dc,text.c_str(),int(text.size()),&cell,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_NOCLIP);
+        cell.left+=size.cx;
+        if(cell.left>=cell.right)break;
+    }
+    RestoreDC(dc,saved);
 }
 LRESULT CALLBACK listProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR ref){
     auto& g=*reinterpret_cast<Grid*>(ref);bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0,shift=(GetKeyState(VK_SHIFT)&0x8000)!=0;
@@ -243,7 +263,19 @@ LRESULT CALLBACK listProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_
         }
         if(header.hwndFrom==ListView_GetHeader(hwnd)&&header.code==NM_CUSTOMDRAW){
             auto& draw=*reinterpret_cast<NMCUSTOMDRAW*>(lp);
-            if(draw.dwDrawStage==CDDS_PREPAINT)return CDRF_NOTIFYITEMDRAW;
+            if(draw.dwDrawStage==CDDS_PREPAINT){
+                if(g.embedded)FillRect(draw.hdc,&draw.rc,g.colors.panel);
+                return CDRF_NOTIFYITEMDRAW|(g.embedded?CDRF_NOTIFYPOSTPAINT:0);
+            }
+            if(draw.dwDrawStage==CDDS_POSTPAINT&&g.embedded){
+                RECT remainder{};
+                GetClientRect(header.hwndFrom,&remainder);
+                RECT last{};
+                if(const int count=Header_GetItemCount(header.hwndFrom);count>0&&Header_GetItemRect(header.hwndFrom,count-1,&last))
+                    remainder.left=last.right;
+                FillRect(draw.hdc,&remainder,g.colors.panel);
+                return CDRF_SKIPDEFAULT;
+            }
             if(draw.dwDrawStage==CDDS_ITEMPREPAINT){
                 wchar_t title[512]{};
                 HDITEMW column{};column.mask=HDI_TEXT;column.pszText=title;column.cchTextMax=512;
@@ -254,7 +286,7 @@ LRESULT CALLBACK listProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_
                 FrameRect(draw.hdc,&cell,(HBRUSH)GetStockObject(DC_BRUSH));
                 cell.left+=6;cell.right-=6;
                 SetTextColor(draw.hdc,colorRef(g.colors.palette.text));SetBkMode(draw.hdc,TRANSPARENT);
-                DrawTextW(draw.hdc,title,-1,&cell,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);
+                drawGridText(g,draw.hdc,title,cell);
                 return CDRF_SKIPDEFAULT;
             }
         }
@@ -280,6 +312,7 @@ LRESULT CALLBACK listProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_
         if(hit.iItem>=0){selectCell(g,hit.iItem,std::max(0,hit.iSubItem-1),shift&&msg==WM_LBUTTONDOWN);if(msg==WM_LBUTTONDBLCLK)editCell(g);else{g.dragging=true;SetCapture(hwnd);}}return 0;
     }
     if(msg==WM_KEYDOWN){
+        if(ctrl&&g.embedded&&wp=='I'&&(!g.reactionStages||g.col==0)){editCell(g);if(g.edit)italicShortcut(g.edit,msg,wp);return 0;}
         if(ctrl&&g.scripts&&g.col==g.scriptColumn&&(wp==VK_OEM_PLUS||wp==VK_ADD)){editCell(g);scriptShortcut(g.edit,msg,wp);return 0;}
         if(ctrl&&wp=='Z'){undo(g,shift);return 0;}if(ctrl&&wp=='Y'){undo(g,true);return 0;}
         if(ctrl&&wp=='C'){copy(g);return 0;}if(ctrl&&wp=='V'){paste(g);return 0;}if(ctrl&&wp=='D'){duplicate(g);return 0;}
@@ -320,8 +353,10 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_CREATE){ui::enableButtonHelp();
         g=static_cast<Grid*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);g->win=hwnd;if(g->scriptColumn<0)g->scriptColumn=g->stages?1:0;SetWindowLongPtrW(hwnd,GWLP_USERDATA,(LONG_PTR)g);
         g->font=CreateFontW(-16,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
-        g->list=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,16,16,940,450,hwnd,(HMENU)10,nullptr,nullptr);
+        g->list=CreateWindowExW(g->embedded?0:WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,16,16,940,450,hwnd,(HMENU)10,nullptr,nullptr);
         SendMessageW(g->list,WM_SETFONT,(WPARAM)g->font,TRUE);ListView_SetExtendedListViewStyle(g->list,LVS_EX_GRIDLINES|LVS_EX_DOUBLEBUFFER);
+        LOGFONTW italic{};GetObjectW(g->font,sizeof(italic),&italic);italic.lfItalic=TRUE;g->italicFont=CreateFontIndirectW(&italic);
+        if(g->embedded)appearance::nativeControl(g->list);
         ListView_SetBkColor(g->list,colorRef(g->colors.palette.raised));
         ListView_SetTextBkColor(g->list,colorRef(g->colors.palette.raised));
         ListView_SetTextColor(g->list,colorRef(g->colors.palette.text));
@@ -347,7 +382,7 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         if(!g->reactionStages)for(int i=25;i<=26;i++)ShowWindow(GetDlgItem(hwnd,i),SW_HIDE);
         sizeEditor(*g);return 0;
     }
-    if(msg==WM_NCDESTROY&&g->embedded){SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);DeleteObject(g->font);delete g;return DefWindowProcW(hwnd,msg,wp,lp);}
+    if(msg==WM_NCDESTROY&&g->embedded){SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);DeleteObject(g->font);DeleteObject(g->italicFont);delete g;return DefWindowProcW(hwnd,msg,wp,lp);}
     if(msg==WM_ERASEBKGND){RECT r;GetClientRect(hwnd,&r);FillRect((HDC)wp,&r,g->colors.panel);return 1;}
     if(msg==WM_CTLCOLORSTATIC)return g->colors.control(msg,(HDC)wp);
     if(msg==WM_DRAWITEM){const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);g->colors.draw(item,item.CtlID==22);return TRUE;}
@@ -368,12 +403,13 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 const auto& palette=g->colors.palette;
                 COLORREF background=invalid?(selected?RGB(249,183,184):RGB(255,222,222)):colorRef(selected?palette.accent:c<0?palette.panel:palette.raised);
                 COLORREF foreground=invalid?RGB(130,19,24):colorRef(selected?palette.onAccent:palette.text);
-                if(c>=0&&g->rows[r][c].find('\n')!=std::string::npos){
+                if(c>=0&&(g->rows[r][c].find('\n')!=std::string::npos||g->rows[r][c].find("~{")!=std::string::npos)){
                     RECT cell{};ListView_GetSubItemRect(g->list,r,c+1,LVIR_BOUNDS,&cell);
                     auto brush=CreateSolidBrush(background);FillRect(draw->nmcd.hdc,&cell,brush);DeleteObject(brush);
                     cell.left+=4;cell.top+=3;SetBkMode(draw->nmcd.hdc,TRANSPARENT);SetTextColor(draw->nmcd.hdc,foreground);
                     auto old=SelectObject(draw->nmcd.hdc,g->font);auto text=wide(g->rows[r][c]);
-                    DrawTextW(draw->nmcd.hdc,text.c_str(),int(text.size()),&cell,DT_LEFT|DT_TOP|DT_NOPREFIX);SelectObject(draw->nmcd.hdc,old);
+                    if(text.find(L"~{")!=std::wstring::npos)drawGridText(*g,draw->nmcd.hdc,text,cell);
+                    else DrawTextW(draw->nmcd.hdc,text.c_str(),int(text.size()),&cell,DT_LEFT|DT_TOP|DT_NOPREFIX);SelectObject(draw->nmcd.hdc,old);
                     return CDRF_SKIPDEFAULT;
                 }
                 draw->clrTextBk=background;draw->clrText=foreground;
@@ -392,6 +428,7 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         if(id==24)duplicate(*g);
         if(id==22)apply(*g);if(id==23)requestClose(*g);return 0;
     }}
+    if(msg==WM_DESTROY&&!g->embedded&&g->italicFont){DeleteObject(g->italicFont);g->italicFont=nullptr;}
     if(msg==WM_DESTROY&&g->rowHeight){ListView_SetImageList(g->list,nullptr,LVSIL_SMALL);ImageList_Destroy(g->rowHeight);g->rowHeight=nullptr;}
     if(msg==WM_CLOSE){requestClose(*g);return 0;}return DefWindowProcW(hwnd,msg,wp,lp);
 }
@@ -400,9 +437,10 @@ static HWND createEmbeddedTable(HWND parent,const std::vector<std::wstring>& col
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&controls);
     WNDCLASSW wc{};wc.lpfnWndProc=gridProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawEmbeddedGrid";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
     auto* g=new Grid;g->embedded=true;g->columns=columns;g->rows=g->original=rows;g->preview=preview;g->cellError=cellError;g->columnEdit=columnEdit;g->originalColumns=columns;
-    g->hint=L"셀 더블클릭 / F2: 입력 · Ctrl+V: 여러 셀 붙여넣기 · 입력 즉시 반영";
+    g->hint=L"셀 더블클릭 / F2: 입력 · Ctrl+I: 선택 글자 기울임 · Ctrl+V: 붙여넣기 · 입력 즉시 반영";
+    g->scripts=true;
     if(reactionStages){
-        g->reactionStages=true;g->scripts=true;
+        g->reactionStages=true;
         g->hint=L"범위 0~100% · 끝은 시작보다 최소 1% 크게 · 글자·굵기·화살촉의 0은 자동 · 모든 행을 지우면 숨김";
     }
     if(g->rows.empty())g->rows.push_back(std::vector<std::string>(columns.size()));

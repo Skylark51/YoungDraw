@@ -77,8 +77,8 @@ static void CALLBACK drivePathName(HWND parent,UINT,UINT_PTR timer,DWORD){
         return;
     }
     if(pathNameStep==1){
-        const auto dialog=FindWindowW(L"YoungDrawForm",L"경로 이름 변경");
-        if(dialog&&GetWindow(dialog,GW_OWNER)==plotManagerWindow){
+        const auto dialog=plotManagerWindow?FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"경로 이름 변경"):nullptr;
+        if(dialog&&GetParent(dialog)==plotManagerWindow){
             SetDlgItemTextW(dialog,100,L"S = 1");
             PostMessageW(dialog,WM_COMMAND,IDOK,0);
             pathNameStep=2;
@@ -254,7 +254,9 @@ static void CALLBACK driveMechanismAdvanced(HWND parent,UINT,UINT_PTR timer,DWOR
     KillTimer(parent,timer);SetDlgItemTextW(dialog,100,L"180");PostMessageW(dialog,WM_COMMAND,IDOK,0);
 }
 static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
-    HWND dialog=GetLastActivePopup(parent);wchar_t name[64]{};GetClassNameW(dialog,name,64);
+    HWND dialog=plotManagerWindow?FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",nullptr):nullptr;
+    if(!dialog)dialog=GetLastActivePopup(parent);
+    wchar_t name[64]{};GetClassNameW(dialog,name,64);
     if(std::wstring(name)==L"YoungDrawMechanismEditor"&&(formAction==3||formAction==4||formAction==26)){
         KillTimer(parent,timer);formDriven=true;previewObserved=toNative(doc)==formBefore;
         SendDlgItemMessageW(dialog,11,CB_SETCURSEL,formAction==26?5:2,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(11,CBN_SELCHANGE),0);
@@ -440,6 +442,8 @@ static void graphManagerChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
     const auto before=toNative(doc);managePlot(owner,false);auto manager=plotManagerWindow;check(manager&&IsWindow(manager)&&toNative(doc)==before,"graph manager opens without modifying the selected graph");
     auto originalButton=GetDlgItem(manager,131);
+    wchar_t doneLabel[32]{};GetDlgItemTextW(manager,4400,doneLabel,32);
+    check(std::wstring(doneLabel)==L"확인","data panel confirmation is labeled clearly");
     SendMessageW(manager,WM_COMMAND,131,0);auto inlineGrid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
     check(inlineGrid&&GetParent(inlineGrid)==manager&&toNative(doc)==before,"data opens as a nonmutating child panel");
     auto list=GetDlgItem(inlineGrid,10);RECT cell{};ListView_GetSubItemRect(list,0,2,LVIR_BOUNDS,&cell);
@@ -448,10 +452,32 @@ static void graphManagerChecks(HWND hwnd){
     check(toNative(doc)==before&&(GetWindowLongPtrW(inlineGrid,GWL_STYLE)&WS_VISIBLE),"invalid data cannot modify the document or disappear on tab switch");
     SendMessageW(list,WM_KEYDOWN,VK_F2,0);input=FindWindowExW(list,nullptr,L"EDIT",nullptr);SetWindowTextW(input,L"-12.5");SendMessageW(list,WM_KEYDOWN,VK_RETURN,0);
     check(doc.plots[0].series[0].values[0]==-12.5,"inline energy edits update the graph without a separate window");
+    RECT nameRect{};
+    ListView_GetSubItemRect(list,1,1,LVIR_BOUNDS,&nameRect);
+    SendMessageW(list,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(nameRect.left+8,nameRect.top+8));
+    auto nameCell=FindWindowExW(list,nullptr,L"EDIT",nullptr);
+    check(nameCell!=nullptr,"inline formatted data editor remains available");
+    SetWindowTextW(nameCell,L"~{R} label");
+    SendMessageW(list,WM_KEYDOWN,VK_RETURN,0);
+    ListView_EnsureVisible(list,0,FALSE);
+    ListView_GetSubItemRect(list,0,2,LVIR_BOUNDS,&cell);
+    SendMessageW(list,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(cell.left+8,cell.top+8));
+    auto energyCell=FindWindowExW(list,nullptr,L"EDIT",nullptr);
+    check(energyCell!=nullptr,"reopening numeric cells preserves editing");
+    SetWindowTextW(energyCell,L"-~{12}.5");
+    SendMessageW(list,WM_KEYDOWN,VK_RETURN,0);
+    check(std::any_of(doc.plots[0].series[0].valueLabels.begin(),doc.plots[0].series[0].valueLabels.end(),
+        [](const auto& text){return text=="-~{12}.5";}),"partial numeric styling is stored separately from the energy");
+    check(toNative(fromCdxml(toCdxml(doc)))==toNative(doc),"formatted graph data round trips through CDXML");
+    SendMessageW(manager,WM_COMMAND,104,0);
+    SendMessageW(manager,WM_COMMAND,104,0);
     SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"inline data change undoes in one action");
     for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
     check(GetDlgItem(manager,131)==originalButton,"tab changes reuse controls instead of recreating them");
     SendMessageW(manager,WM_COMMAND,4001,0);
+    formAction=20;formDriven=false;SetTimer(hwnd,901,10,driveForm);
+    SendMessageW(manager,WM_COMMAND,137,0);KillTimer(hwnd,901);
+    check(formDriven&&toNative(doc)==before,"axis settings open and cancel inside the manager");
     RECT legendCard{},lastColumn{},secondRow{};
     GetWindowRect(GetDlgItem(manager,plotLegendCommand),&legendCard);
     GetWindowRect(GetDlgItem(manager,240),&lastColumn);
@@ -562,6 +588,18 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(manager,WM_COMMAND,4003,0);SendDlgItemMessageW(manager,4200,CB_SETCURSEL,0,0);SendDlgItemMessageW(manager,4201,CB_SETCURSEL,0,0);SendMessageW(manager,WM_COMMAND,4300,0);structureEditor=savedEditor;
     check(structureInSlot(doc,owner,0,true).atoms[0].element==8&&toNative(structureInSlot(doc,owner,1,true))==otherSlot&&doc.plots[0].series[0].values==energies,"manager edits a chosen structure independently of other states and graph data");
     SendMessageW(manager,WM_COMMAND,104,0);check(toNative(structureInSlot(doc,owner,0,true))==originalSlot,"independent structure edit undoes through the manager");
+    const auto below=structureInSlot(doc,owner,0,false);
+    check(below.allIds().empty(),"test uses an empty region opposite an existing structure");
+    structureEditor=[](const Document& current)->std::optional<Document>{
+        check(current.allIds().empty(),"choosing an empty region starts a blank structure");
+        auto result=current;result.addAtom({0,0},8);return result;
+    };
+    SendDlgItemMessageW(manager,4200,CB_SETCURSEL,0,0);
+    SendDlgItemMessageW(manager,4201,CB_SETCURSEL,1,0);
+    SendMessageW(manager,WM_COMMAND,4300,0);structureEditor=savedEditor;
+    check(structureInSlot(doc,owner,0,false).atoms.size()==1&&toNative(structureInSlot(doc,owner,0,true))==originalSlot,
+        "new structure is saved in the chosen empty region");
+    SendMessageW(manager,WM_COMMAND,104,0);
     SendMessageW(manager,WM_COMMAND,4004,0);formBefore=toNative(doc);formAction=31;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotWaveWidthCommand,0);check(formDriven&&doc.plots[0].waveWidth==3.2,"manager retains custom wave controls");
     RECT waveCard{};GetWindowRect(GetDlgItem(manager,plotWaveWidthCommand),&waveCard);
     const LPARAM wheelPoint=MAKELPARAM((waveCard.left+waveCard.right)/2,(waveCard.top+waveCard.bottom)/2);

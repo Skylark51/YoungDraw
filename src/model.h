@@ -95,7 +95,7 @@ struct EnergyState {
 inline constexpr double maxStageArrowWidth=100.;
 struct MechanismStage { std::string label; double start=0,end=100,fontSize=0,arrowWidth=0,arrowHeadSize=0; }; // Percent span; fontSize 0 matches state captions.
 // Empty color entries inherit the pathway color. Segment i joins states i and i+1.
-struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
+struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors,valueLabels; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
 // One shared point between two paths on the same segment. Position is the
 // fraction of the gap between the adjacent plateaus.
 struct EnergyCrossing {
