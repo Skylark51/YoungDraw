@@ -93,6 +93,31 @@ static void CALLBACK drivePathName(HWND parent,UINT,UINT_PTR timer,DWORD){
     KillTimer(parent,timer);
     PostMessageW(plotManagerWindow,WM_CLOSE,0,0);
 }
+static int graphStyleMode=0,graphStyleResult=IDCANCEL;
+static bool graphStyleCardsSeen=false,graphStylePreviewSeen=false;
+static void CALLBACK driveGraphStyle(HWND parent,UINT,UINT_PTR timer,DWORD){
+    auto picker=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawGraphPicker",L"그래프 형태");
+    if(!picker)picker=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"그래프 형태");
+    if(!picker)return;
+    KillTimer(parent,timer);
+    graphStyleCardsSeen=true;
+    RECT previous{},panel{};GetWindowRect(picker,&panel);
+    for(int i=0;i<5;++i){
+        const auto card=GetDlgItem(picker,100+i);
+        RECT bounds{};GetWindowRect(card,&bounds);
+        graphStyleCardsSeen=graphStyleCardsSeen&&card&&ui::hasButtonHelp(card)&&
+            (GetWindowLongPtrW(card,GWL_STYLE)&BS_TYPEMASK)==BS_OWNERDRAW&&
+            bounds.left>=panel.left&&bounds.right<=panel.right&&bounds.right>bounds.left&&
+            (!i||(bounds.left>=previous.right&&bounds.top==previous.top));
+        previous=bounds;
+    }
+    if(graphStyleCardsSeen){
+        const int id=100+graphStyleMode;
+        SendMessageW(picker,WM_COMMAND,MAKEWPARAM(id,BN_CLICKED),LPARAM(GetDlgItem(picker,id)));
+        graphStylePreviewSeen=doc.plots.front().mode==graphStyleMode;
+    }
+    PostMessageW(picker,WM_COMMAND,graphStyleCardsSeen?graphStyleResult:IDCANCEL,0);
+}
 static bool chemistryMenuOpened=false;
 enum class CrossingAction { AddLeft,AddRight,CancelEdit,DeleteLeft };
 static CrossingAction crossingAction;
@@ -474,6 +499,18 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"inline data change undoes in one action");
     for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
     check(GetDlgItem(manager,131)==originalButton,"tab changes reuse controls instead of recreating them");
+    SendMessageW(manager,WM_COMMAND,4000,0);
+    auto styledGraph=doc;
+    graphStyleMode=(doc.plots.front().mode+1)%5;
+    styledGraph.plots.front().mode=graphStyleMode;
+    for(int result:{IDCANCEL,IDOK}){
+        graphStyleResult=result;graphStyleCardsSeen=false;graphStylePreviewSeen=false;
+        SetTimer(hwnd,901,10,driveGraphStyle);
+        SendMessageW(manager,WM_COMMAND,changePlotStyleCommand,0);KillTimer(hwnd,901);
+        check(graphStyleCardsSeen&&graphStylePreviewSeen,"five inline graph cards show help and preview on selection");
+        check(toNative(doc)==(result==IDOK?toNative(styledGraph):before),"graph style applies or cancels without affecting other data");
+    }
+    check(history.undo(doc)&&toNative(doc)==before,"graph style change undoes in one operation");
     SendMessageW(manager,WM_COMMAND,4001,0);
     formAction=20;formDriven=false;SetTimer(hwnd,901,10,driveForm);
     SendMessageW(manager,WM_COMMAND,137,0);KillTimer(hwnd,901);

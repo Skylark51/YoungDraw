@@ -45,10 +45,11 @@ namespace {
 struct GraphPicker {
     std::vector<yd::Reaction> mechanisms;
     int count() const {return mechanisms.empty()?5:int(mechanisms.size());}
-    GraphChoice choice;DialogColors colors;HFONT font=nullptr;bool done=false,ok=false,editStyle=false;std::function<void(int)> preview;
+    GraphChoice choice;DialogColors colors;HFONT font=nullptr;bool done=false,ok=false,editStyle=false,inlinePanel=false;std::function<void(int)> preview;
 };
 const wchar_t* graphNames[]={L"부드러운 곡선",L"직선",L"준위 · 점선 연결",L"준위 · 실선 연결",L"독립 에너지 준위"};
 const wchar_t* graphDetails[]={L"봉우리와 중간체를 부드럽게 연결",L"상태 사이를 직선으로 연결",L"평평한 준위를 점선으로 연결",L"평평한 준위를 실선으로 연결",L"스핀 다중도 등 개별 상태 비교"};
+constexpr int inlineGraphPickerHeight=184;
 constexpr const wchar_t* mechanismNames[]={L"직선",L"가로 → 아래 → 순환",L"가로 → 아래 → 분기·합류",L"촉매 순환"};
 void drawMechanismPath(Gdiplus::Graphics& g,const Gdiplus::RectF& card,const yd::Reaction& reaction){
     using namespace Gdiplus;
@@ -110,30 +111,42 @@ void drawMechanismCard(const DRAWITEMSTRUCT& item,const GraphPicker& picker,int 
     ui::drawLabel(g,mechanismNames[mode],{box.X,box.Y+151,box.Width,30},12.f,
         selected||focused?palette.accent:palette.text,selected,true);
 }
-void drawGraphCard(const DRAWITEMSTRUCT& item,GraphPicker& picker,int mode){
+void drawGraphCard(const DRAWITEMSTRUCT& item,const GraphPicker& picker,int mode){
     using namespace Gdiplus;
     Graphics g(item.hDC);g.SetSmoothingMode(SmoothingModeAntiAlias);
     const auto& palette=picker.colors.palette;const bool selected=picker.choice.mode==mode;
     RectF box(float(item.rcItem.left),float(item.rcItem.top),float(item.rcItem.right-item.rcItem.left),float(item.rcItem.bottom-item.rcItem.top));
     SolidBrush fill(selected?palette.hover:palette.raised);g.FillRectangle(&fill,box);
     Pen border(selected?palette.accent:palette.edge,selected?2.f:1.f);g.DrawRectangle(&border,box.X+1,box.Y+1,box.Width-2,box.Height-2);
-    if(item.itemState&ODS_FOCUS){RECT focus=item.rcItem;InflateRect(&focus,-4,-4);DrawFocusRect(item.hDC,&focus);}
-    const float x=box.X+22,y=box.Y+20,w=box.Width-44,h=60;
+    if((item.itemState&ODS_FOCUS)&&!(item.itemState&ODS_NOFOCUSRECT)){RECT focus=item.rcItem;InflateRect(&focus,-4,-4);DrawFocusRect(item.hDC,&focus);}
+    const bool compact=picker.inlinePanel;
+    const float w=compact?std::min(124.f,box.Width-38):box.Width-44;
+    const float x=box.X+(box.Width-w)/2,y=box.Y+(compact?13:20),scale=compact?.8f:1.f,h=60*scale;
     Pen axis(palette.muted,1);g.DrawLine(&axis,x,y+h,x+w,y+h);g.DrawLine(&axis,x,y+h,x,y);
-    Pen path(palette.text,2.1f);PointF pts[]={{x+10,y+46},{x+w*.5f,y+9},{x+w-10,y+50}};
-    if(mode==0){g.DrawBezier(&path,pts[0],PointF(x+w*.3f,y+46),PointF(x+w*.3f,y+9),pts[1]);g.DrawBezier(&path,pts[1],PointF(x+w*.7f,y+9),PointF(x+w*.7f,y+50),pts[2]);}
+    Pen path(palette.text,2.1f);PointF pts[]={{x+10,y+46*scale},{x+w*.5f,y+9*scale},{x+w-10,y+50*scale}};
+    if(mode==0){g.DrawBezier(&path,pts[0],PointF(x+w*.3f,pts[0].Y),PointF(x+w*.3f,pts[1].Y),pts[1]);g.DrawBezier(&path,pts[1],PointF(x+w*.7f,pts[1].Y),PointF(x+w*.7f,pts[2].Y),pts[2]);}
     else if(mode==1)g.DrawLines(&path,pts,3);
     else{
-        const float half=13;
+        const float half=13*scale;
         for(int i=0;i<3;++i){
             if(i&&mode!=4){Pen join(palette.muted,1.4f);if(mode==2)join.SetDashStyle(DashStyleDash);g.DrawLine(&join,pts[i-1].X+half,pts[i-1].Y,pts[i].X-half,pts[i].Y);}
             g.DrawLine(&path,pts[i].X-half,pts[i].Y,pts[i].X+half,pts[i].Y);
         }
     }
     SolidBrush dot(palette.accent);for(auto pt:pts)g.FillEllipse(&dot,pt.X-2.8f,pt.Y-2.8f,5.6f,5.6f);
-    ui::drawLabel(g,graphNames[mode],{box.X+12,box.Y+91,box.Width-24,25},14,palette.text,true,true);
-    ui::drawLabel(g,graphDetails[mode],{box.X+10,box.Y+118,box.Width-20,26},10.5f,palette.muted,false,true);
+    ui::drawLabel(g,graphNames[mode],{box.X+8,box.Y+(compact?68:91),box.Width-16,25},14,palette.text,true,true);
+    if(!compact)ui::drawLabel(g,graphDetails[mode],{box.X+10,box.Y+118,box.Width-20,26},10.5f,palette.muted,false,true);
     if(selected){SolidBrush chosen(palette.accent);g.FillEllipse(&chosen,box.X+box.Width-19.f,box.Y+9.f,8.f,8.f);}
+}
+void layoutInlineGraphPicker(HWND hwnd,int width){
+    constexpr int count=5,gap=10;
+    const int available=width-(count-1)*gap;
+    for(int i=0;i<count;++i){
+        const int left=available*i/count,right=available*(i+1)/count;
+        MoveWindow(GetDlgItem(hwnd,100+i),left+i*gap,32,right-left,104,TRUE);
+    }
+    MoveWindow(GetDlgItem(hwnd,IDOK),width-210,150,100,34,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDCANCEL),width-100,150,100,34,TRUE);
 }
 LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
     auto* picker=reinterpret_cast<GraphPicker*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
@@ -141,6 +154,14 @@ LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
         picker=static_cast<GraphPicker*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(picker));
         picker->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
         auto control=[&](const wchar_t* kind,const wchar_t* label,DWORD style,int id,int x,int y,int w,int h){auto c=CreateWindowW(kind,label,WS_CHILD|WS_VISIBLE|style,x,y,w,h,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);SendMessageW(c,WM_SETFONT,WPARAM(picker->font),TRUE);return c;};
+        if(picker->inlinePanel){
+            control(L"STATIC",L"그래프 형태",0,0,0,2,220,26);
+            for(int i=0;i<picker->count();++i)control(L"BUTTON",graphNames[i],WS_TABSTOP|BS_OWNERDRAW,100+i,0,0,0,0);
+            control(L"BUTTON",L"적용",WS_TABSTOP|BS_OWNERDRAW,IDOK,0,0,0,0);
+            control(L"BUTTON",L"취소",WS_TABSTOP|BS_OWNERDRAW,IDCANCEL,0,0,0,0);
+            RECT area{};GetClientRect(hwnd,&area);layoutInlineGraphPicker(hwnd,area.right);
+            return 0;
+        }
         if(!picker->mechanisms.empty()){
             control(L"STATIC",L"경로 예시를 보고 양식을 선택하세요.",0,0,22,16,640,28);
             for(int i=0;i<picker->count();++i){
@@ -165,6 +186,7 @@ LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
         return 0;
     }
     if(!picker)return DefWindowProcW(hwnd,message,wp,lp);
+    if(message==WM_SIZE&&picker->inlinePanel){layoutInlineGraphPicker(hwnd,LOWORD(lp));return 0;}
     if(message==WM_ERASEBKGND){RECT r{};GetClientRect(hwnd,&r);FillRect(HDC(wp),&r,picker->colors.panel);return 1;}
     if(message==WM_CTLCOLORSTATIC)return picker->colors.control(message,HDC(wp));
     if(message==WM_DRAWITEM){const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);
@@ -189,6 +211,17 @@ std::optional<GraphChoice> showPathPicker(HWND owner,GraphPicker& picker,const w
     const auto instance=GetModuleHandleW(nullptr);
     WNDCLASSW wc{};wc.lpfnWndProc=graphPickerProc;wc.hInstance=instance;wc.lpszClassName=className;
     wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
+    if(auto* host=inlineDialogHost();picker.editStyle&&host){
+        picker.inlinePanel=true;
+        auto hwnd=CreateWindowExW(WS_EX_CONTROLPARENT,className,L"그래프 형태",WS_CHILD|WS_CLIPCHILDREN,
+            0,0,840,inlineGraphPickerHeight,host->window,nullptr,instance,&picker);
+        if(!hwnd)return {};
+        attachWindowHelp(hwnd);
+        runInlineDialog(hwnd,inlineGraphPickerHeight,picker.done,GetDlgItem(hwnd,100+picker.choice.mode));
+        if(picker.font)DeleteObject(picker.font);
+        if(picker.ok)return picker.choice;
+        return {};
+    }
     constexpr DWORD style=WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN;
     RECT area{0,0,width,height};AdjustWindowRectEx(&area,style,FALSE,0);
     const int w=area.right-area.left,h=area.bottom-area.top;const auto r=ownedWindowRect(owner,w,h,picker.editStyle);
@@ -206,13 +239,6 @@ std::optional<GraphChoice> showPathPicker(HWND owner,GraphPicker& picker,const w
 }
 }
 std::optional<GraphChoice> graphChoice(HWND owner,int initialMode,bool editStyle,const std::function<void(int)>& preview){
-    if(editStyle&&inlineDialogHost()){
-        const auto result=form(owner,L"그래프 형태",{{L"형태",std::to_string(initialMode),false,
-            {L"부드러운 곡선",L"직선",L"준위 · 점선 연결",L"준위 · 실선 연결",L"독립 에너지 준위"}}},
-            [&](const auto& values)->std::wstring{if(preview)preview(std::stoi(values[0]));return {};});
-        if(!result)return {};
-        return GraphChoice{std::stoi(result->front()),true};
-    }
     GraphPicker picker;picker.choice.mode=std::clamp(initialMode,0,4);picker.editStyle=editStyle;picker.preview=preview;
     return showPathPicker(owner,picker,editStyle?L"그래프 스타일 변경":L"새 에너지 그래프",710,editStyle?509:598,L"YoungDrawGraphPicker");
 }

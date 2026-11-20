@@ -53,7 +53,7 @@ std::wstring buttonHelpText(HWND button){auto root=GetAncestor(button,GA_ROOT);a
             L"가로 경로가 좌우로 분기된 뒤 마지막 단계에서 합류합니다.",L"마지막 단계에서 첫 단계로 돌아오는 닫힌 경로를 만듭니다."};
         return paths[id-100];
     }
-    if(type==L"YoungDrawGraphPicker"){
+    if(classOf(GetParent(button))==L"YoungDrawGraphPicker"){
         if(id>=100&&id<105){const wchar_t* detail[]={L"봉우리와 중간체를 부드러운 곡선으로 연결합니다.",L"상태 사이를 직선으로 연결합니다.",L"평평한 에너지 준위를 점선으로 연결합니다.",L"평평한 에너지 준위를 실선으로 연결합니다.",L"상태들을 연결선 없이 독립 에너지 준위로 비교합니다."};return std::wstring(detail[id-100])+L" 카드를 누르면 선택한 형태를 미리 볼 수 있습니다.";}
         if(id==200)return L"그래프를 전자 에너지 차이 ΔE 표기로 만듭니다.";if(id==201)return L"그래프를 자유 에너지 차이 ΔG 표기로 만듭니다.";
     }
