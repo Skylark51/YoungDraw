@@ -457,49 +457,86 @@ void editPlotPhotoExcitation(int id){
         throw std::runtime_error("두 준위가 연결된 에너지 그래프를 선택하세요.");
     const auto original=*selected;
     const Document before=doc;
-    std::vector<ui::SearchItem> segments;
-    for(size_t i=0;i+1<original.states.size();++i){
-        auto stateName=[&](size_t index){
-            return std::to_wstring(index+1)+L". "+ui::wide(original.states[index].label);
-        };
-        segments.push_back({stateName(i)+L" → "+stateName(i+1),
-            original.states[i].photoPath>=0?L"광여기 적용됨":L"두 준위 사이의 연결"});
-    }
-    const auto segment=ui::search(win,L"광여기 hν · 구간 선택",segments,L"편집",true);
-    if(!segment)return;
-    const size_t i=*segment;
-    std::vector<std::wstring> choices={L"일반 연결"};
-    auto entry=[&](const std::string& label,double a,double b){
-        return ui::wide(label)+L" · "+ui::wide(number(std::min(a,b)))+L" → "+ui::wide(number(std::max(a,b)));
+    auto stateName=[&](size_t index){
+        return std::to_wstring(index+1)+L". "+ui::wide(original.states[index].label);
     };
-    if(original.series.empty())choices.push_back(entry("Path 1",original.states[i].energy,original.states[i+1].energy));
-    else for(const auto& path:original.series)choices.push_back(path.hasValue(i)&&path.hasValue(i+1)?
-        entry(path.name,path.values[i],path.values[i+1]):ui::wide(path.name)+L" · 에너지 값 없음");
-    auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
-        auto graph=original;
-        const int index=std::stoi(values[0])-1;
-        if(index>=0){
-            double a=graph.states[i].energy,b=graph.states[i+1].energy;
-            if(!graph.series.empty()){
-                const auto& path=graph.series.at(size_t(index));
-                if(!path.hasValue(i)||!path.hasValue(i+1))return L"선택한 경로에 두 에너지 값이 모두 있어야 합니다.";
-                a=path.values[i];b=path.values[i+1];
-            }
-            if(std::abs(a-b)<1e-9)return L"서로 다른 에너지 준위를 선택하세요.";
-            for(const auto& crossing:graph.crossings)
-                if(crossing.segment==int(i)&&(crossing.firstPath==index||crossing.secondPath==index))
-                    return L"이 경로와 구간에 스핀 교차점이 설정되어 있습니다. 교차점을 옮기거나 제거하세요.";
-            auto& from=graph.states[i];
-            if(from.breakAfter&&from.breakPath==index)from.breakAfter=false;
+    auto pathRange=[&](size_t i,size_t k)->std::optional<std::wstring>{
+        double a=original.states[i].energy,b=original.states[i+1].energy;
+        if(!original.series.empty()){
+            const auto& path=original.series[k];
+            if(!path.hasValue(i)||!path.hasValue(i+1))return {};
+            a=path.values[i];b=path.values[i+1];
         }
-        graph.states[i].photoPath=index;
+        if(std::abs(a-b)<1e-9)return {};
+        for(const auto& crossing:original.crossings)
+            if(crossing.segment==int(i)&&(crossing.firstPath==int(k)||crossing.secondPath==int(k)))return {};
+        return ui::wide(number(std::min(a,b)))+L" → "+ui::wide(number(std::max(a,b)));
+    };
+    auto update=[&](size_t i,int path)->std::wstring{try{
+        auto graph=original;
+        auto& from=graph.states[i];
+        if(path>=0&&from.breakAfter&&from.breakPath==path)from.breakAfter=false;
+        from.photoPath=path;
         validateEnergyAnnotations(graph);
         doc=before;*plot(id)=std::move(graph);redraw();UpdateWindow(win);return {};
     }catch(const std::exception& error){return ui::wide(error.what());}};
-    const auto applied=ui::form(win,L"광여기 hν · "+segments[i].title,
-        {{L"광여기를 적용할 경로",std::to_string(original.states[i].photoPath+1),false,choices}},update);
-    if(applied){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
-    else{doc=before;redraw();}
+    auto finish=[&](bool applied){
+        if(applied){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+        else{doc=before;redraw();}
+    };
+    const size_t pathCount=std::max(size_t(1),original.series.size());
+    if(pathCount==1){
+        std::vector<std::wstring> choices;
+        std::vector<std::pair<size_t,int>> actions;
+        for(size_t i=0;i+1<original.states.size();++i){
+            const bool applied=original.states[i].photoPath>=0;
+            const auto range=pathRange(i,0);
+            if(!applied&&!range)continue;
+            auto label=stateName(i)+L" → "+stateName(i+1);
+            if(range)label+=L"  ("+*range+L")";
+            choices.push_back((applied?L"해제 · ":L"추가 · ")+label);
+            actions.emplace_back(i,applied?-1:0);
+        }
+        if(actions.empty())throw std::runtime_error("광여기에 사용할 서로 다른 두 에너지 값이 없습니다.");
+        const auto applied=ui::form(win,L"광여기 hν",{{L"구간 선택", "0",false,choices}},
+            [&](const auto& values){const auto [segment,path]=actions.at(std::stoul(values[0]));return update(segment,path);});
+        finish(bool(applied));
+        return;
+    }
+
+    std::vector<ui::SearchItem> segments;
+    std::vector<size_t> indices;
+    for(size_t i=0;i+1<original.states.size();++i){
+        std::optional<std::wstring> firstRange;
+        for(size_t k=0;k<pathCount&&!firstRange;++k)firstRange=pathRange(i,k);
+        const bool applied=original.states[i].photoPath>=0;
+        if(!firstRange&&!applied)continue;
+        auto label=stateName(i)+L" → "+stateName(i+1);
+        if(firstRange)label+=L"  ("+*firstRange+L")";
+        if(applied)label+=L" · hν";
+        segments.push_back({label,L""});
+        indices.push_back(i);
+    }
+    if(segments.empty())throw std::runtime_error("광여기에 사용할 서로 다른 두 에너지 값이 없습니다.");
+    const auto segment=ui::search(win,L"광여기 hν · 구간 선택",segments,L"편집");
+    if(!segment)return;
+    const size_t i=indices[*segment];
+    const int current=original.states[i].photoPath;
+    std::vector<std::wstring> choices={L"일반 연결"};
+    std::vector<int> paths={-1};
+    size_t selectedPath=0;
+    for(size_t k=0;k<pathCount;++k){
+        const auto range=pathRange(i,k);
+        if(!range&&int(k)!=current)continue;
+        if(int(k)==current)selectedPath=choices.size();
+        choices.push_back(ui::wide(original.series[k].name)+L" · "+(range?*range:L"현재 광여기 경로"));
+        paths.push_back(int(k));
+    }
+    if(current<0&&paths.size()==2)selectedPath=1;
+    const auto applied=ui::form(win,L"광여기 hν · 경로 선택",
+        {{L"광여기를 적용할 경로",std::to_string(selectedPath),false,choices}},
+        [&](const auto& values){return update(i,paths.at(std::stoul(values[0])));});
+    finish(bool(applied));
 }
 
 void editPlotAnnotations(int id){

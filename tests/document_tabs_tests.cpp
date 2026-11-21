@@ -497,9 +497,32 @@ static void documentStyleChecks(HWND hwnd){
         fromCdxml(toCdxml(doc)).style.labelFont==doc.style.labelFont,"document font survives native and CDXML round trips");
     check(history.undo(doc)&&toNative(doc)==before,"document style changes share one undo checkpoint");
 }
+static bool photoFormSeen=false,removePhoto=false;
+static void CALLBACK drivePhotoForm(HWND owner,UINT,UINT_PTR timer,DWORD){
+    const auto form=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"광여기 hν");
+    if(!form)return;
+    KillTimer(owner,timer);
+    const auto combo=GetDlgItem(form,100);
+    wchar_t text[256]{};
+    SendMessageW(combo,CB_GETLBTEXT,0,LPARAM(text));
+    const std::wstring choice=text;
+    photoFormSeen=choice.find(removePhoto?L"해제":L"추가")!=std::wstring::npos&&
+                  choice.find(L"0")!=std::wstring::npos&&choice.find(L"37.2")!=std::wstring::npos;
+    PostMessageW(form,WM_COMMAND,IDOK,0);
+}
 static void graphManagerChecks(HWND hwnd){
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
     const auto before=toNative(doc);managePlot(owner,false);auto manager=plotManagerWindow;check(manager&&IsWindow(manager)&&toNative(doc)==before,"graph manager opens without modifying the selected graph");
+    SendMessageW(manager,WM_COMMAND,4002,0);
+    for(bool remove:{false,true}){
+        removePhoto=remove;photoFormSeen=false;
+        SetTimer(hwnd,901,10,drivePhotoForm);SendMessageW(manager,WM_COMMAND,4405,0);KillTimer(hwnd,901);
+        check(photoFormSeen&&doc.plots[0].states[0].photoPath==(remove?-1:0),
+              "one photo dialog shows the energy range and adds or removes the arrow");
+    }
+    check(toNative(doc)==before,"removing photoexcitation restores the original graph");
+    history.clear();
+    SendMessageW(manager,WM_COMMAND,4000,0);
     auto originalButton=GetDlgItem(manager,131);
     GetWindowRect(GetDlgItem(manager,4000),&graphManagerTabBounds);
     RECT frame{};GetWindowRect(manager,&frame);
