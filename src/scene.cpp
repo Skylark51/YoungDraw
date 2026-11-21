@@ -229,7 +229,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             else if(b.doubleSide){line(a,z,bondWidth);line(a+n*(gap*b.doubleSide),z+n*(gap*b.doubleSide),bondStyle.lineWidth);}else{line(a+n*(gap/2),z+n*(gap/2),bondWidth);line(a-n*(gap/2),z-n*(gap/2),bondStyle.lineWidth);}}
         else if(b.kind==BondKind::Triple){line(a,z,bondWidth);line(a+n*gap,z+n*gap,bondWidth);line(a-n*gap,z-n*gap,bondWidth);}
         else if(b.kind==BondKind::Wavy){Vec last=a;for(int i=1;i<=24;i++){double t=double(i)/24;Vec q=a+v*t+n*(std::sin(t*pi*8)*.8*b.drawingScale);line(last,q,bondWidth);last=q;}}
-        else if(b.kind==BondKind::Dative){line(a,z,bondWidth);line(z,z-u*(3*b.drawingScale)+n*(1.4*b.drawingScale),bondWidth);line(z,z-u*(3*b.drawingScale)-n*(1.4*b.drawingScale),bondWidth);}
+        else if(b.kind==BondKind::Dative){line(a,z,bondWidth);if(b.customDisplay!="Solid"){line(z,z-u*(3*b.drawingScale)+n*(1.4*b.drawingScale),bondWidth);line(z,z-u*(3*b.drawingScale)-n*(1.4*b.drawingScale),bondWidth);}}
         else if(b.kind==BondKind::Aromatic){
             // The solid stroke stays on the skeleton; put the partial second
             // stroke inside the ring or delocalized fragment, independent of

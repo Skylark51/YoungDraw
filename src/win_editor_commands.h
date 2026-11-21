@@ -32,6 +32,7 @@ inline constexpr int reopenClosedDocumentCommand = 256;
 inline constexpr int exportTiffCommand = 257;
 inline constexpr int rotateToolCommand = 258;
 inline constexpr int arrowColorCommand = 259;
+inline constexpr int ligandSpatialCommand = 260;
 inline constexpr int exportPngCommand = 247;
 inline constexpr int copyPngCommand = 248;
 

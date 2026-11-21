@@ -323,6 +323,7 @@ struct Form {
     int contentBottom=16;
     RECT picture{};
     std::function<void(HDC,const RECT&,const std::vector<std::string>&)> illustration;
+    int illustrationHeight=124;
     DialogColors colors;
     std::vector<Field> fields;std::vector<HWND> edits;
     std::vector<std::string> result;Preview preview;
@@ -634,7 +635,7 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             if(f->tabs.empty())y+=f->embedded?34:rowHeight(field);
         }
         if(f->tab&&!f->embedded){layoutFormTabs(*f);y=f->contentBottom;}
-        if(f->illustration){f->picture={16,y,660,y+124};y+=132;}
+        if(f->illustration){f->picture={16,y,660,y+f->illustrationHeight};y+=f->illustrationHeight+8;}
         if(f->embedded){
             f->error=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,16,y+2,420,40,hwnd,nullptr,nullptr,nullptr);
             SendMessageW(f->error,WM_SETFONT,(WPARAM)f->font,TRUE);
@@ -760,9 +761,9 @@ HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fie
 }
 
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& callback,const FormTabs& tabs,
-    const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration){
+    const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration,int illustrationHeight){
     static bool registered=false;if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawForm";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);registered=true;}
-    Form f;f.fields=fields;f.preview=callback;f.tabs=tabs;f.illustration=illustration;
+    Form f;f.fields=fields;f.preview=callback;f.tabs=tabs;f.illustration=illustration;f.illustrationHeight=std::clamp(illustrationHeight,124,360);
     if(tabs.empty())for(auto& v:fields)f.contentBottom+=rowHeight(v);
     else{
         INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_TAB_CLASSES};InitCommonControlsEx(&controls);
@@ -783,7 +784,7 @@ std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& tit
         if(f.ok)return f.result;
         return {};
     }
-    const int height=92+f.contentBottom+(callback?43:0)+(illustration?132:0);
+    const int height=92+f.contentBottom+(callback?43:0)+(illustration?f.illustrationHeight+8:0);
     const RECT r=ownedWindowRect(parent,700,height,bool(callback));
     HWND hwnd=CreateWindowExW(0,L"YoungDrawForm",title.c_str(),WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,700,height,parent,nullptr,GetModuleHandleW(nullptr),&f);
     if(!hwnd)return {};

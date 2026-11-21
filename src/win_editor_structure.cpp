@@ -5,6 +5,7 @@
 #include "win_editor_reaction.h"
 #include "win_editor_render.h"
 #include "structure_templates.h"
+#include "ligand_spatial.h"
 #include "win_editor_state.h"
 #include "win_editor_structure.h"
 #include "win_editor_text.h"
@@ -259,6 +260,69 @@ void editObject(int id){if(editOrbital(id))return;if(doc.isLocked(id)){status=L"
 void edit(){if(activeStructureTarget()){editTargetStructure();return;}int id=primary();if(auto* o=textObject(id)){if(tool!=Text)return;beginInline(InlineTarget{id,0,-1,o->points[0],o->fontSize},o->points[0]);return;}if(reaction(id))editReaction(id);else if(plot(id))editPlot(id);else editObject(id);}
 void addImage(Vec p){auto path=fileDialog(false,3);if(!path)return;insert(imageDocument(readFile(*path)),p);tool=Select;}
 
+
+void editLigandSpatial(){
+    if(selection.empty())throw std::runtime_error("입체로 바꿀 구조나 메커니즘의 구조 영역을 먼저 선택하세요.");
+    const Document before=doc;const auto originalSelection=selection;
+    auto chosen=selection;
+    if(activeStructureTarget()){
+        if(auto* r=reaction(targetContainer))chosen=r->slots.at(targetSlot).members;
+        if(auto* p=plot(targetContainer))chosen=targetAbove?p->states.at(targetSlot).above:p->states.at(targetSlot).below;
+    }
+    const auto ids=spatialSelection(before,chosen);
+    if(ids.empty())throw std::runtime_error("선택한 구조 영역에 원자·결합이 없습니다.");
+    std::vector<const LigandTemplate*> references;
+    std::vector<std::wstring> names={L"자동 · BQCN / MeSiP₂ 골격 인식",L"현재 입체 좌표 유지"};
+    for(const auto& entry:ligandTemplates())if(entry.spatial){references.push_back(&entry);names.push_back(ui::wide(entry.name));}
+    const bool existing=std::all_of(ids.begin(),ids.end(),[&](int id){return before.atom(id)->depth.has_value();});
+    Document candidate=before;
+    auto update=[&](const std::vector<std::string>& values)->std::wstring{
+        try{
+            const size_t reference=std::stoul(values[0]);candidate=before;
+            if(reference==0){
+                bool matched=false;
+                // A bound reference wins over a free ligand, retaining pendant co-ligands.
+                for(bool bound:{true,false})for(const auto* entry:references)if(!matched&&entry->bound==bound&&!entry->compact){
+                    auto attempt=before;if(applyLigandSpatial(attempt,ids,entry->drawing)){candidate=std::move(attempt);matched=true;}
+                }
+                if(!matched)return L"BQCN / MeSiP₂의 원자·결합 연결이 일치하지 않습니다. 템플릿을 삽입하거나 원래 골격을 선택하세요.";
+            }else if(reference>1){
+                if(reference-2>=references.size()||!applyLigandSpatial(candidate,ids,references[reference-2]->drawing))
+                    return L"선택한 입체 기준과 원자·결합 또는 입체 표기가 일치하지 않습니다.";
+            }
+            double x=numeric(values[2],-36000,36000),y=numeric(values[3],-36000,36000),z=numeric(values[4],-36000,36000);
+            if(values[1]=="1")y+=45;else if(values[1]=="2")y+=90;else if(values[1]=="3")x+=90;
+            rotateSpatial(candidate,ids,x,y,z,numeric(values[5],0,85));
+            doc=candidate;redraw();UpdateWindow(win);return {};
+        }catch(const std::exception& e){return ui::wide(e.what());}
+    };
+    auto illustration=[&](HDC dc,const RECT& box,const auto&){
+        Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);
+        const auto& palette=appearance::palette();
+        const float width=float(box.right-box.left)/2,height=float(box.bottom-box.top)-28;
+        auto left=makeScene(before.subset(ids),measure),right=makeScene(candidate.subset(ids),measure);
+        const float scale=float(std::min({1.5,(width-24)/std::max({1.,left.bounds.w,right.bounds.w}),(height-14)/std::max({1.,left.bounds.h,right.bounds.h})}));
+        auto draw=[&](const Scene& scene,float x,const wchar_t* title){
+            ui::drawLabel(g,title,{x,float(box.top),width,24},12,palette.text,true);
+            auto state=g.Save();g.SetClip(RectF(x,float(box.top)+26,width,height));
+            const auto& b=scene.bounds;g.TranslateTransform(x+width/2,float(box.top)+26+height/2);g.ScaleTransform(scale,scale);g.TranslateTransform(float(-b.x-b.w/2),float(-b.y-b.h/2));render(g,scene,false,true);g.Restore(state);
+        };
+        draw(left,float(box.left),L"변환 전");draw(right,float(box.left)+width,L"입체 미리보기");
+    };
+    const auto result=ui::form(win,L"입체 변환·회전 · BQCN / Co–Si",{
+        {L"입체 기준",existing?"1":"0",false,names},
+        {L"보기 방향","0",false,{L"기준 시점",L"비스듬히 45°",L"옆면 90°",L"위에서 90°"}},
+        ui::numericField(L"상하 회전 (도)",0,-36000,36000,5),
+        ui::numericField(L"좌우 회전 (도)",0,-36000,36000,5),
+        ui::numericField(L"화면 안 회전 (도)",0,-36000,36000,5),
+        ui::numericField(L"뒤쪽 회색 강도 (%)\n0: 원래 결합 색",60,0,85,5)
+    },update,{},illustration,280);
+    doc=before;selection=originalSelection;
+    if(result){const auto error=update(*result);if(!error.empty()){doc=before;redraw();throw std::runtime_error(ui::utf8(error));}
+        if(toNative(doc)!=toNative(before)){history.checkpoint(before);tool=Select;changed();status=L"입체 좌표와 뒤쪽 회색을 적용했습니다. Ctrl+Z: 되돌리기 · 편집 > 입체 변환·회전에서 다시 조절";}
+    }
+    redraw();
+}
 
 void transformSelected(int operation){
     if(selection.empty())throw std::runtime_error("회전·반전할 구조의 원자나 결합을 먼저 선택하세요.");Document before=doc;auto originalSelection=selection;

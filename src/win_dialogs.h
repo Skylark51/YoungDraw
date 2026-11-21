@@ -45,5 +45,5 @@ HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fie
     const std::function<std::optional<COLORREF>(COLORREF)>& pickColor={});
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& preview={},
     const std::vector<std::pair<std::wstring,std::vector<size_t>>>& tabs={},
-    const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration={});
+    const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration={},int illustrationHeight=124);
 }

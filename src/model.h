@@ -27,6 +27,8 @@ enum class BondKind { Single, Double, Triple, Wedge, Hash, Dash, Bold, Wavy, Aro
 struct TextRun { std::string text,color="#000000",font="Arial"; double size=10; int face=0; };
 struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,radical=0; std::string label; bool protect=false; std::vector<TextRun> labelRuns; Vec labelOffset; std::string color="#000000"; Vec annotationOffset; bool annotationManual=false; double drawingScale=1;
     std::optional<double> mullikenSpin;
+    // Depth in drawing points at drawingScale=1. XY remains directly editable.
+    std::optional<double> depth;
     std::optional<double> labelSize, labelMargin;
     std::optional<double> labelAlignment; // Horizontal bond reference within the label: 0 left, 1 right.
     Vec labelAdjustment; // Additional label translation in drawing points; skeleton stays fixed.
@@ -35,6 +37,7 @@ struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,
 };
 struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; std::string customOrder,customDisplay; std::string color="#000000"; double drawingScale=1;
     std::optional<double> lineWidth, boldWidth, hashSpacing, doubleGap;
+    std::string depthColor; // Original ink before automatic depth shading.
     void preserveStyle(const Style& from,const Style& to);
 };
 enum class ObjectKind { Line, Curve, Text, Ellipse, Rectangle, Image };

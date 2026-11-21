@@ -7,6 +7,7 @@
 #include "win_editor_window.h"
 #include "cdxml.h"
 #include "lab_templates_data.h"
+#include "ligand_spatial.h"
 #include "mechanism_data.h"
 #include "office.h"
 #include "win_dialogs.h"
@@ -52,6 +53,16 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIA
      return FAILED(result)?int(result):0;
  }
  if(argc==2&&std::wstring(argv[1])==L"--test-office"){office::start({nullptr,[](const Document&){},[](){return coordinateDemo();},officePicture},false,false);auto result=office::selfTest();LocalFree(argv);imageCache.clear();GdiplusShutdown(token);OleUninitialize();return FAILED(result)?int(result):0;}
+ if(argc==3&&std::wstring(argv[1])==L"--export-ligand-templates"){
+     int result=0;
+     try{fs::create_directories(argv[2]);for(const auto& entry:ligandTemplates()){
+         const auto path=fs::path(argv[2])/ui::wide(entry.slug);
+         writePreview(path.wstring()+L".png",entry.drawing);
+         writeFile(path.wstring()+L".svg",toSvg(makeScene(entry.drawing)));
+         writeFile(path.wstring()+L".cdxml",toCdxml(entry.drawing));
+     }}catch(...){result=1;}
+     LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return result;
+ }
  if(argc==3&&std::wstring(argv[1])==L"--export-lab-templates"){try{fs::create_directories(argv[2]);size_t i=0;for(auto& entry:labTemplates){auto d=fromNative(entry.data);auto path=fs::path(argv[2])/std::to_wstring(i++);writePreview(path.wstring()+L".png",d);writeFile(path.wstring()+L".svg",toSvg(makeScene(d)));writeFile(path.wstring()+L".cdxml",toCdxml(d));}writePreview((fs::path(argv[2])/L"chair.png").wstring(),chairTemplate());writeFile((fs::path(argv[2])/L"chair.svg").wstring(),toSvg(makeScene(chairTemplate())));LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(...){LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
  if(argc==3&&std::wstring(argv[1])==L"--export-demo"){try{writeFile(std::wstring(argv[2])+L".cdxml",toCdxml(doc));writeFile(std::wstring(argv[2])+L".svg",toSvg(makeScene(doc)));writeFile(std::wstring(argv[2])+L"-mechanism.ydraw",toNative(mechanismDemo()));writeFile(std::wstring(argv[2])+L"-mechanism.cdxml",toCdxml(mechanismDemo()));writeFile(std::wstring(argv[2])+L"-mechanism.svg",toSvg(makeScene(mechanismDemo())));writeFile(std::wstring(argv[2])+L"-coordinate.ydraw",toNative(coordinateDemo()));writeFile(std::wstring(argv[2])+L"-coordinate.cdxml",toCdxml(coordinateDemo()));writeFile(std::wstring(argv[2])+L"-coordinate.svg",toSvg(makeScene(coordinateDemo())));Document rigid=coordinateDemo();rigid.plots[0].mode=3;rigid.plots[0].series[0].dash=1;rigid.plots[0].series[0].color="#0e6d89";rigid.plots[0].states[1].marker=3;rigid.plots[0].states[3].marker=4;rigid.plots[0].series.push_back({"Path 2","#b44758",{0,26,10,19,-9.9},0,2,2,2.5});writeFile(std::wstring(argv[2])+L"-rigid.ydraw",toNative(rigid));writeFile(std::wstring(argv[2])+L"-rigid.cdxml",toCdxml(rigid));writeFile(std::wstring(argv[2])+L"-rigid.svg",toSvg(makeScene(rigid)));writePreview(std::wstring(argv[2])+L"-rigid.png",rigid);writePreview(std::wstring(argv[2])+L"-coordinate.png",coordinateDemo());writePreview(std::wstring(argv[2])+L"-mechanism.png",mechanismDemo());Document partial;int pa=partial.addAtom({30,45}),pb=partial.addAtom({56,30}),pc=partial.addAtom({82,45});partial.addBond(pa,pb);partial.addBond(pc,pb);delocalizeBonds(partial,partial.allIds());writeFile(std::wstring(argv[2])+L"-delocalized.ydraw",toNative(partial));writeFile(std::wstring(argv[2])+L"-delocalized.cdxml",toCdxml(partial));writeFile(std::wstring(argv[2])+L"-delocalized.svg",toSvg(makeScene(partial)));writePreview(std::wstring(argv[2])+L"-delocalized.png",partial);Document cyclic=mechanismDemo();optimizeMechanism(cyclic,{},true);writeFile(std::wstring(argv[2])+L"-cycle.ydraw",toNative(cyclic));writePreview(std::wstring(argv[2])+L"-cycle.png",cyclic);LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 0;}catch(...){LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;}}
  if(argc==3&&std::wstring(argv[1])==L"--migrate-ydraw"){

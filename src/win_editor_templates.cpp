@@ -7,6 +7,7 @@
 #include "win_editor_templates.h"
 #include "cdxml.h"
 #include "lab_templates_data.h"
+#include "ligand_spatial.h"
 #include "structure_templates.h"
 #include "win_dialogs.h"
 #include "win_ui.h"
@@ -87,6 +88,7 @@ std::vector<ui::TemplateCard>& templateCards(size_t& unreadable){
         for(const auto& entry:layoutReferences())add(L"2D 배치 기준",ui::wide(entry.name),entry.drawing);
         for(const auto& entry:functionalGroups())
             add(L"작용기",ui::wide(entry.abbreviation)+L" · "+ui::wide(entry.name),entry.drawing);
+        for(const auto& entry:ligandTemplates())add(ui::wide(entry.category),ui::wide(entry.name),entry.drawing,L"",std::string(entry.family)=="mesip2"?L"Co-Si · diphosphinosilyl · MeSiP2":L"BQCN · Gao deformylation");
         for(auto& entry:labTemplates)add(ui::wide(entry.category),ui::wide(entry.name),fromNative(entry.data));
         for(const auto& path:paths)try{
             add(L"사용자",path.stem().wstring(),fromCdxml(readFile(path.wstring())),path.wstring(),groupOf(path));

@@ -87,6 +87,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  if(id==156){pruneLockedSelection();textColorPalette(colorTarget);return;}
  if(id==155){pruneLockedSelection();atomColorPalette();return;}
  if(id==arrowColorCommand){pruneLockedSelection();arrowColorPalette();return;}
+ if(id==ligandSpatialCommand){pruneLockedSelection();editLigandSpatial();return;}
  if(id==rotateToolCommand){
     cancel();pruneLockedSelection();
     tool=tool==Rotate?Select:Rotate;

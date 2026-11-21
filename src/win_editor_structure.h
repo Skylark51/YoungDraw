@@ -19,6 +19,7 @@ void editObject(int id);
 void edit();
 void addImage(Vec p);
 void transformSelected(int operation);
+void editLigandSpatial();
 bool activeStructureTarget();
 void editTargetStructure();
 void insertStructureTarget(const Document& fragment);
