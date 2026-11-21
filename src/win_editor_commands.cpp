@@ -170,7 +170,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
       }
       break;
   }
- case 153:case 154:{auto chosen=selectedDocument();if(chosen.atoms.empty()&&chosen.bonds.empty())throw std::runtime_error("원자나 결합을 먼저 선택하세요.");history.checkpoint(doc);std::string color=id==153?"#a2a9b2":"#000000";for(auto& a:chosen.atoms)if(auto* target=doc.atom(a.id)){target->color=color;target->protect=true;for(auto& run:target->labelRuns)run.color=color;}for(auto& b:chosen.bonds)if(auto* target=doc.bond(b.id))target->color=color;changed();break;}
+ case 153:case 154:{auto chosen=selectedDocument();if(chosen.atoms.empty()&&chosen.bonds.empty())throw std::runtime_error("원자나 결합을 먼저 선택하세요.");history.checkpoint(doc);std::string color=id==153?"#a2a9b2":"#000000";for(auto& a:chosen.atoms)if(auto* target=doc.atom(a.id)){target->color=color;target->protect=true;for(auto& run:target->labelRuns)run.color=color;}for(auto& b:chosen.bonds)if(auto* target=doc.bond(b.id)){target->color=color;if(!target->depthColor.empty())target->depthColor=color;}changed();break;}
  case 104:if(history.undo(doc)){selection.clear();targetContainer=0;changed();}break;case 105:if(history.redo(doc)){selection.clear();targetContainer=0;changed();}break;case 107:fit();break;case 110:clean();break;case 111:library();break;
  case 112:saveCurrentTemplate();break;
  case 113:{auto p=fileDialog(false);if(p)insert(fromCdxml(readFile(*p)),center());break;}

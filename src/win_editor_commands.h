@@ -36,6 +36,7 @@ inline constexpr int ligandSpatialCommand = 260;
 inline constexpr int exportPngCommand = 247;
 inline constexpr int copyPngCommand = 248;
 
+inline constexpr bool isEditorCommand(int id){return (id>=100&&id<=ligandSpatialCommand)||(id>=301&&id<=418);}
 void command(int id);
 
 } // namespace yd::editor

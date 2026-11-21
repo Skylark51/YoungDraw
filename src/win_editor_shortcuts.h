@@ -10,6 +10,8 @@ void key(WPARAM k);
 void firstUseGuide(int id);
 void shortcutSettings();
 void showHelp();
+struct EditorCommandEntry {int id;std::wstring title,detail;};
+std::vector<EditorCommandEntry> availableEditorCommands(HWND window);
 void searchCommands();
 
 } // namespace yd::editor

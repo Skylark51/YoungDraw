@@ -63,7 +63,7 @@ bool scrollTools(Vec at,int delta){
     else if(at.x>=ww-right){offset=&rightOffset;limit=std::max(0,(showLayers?737:570)-(wh-bottom));}
     if(!offset)return false;
     *offset=std::clamp(*offset+delta,0,limit);
-    hideTooltip();redraw();return true;
+    hideTooltip();repaintOnly();return true;
 }
 
 static void clipHits(size_t first,const RectF& clip,float x,float y){

@@ -1,5 +1,6 @@
 #include "win_editor_clipboard.h"
 #include "win_editor_commands.h"
+#include "win_editor_chrome.h"
 #include "win_editor_plot.h"
 #include "win_editor_pointer.h"
 #include "win_editor_reaction.h"
@@ -170,21 +171,30 @@ void showHelp(){
         L"에너지를 더블클릭해 값을 바꿉니다. 드래그하면 붙여넣을 수 있는 구조 영역이 청록색으로 표시됩니다."});
     ui::search(win,L"YoungDraw 도움말 · F1",entries,L"확인",true);
 }
-void searchCommands(){
-    std::vector<ui::SearchItem> entries;
-    std::vector<int> commands;
-    HMENU bar=GetMenu(win);
+std::vector<EditorCommandEntry> availableEditorCommands(HWND window){
+    std::vector<EditorCommandEntry> result;std::set<int> seen;
+    auto add=[&](int id,std::wstring title,std::wstring group){
+        if(!isEditorCommand(id)||id==230||!seen.insert(id).second)return;
+        if(const auto pos=title.find(L'\t');pos!=std::wstring::npos)title.replace(pos,1,L"   ·   ");
+        result.push_back({id,std::move(title),std::move(group)});
+    };
     std::function<void(HMENU,const std::wstring&)> scan=[&](HMENU menu,const std::wstring& group){
         for(int j=0;j<GetMenuItemCount(menu);++j){
             if(GetMenuState(menu,j,MF_BYPOSITION)&(MF_GRAYED|MF_DISABLED))continue;
-            wchar_t label[240]{};GetMenuStringW(menu,j,label,240,MF_BYPOSITION);
+            wchar_t label[512]{};GetMenuStringW(menu,j,label,512,MF_BYPOSITION);
             if(auto child=GetSubMenu(menu,j)){scan(child,group.empty()?label:group+L" / "+label);continue;}
-            const UINT id=GetMenuItemID(menu,j);if(!id||id==UINT(-1)||id==230)continue;
-            std::wstring title(label);if(const auto pos=title.find(L'\t');pos!=std::wstring::npos)title.replace(pos,1,L"   ·   ");
-            entries.push_back({std::move(title),group});commands.push_back(int(id));
+            add(int(GetMenuItemID(menu,j)),label,group);
         }
-    };scan(bar,L"");
-    if(auto selected=ui::search(win,L"명령 검색 · Ctrl+Shift+F",entries,L"실행"))command(commands[*selected]);
+    };scan(GetMenu(window),L"");
+    for(int id=200;id<=218&&id-200<int(toolNames.size());++id)add(id,toolNames[id-200],L"그리기 도구");
+    const int extra[]={150,131,132,133,170,171,172,173,174,175,177,178,179,180,181,182,183,155,156,spinMultiplicityPlotCommand,reactionProfilePlotCommand,plotLegendCommand,plotWaveWidthCommand,plotWaveGapCommand,240,241,242,243,244,245,246};
+    if(!isolatedStructureEditing)for(int id:extra){auto help=id==150?std::wstring(L"문서 서식\n글꼴·글자 크기·선 굵기"):helpText(id);auto line=help.find(L'\n');add(id,help.substr(0,line),L"작업 도구 / "+(line==std::wstring::npos?help:help.substr(line+1)));}
+    return result;
+}
+void searchCommands(){
+    const auto available=availableEditorCommands(win);std::vector<ui::SearchItem> entries;
+    for(const auto& e:available)entries.push_back({e.title,e.detail});
+    if(auto selected=ui::search(win,L"명령 검색 · Ctrl+Shift+F",entries,L"실행",true))command(available.at(*selected).id);
 }
 void key(WPARAM k){
     if(stageCopyOwner){

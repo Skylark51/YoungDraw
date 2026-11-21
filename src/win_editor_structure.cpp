@@ -275,10 +275,13 @@ void editLigandSpatial(){
     std::vector<std::wstring> names={L"자동 · BQCN / MeSiP₂ 골격 인식",L"현재 입체 좌표 유지"};
     for(const auto& entry:ligandTemplates())if(entry.spatial){references.push_back(&entry);names.push_back(ui::wide(entry.name));}
     const bool existing=std::all_of(ids.begin(),ids.end(),[&](int id){return before.atom(id)->depth.has_value();});
-    Document candidate=before;
+    Document candidate=before;std::map<size_t,Document> prepared;
+    const auto originalScene=makeScene(before.subset(ids),measure);auto revisedScene=originalScene;
+
     auto update=[&](const std::vector<std::string>& values)->std::wstring{
         try{
-            const size_t reference=std::stoul(values[0]);candidate=before;
+            const size_t reference=std::stoul(values[0]);
+            if(prepared.count(reference))candidate=prepared.at(reference);else {candidate=before;
             if(reference==0){
                 bool matched=false;
                 // A bound reference wins over a free ligand, retaining pendant co-ligands.
@@ -290,17 +293,18 @@ void editLigandSpatial(){
                 if(reference-2>=references.size()||!applyLigandSpatial(candidate,ids,references[reference-2]->drawing))
                     return L"선택한 입체 기준과 원자·결합 또는 입체 표기가 일치하지 않습니다.";
             }
+            prepared[reference]=candidate;}
             double x=numeric(values[2],-36000,36000),y=numeric(values[3],-36000,36000),z=numeric(values[4],-36000,36000);
             if(values[1]=="1")y+=45;else if(values[1]=="2")y+=90;else if(values[1]=="3")x+=90;
             rotateSpatial(candidate,ids,x,y,z,numeric(values[5],0,85));
-            doc=candidate;redraw();UpdateWindow(win);return {};
+            revisedScene=makeScene(candidate.subset(ids),measure);doc=candidate;redraw();return {};
         }catch(const std::exception& e){return ui::wide(e.what());}
     };
     auto illustration=[&](HDC dc,const RECT& box,const auto&){
         Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);
         const auto& palette=appearance::palette();
         const float width=float(box.right-box.left)/2,height=float(box.bottom-box.top)-28;
-        auto left=makeScene(before.subset(ids),measure),right=makeScene(candidate.subset(ids),measure);
+        const auto& left=originalScene;const auto& right=revisedScene;
         const float scale=float(std::min({1.5,(width-24)/std::max({1.,left.bounds.w,right.bounds.w}),(height-14)/std::max({1.,left.bounds.h,right.bounds.h})}));
         auto draw=[&](const Scene& scene,float x,const wchar_t* title){
             ui::drawLabel(g,title,{x,float(box.top),width,24},12,palette.text,true);
@@ -315,11 +319,11 @@ void editLigandSpatial(){
         ui::numericField(L"상하 회전 (도)",0,-36000,36000,5),
         ui::numericField(L"좌우 회전 (도)",0,-36000,36000,5),
         ui::numericField(L"화면 안 회전 (도)",0,-36000,36000,5),
-        ui::numericField(L"뒤쪽 회색 강도 (%)\n0: 원래 결합 색",60,0,85,5)
+        ui::numericField(L"뒤쪽 교차 구간 회색 (%)\n0: 원래 결합 색",60,0,85,5)
     },update,{},illustration,280);
     doc=before;selection=originalSelection;
     if(result){const auto error=update(*result);if(!error.empty()){doc=before;redraw();throw std::runtime_error(ui::utf8(error));}
-        if(toNative(doc)!=toNative(before)){history.checkpoint(before);tool=Select;changed();status=L"입체 좌표와 뒤쪽 회색을 적용했습니다. Ctrl+Z: 되돌리기 · 편집 > 입체 변환·회전에서 다시 조절";}
+        if(toNative(doc)!=toNative(before)){history.checkpoint(before);tool=Select;changed();status=L"논문용 입체 도식과 뒤쪽 교차 표시를 적용했습니다. Ctrl+Z: 되돌리기 · 편집 > 입체 변환·회전에서 다시 조절";}
     }
     redraw();
 }

@@ -59,6 +59,7 @@ void retargetTemplateTabs(const fs::path& from,const std::optional<fs::path>& to
 std::vector<ui::TemplateCard>& templateCards(size_t& unreadable){
     struct Cache {std::string signature;std::vector<ui::TemplateCard> cards;size_t unreadable=0;};
     static Cache cache;
+    static std::vector<ui::TemplateCard> builtins;
     std::vector<fs::path> paths;
     for(auto& entry:fs::recursive_directory_iterator(templateDir(),fs::directory_options::skip_permission_denied)){
         if(!entry.is_regular_file())continue;
@@ -79,6 +80,7 @@ std::vector<ui::TemplateCard>& templateCards(size_t& unreadable){
             auto preview=makeScene(fragment,measure);
             next.cards.push_back({std::move(name),std::move(category),std::move(fragment),std::move(preview),std::move(path),std::move(group),false});
         };
+        if(builtins.empty()){
         Document basic;basic.ring({0,0},6,true);add(L"기본",L"벤젠",basic);
         basic={};basic.ring({0,0},5);add(L"기본",L"사이클로펜테인",basic);
         add(L"기본",L"의자형 · 형태 보호",chairTemplate());
@@ -90,6 +92,8 @@ std::vector<ui::TemplateCard>& templateCards(size_t& unreadable){
             add(L"작용기",ui::wide(entry.abbreviation)+L" · "+ui::wide(entry.name),entry.drawing);
         for(const auto& entry:ligandTemplates())add(ui::wide(entry.category),ui::wide(entry.name),entry.drawing,L"",std::string(entry.family)=="mesip2"?L"Co-Si · diphosphinosilyl · MeSiP2":L"BQCN · Gao deformylation");
         for(auto& entry:labTemplates)add(ui::wide(entry.category),ui::wide(entry.name),fromNative(entry.data));
+        builtins=next.cards;
+        }else next.cards=builtins;
         for(const auto& path:paths)try{
             add(L"사용자",path.stem().wstring(),fromCdxml(readFile(path.wstring())),path.wstring(),groupOf(path));
         }catch(...){next.unreadable++;}
@@ -121,7 +125,7 @@ void library(const std::wstring& initialCategory){
         auto result=ui::templateGallery(win,cards,category,[](Graphics& g,const Scene& scene,RectF box){
             auto b=scene.bounds;double scale=std::min(double(box.Width)/std::max(1.,b.w),double(box.Height)/std::max(1.,b.h));auto saved=g.Save();g.SetClip(box,CombineModeIntersect);
             g.TranslateTransform(float(box.X+box.Width/2-(b.x+b.w/2)*scale),float(box.Y+box.Height/2-(b.y+b.h/2)*scale));g.ScaleTransform(float(scale),float(scale));render(g,scene,false,true);g.Restore(saved);
-        });
+        },[&](size_t index,bool value){auto favorites=loadFavorites();auto key=templateKey(cards.at(index));if(value)favorites.insert(key);else favorites.erase(key);saveFavorites(favorites);cards.at(index).favorite=value;});
         if(!result){if(unreadable)status=L"읽을 수 없는 사용자 템플릿 "+std::to_wstring(unreadable)+L"개를 제외했습니다.";return;}
         auto card=cards.at(result->index);
         if(result->action==ui::TemplateAction::Favorite){

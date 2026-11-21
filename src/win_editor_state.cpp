@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <regex>
 #include <sstream>
+#include <map>
+#include <tuple>
 
 namespace yd::editor {
 int right=260;
@@ -65,7 +67,19 @@ std::string joined(const std::vector<std::string>& v){std::string s;for(auto& x:
 std::vector<double> values(std::string s){for(char& c:s)if(c==','||c==';')c=' ';std::istringstream in(s);in.imbue(std::locale::classic());std::vector<double> v;double n;while(in>>n){if(!std::isfinite(n)||std::abs(n)>1e6)throw std::runtime_error("올바른 에너지 값을 입력하세요.");v.push_back(n);}if(!in.eof())throw std::runtime_error("에너지를 공백으로 구분한 숫자로 입력하세요.");return v;}
 std::string valueList(const std::vector<double>& v){std::string s;for(double n:v)s+=(s.empty()?"":" ")+number(n);return s;}
 std::string colorValue(const std::string& s){if(!std::regex_match(s,std::regex("#[0-9a-fA-F]{6}")))throw std::runtime_error("색상 형식: #RRGGBB");return s;}
-double measure(const std::string& s,double size,const std::string& font,int face){Bitmap bm(1,1,PixelFormat32bppARGB);Graphics g(&bm);FontFamily ff(ui::wide(font).c_str());Font f(&ff,float(size),(face&1?FontStyleBold:0)|(face&2?FontStyleItalic:0),UnitPixel);StringFormat fmt(StringFormat::GenericTypographic());RectF b;auto w=ui::wide(s);g.MeasureString(w.c_str(),-1,&f,PointF(0,0),&fmt,&b);return b.Width;}
+namespace {
+using MeasurementKey=std::tuple<std::string,double,std::string,int>;
+std::map<MeasurementKey,double> textMeasurements;
+MeasurementStats measurementCounters;
+}
+MeasurementStats measurementStats(){return measurementCounters;}
+void clearMeasurementCache(){textMeasurements.clear();measurementCounters={};}
+double measure(const std::string& s,double size,const std::string& font,int face){
+    const bool cacheable=s.size()<=4096&&std::isfinite(size);
+    MeasurementKey key{s,size,font,face&3};
+    if(cacheable){const auto found=textMeasurements.find(key);if(found!=textMeasurements.end()){measurementCounters.hits++;return found->second;}}
+    measurementCounters.misses++;
+    Bitmap bm(1,1,PixelFormat32bppARGB);Graphics g(&bm);FontFamily ff(ui::wide(font).c_str());Font f(&ff,float(size),(face&1?FontStyleBold:0)|(face&2?FontStyleItalic:0),UnitPixel);StringFormat fmt(StringFormat::GenericTypographic());RectF b;auto w=ui::wide(s);g.MeasureString(w.c_str(),-1,&f,PointF(0,0),&fmt,&b);if(cacheable){if(textMeasurements.size()>=8192)textMeasurements.clear();textMeasurements.emplace(std::move(key),b.Width);}return b.Width;}
 Scene scene(){return makeScene(doc,measure);}
 const Scene& sceneForPaint(bool reuse){
     // Direct paint calls used by tests request a fresh scene.
