@@ -9,6 +9,10 @@ struct LigandTemplate {
 const std::vector<LigandTemplate>& ligandTemplates();
 // Selected atoms/bonds expand to their connected molecules. Containers are resolved by the editor.
 std::vector<int> spatialSelection(const Document& d,const std::vector<int>& selection);
+struct SpatialCrossing {int front=0,back=0;Vec point;double frontT=0,backT=0;};
+std::vector<SpatialCrossing> spatialCrossings(const Document& d);
+std::vector<int> spatialBondOrder(const Document& d);
+void shadeSpatial(Document& d,const std::vector<int>& selection,double gray=60);
 void rotateSpatial(Document& d,const std::vector<int>& selection,double x,double y,double z,double gray=60);
 // Exact element/connection matching; extra co-ligands retain attachment offsets.
 // No atoms or bonds are added, removed, or assigned oxidation states.

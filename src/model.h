@@ -37,6 +37,8 @@ struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,
 };
 struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; std::string customOrder,customDisplay; std::string color="#000000"; double drawingScale=1;
     std::optional<double> lineWidth, boldWidth, hashSpacing, doubleGap;
+    std::optional<int> zOrder; // Imported 2D bond stacking; no invented 3D coordinates.
+    std::string depthRearColor; // Local rear crossing accent; never the visible scaffold ink.
     std::string depthColor; // Original ink before automatic depth shading.
     void preserveStyle(const Style& from,const Style& to);
 };

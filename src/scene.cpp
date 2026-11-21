@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "ligand_spatial.h"
 #include "plot_data.h"
 #include "mechanism_data.h"
 #include <iomanip>
@@ -212,13 +213,13 @@ Scene makeScene(const Document& d,const Measure& measure){
         bondStyle.lineWidth=b.lineWidth.value_or(d.style.lineWidth)*b.drawingScale;
         bondStyle.boldWidth=b.boldWidth.value_or(d.style.boldWidth)*b.drawingScale;
         bondStyle.hashSpacing=b.hashSpacing.value_or(d.style.hashSpacing)*b.drawingScale;
-        owner=b.id;strokeColor=b.color;double bondWidth=b.customDisplay=="Bold"?bondStyle.boldWidth:bondStyle.lineWidth; Vec origA=d.atom(b.a)->p,origB=d.atom(b.b)->p,a=clip(b.a,origA,origB),z=clip(b.b,origB,origA),v=z-a;double len=v.length();
+        owner=b.id;strokeColor=b.depthColor.empty()?b.color:b.depthColor;double bondWidth=b.customDisplay=="Bold"?bondStyle.boldWidth:bondStyle.lineWidth; Vec origA=d.atom(b.a)->p,origB=d.atom(b.b)->p,a=clip(b.a,origA,origB),z=clip(b.b,origB,origA),v=z-a;double len=v.length();
         if(len<.2 || (a-origA).length()+(z-origB).length()>=(origB-origA).length())continue;
         Vec u=v*(1/len),n={-u.y,u.x};double gap=b.doubleGap.value_or(d.style.bondLength*d.style.bondSpacing)*b.drawingScale;
         // BoldWidth is the full width, also at the broad end of a wedge.
         // Keep short, label-clipped coordination bonds from becoming squat triangles.
         double wedgeWidth=std::min(bondStyle.boldWidth,len*.35);
-        if(b.kind==BondKind::Wedge){Primitive p;p.owner=owner;p.color=b.color;p.type=Primitive::Polygon;p.points={a,z+n*(wedgeWidth/2),z-n*(wedgeWidth/2)};s.items.push_back(p);}
+        if(b.kind==BondKind::Wedge){Primitive p;p.owner=owner;p.color=strokeColor;p.type=Primitive::Polygon;p.points={a,z+n*(wedgeWidth/2),z-n*(wedgeWidth/2)};s.items.push_back(p);}
         else if(b.kind==BondKind::Hash){
             double ink=std::min(bondStyle.lineWidth*.6,len/6);
             int count=std::max(2,int(len/std::max(bondStyle.hashSpacing,ink*2.2)));
@@ -243,6 +244,45 @@ Scene makeScene(const Document& d,const Measure& measure){
             line(a,z,bondWidth);double inset=std::min(len*.25,gap*.8);line(a+u*inset+n*(side*gap),z-u*inset+n*(side*gap),bondWidth,1);
         }
         else line(a,z,b.kind==BondKind::Bold?bondStyle.boldWidth:bondWidth,b.kind==BondKind::Dash?1:b.kind==BondKind::Dot?2:0);
+    }
+    // Resolve occlusion on the bond axis, including wedge polygons and hash strokes.
+    // Gray accents are local; the rest of every visible skeleton stays in original ink.
+    const auto depthCrossings=spatialCrossings(d);
+    if(!depthCrossings.empty()){
+        std::vector<Primitive> resolved;
+        for(auto item:s.items){
+            auto* bond=d.bond(item.owner);
+            if(!bond||(item.type!=Primitive::Line&&item.type!=Primitive::Polygon)||item.points.size()<2){resolved.push_back(std::move(item));continue;}
+            const Vec origin=d.atom(bond->a)->p,axis=d.atom(bond->b)->p-origin;const double length=axis.length();if(length<1e-8){resolved.push_back(std::move(item));continue;}
+            auto position=[&](Vec point){Vec delta=point-origin;return (delta.x*axis.x+delta.y*axis.y)/(length*length);};
+            const std::string ink=bond->depthColor.empty()?item.color:bond->depthColor;
+            const std::string rear=bond->depthRearColor.empty()?bond->color:bond->depthRearColor;
+            std::vector<std::pair<double,double>> holes,accents,fronts;std::vector<double> cuts{0,1};
+            auto interval=[&](auto& list,double t,double radius){double a=std::clamp(t-radius,0.,1.),b=std::clamp(t+radius,0.,1.);list.push_back({a,b});cuts.push_back(a);cuts.push_back(b);};
+            for(const auto& crossing:depthCrossings){
+                if(crossing.front!=bond->id&&crossing.back!=bond->id)continue;
+                const double t=position(crossing.point);
+                if(crossing.front==bond->id){interval(fronts,t,(item.width+2*bond->drawingScale)/length);continue;}
+                const auto* front=d.bond(crossing.front);const Vec frontAxis=d.atom(front->b)->p-d.atom(front->a)->p;
+                const double sine=std::abs(axis.x*frontAxis.y-axis.y*frontAxis.x)/std::max(1e-8,length*frontAxis.length());
+                const bool broad=front->kind==BondKind::Wedge||front->kind==BondKind::Hash||front->kind==BondKind::Bold;
+                const double width=(broad?front->boldWidth.value_or(d.style.boldWidth):front->lineWidth.value_or(d.style.lineWidth))*front->drawingScale;
+                const double padding=(width*.5+item.width*.5+1.2*front->drawingScale)/std::max(.12,sine)/length;
+                interval(holes,t,padding);interval(accents,t,padding+4*bond->drawingScale/length);
+            }
+            if(holes.empty()){item.color=ink;resolved.push_back(std::move(item));continue;}
+            std::sort(cuts.begin(),cuts.end());
+            auto contains=[](const auto& list,double t){for(auto range:list)if(t>=range.first&&t<=range.second)return true;return false;};
+            auto colorAt=[&](double t){if(contains(fronts,t))return ink;if(contains(holes,t))return std::string();return contains(accents,t)?rear:ink;};
+            if(item.type==Primitive::Line){
+                const Vec first=item.points[0],delta=item.points[1]-first;const double start=position(first),end=position(item.points[1]),span=end-start;
+                if(std::abs(span)<1e-9){item.color=colorAt(start);if(!item.color.empty())resolved.push_back(std::move(item));continue;}
+                for(size_t i=1;i<cuts.size();i++){double a=std::clamp((cuts[i-1]-start)/span,0.,1.),b=std::clamp((cuts[i]-start)/span,0.,1.);if(a>b)std::swap(a,b);if((b-a)*delta.length()<.1)continue;auto color=colorAt(start+span*(a+b)/2);if(color.empty())continue;auto part=item;part.color=color;part.points={first+delta*a,first+delta*b};part.flatStart=part.flatEnd=true;resolved.push_back(std::move(part));}
+            }else{
+                auto clip=[&](std::vector<Vec> polygon,double boundary,bool greater){std::vector<Vec> output;if(polygon.empty())return output;auto previous=polygon.back();double before=position(previous)-boundary;for(auto point:polygon){double after=position(point)-boundary;bool inBefore=greater?before>=0:before<=0,inAfter=greater?after>=0:after<=0;if(inBefore!=inAfter)output.push_back(previous+(point-previous)*(before/(before-after)));if(inAfter)output.push_back(point);previous=point;before=after;}return output;};
+                for(size_t i=1;i<cuts.size();i++){double a=cuts[i-1],b=cuts[i];if(b-a<1e-9)continue;auto color=colorAt((a+b)/2);if(color.empty())continue;auto points=clip(clip(item.points,a,true),b,false);if(points.size()<3)continue;auto part=item;part.color=color;part.points=std::move(points);resolved.push_back(std::move(part));}
+            }
+        }s.items=std::move(resolved);
     }
     strokeColor="#000000";s.items.insert(s.items.end(),labels.begin(),labels.end());
     int arrowIndex=-1;std::vector<int> hiddenArrowIndices;

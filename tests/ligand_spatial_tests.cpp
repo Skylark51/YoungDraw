@@ -39,13 +39,14 @@ int main(){
         for(const auto& bond:ordinary.bonds)if(bond.kind==BondKind::Dative)check(bond.customDisplay=="Solid","plain coordination strokes survive ordinary CDXML");
         if(t.spatial){
             check(std::all_of(d.atoms.begin(),d.atoms.end(),[](const auto& a){return a.depth.has_value();}),"every projected atom has depth");
+            auto paper=d;for(auto& atom:paper.atoms)atom.depth.reset();check(applyLigandSpatial(paper,paper.allIds(),d),"explicit paper stereobonds agree with stored 3D chirality");
             auto rotated=d;rotateSpatial(rotated,d.allIds(),31,47,0);rotateSpatial(rotated,rotated.allIds(),0,-47,0);rotateSpatial(rotated,rotated.allIds(),-31,0,0);
             for(size_t i=0;i<d.atoms.size();i++){
                 check((rotated.atoms[i].p-d.atoms[i].p).length()<1e-6&&std::abs(*rotated.atoms[i].depth-*d.atoms[i].depth)<1e-6,"inverse rotations restore coordinates");
                 for(size_t j=0;j<i;j++)check(std::abs(distance(rotated.atoms[i],rotated.atoms[j])-distance(d.atoms[i],d.atoms[j]))<1e-6,"rigid rotations preserve all 3D distances");
             }
-            rotateSpatial(rotated,rotated.allIds(),0,180,0);int changed=0;for(size_t i=0;i<d.bonds.size();i++)changed+=rotated.bonds[i].color!=d.bonds[i].color;check(changed>0,"rear shading responds to view direction");
-            rotateSpatial(rotated,rotated.allIds(),0,0,0,0);for(const auto& b:rotated.bonds)check(b.color==b.depthColor,"zero gray restores original ink");
+            rotateSpatial(rotated,rotated.allIds(),0,180,0);for(const auto& b:rotated.bonds)check(b.color==b.depthColor&&!b.depthRearColor.empty(),"visible skeleton remains original ink after rotating, with local rear accent configured");
+            rotateSpatial(rotated,rotated.allIds(),0,0,0,0);for(const auto& b:rotated.bonds)check(b.color==b.depthColor&&b.depthRearColor==b.depthColor,"zero gray restores original ink");
             auto clean=d;cleanStructure(clean);check(toNative(clean)==toNative(d),"2D cleanup preserves projected structures");
         }
         auto path=ui::wide(t.slug);yd::editor::writePreview(path+L".png",d);yd::editor::writeFile(path+L".svg",toSvg(makeScene(d)));yd::editor::writeFile(path+L".cdxml",toCdxml(d));
@@ -68,8 +69,8 @@ int main(){
         WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawLigandTests";RegisterClassW(&wc);
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Ligand tests",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);win=hwnd;
         doc=entry("mesip2-planar").drawing;selection=doc.allIds();history.clear();targetContainer=0;changed();auto before=toNative(doc);
-        cancelForm=true;SetTimer(hwnd,903,10,drive);command(ligandSpatialCommand);KillTimer(hwnd,903);check(formDriven&&previewSeen&&toNative(doc)==before&&!history.undo(doc),"live preview cancel restores complete document without undo step");
-        cancelForm=false;formDriven=previewSeen=false;SetTimer(hwnd,903,10,drive);command(ligandSpatialCommand);KillTimer(hwnd,903);check(formDriven&&previewSeen&&doc.atoms[0].depth&&history.undo(doc)&&toNative(doc)==before&&!history.undo(doc),"UI apply commits exactly one reversible edit");
+        cancelForm=true;SetTimer(hwnd,903,10,drive);SendMessageW(hwnd,WM_COMMAND,ligandSpatialCommand,0);KillTimer(hwnd,903);check(formDriven&&previewSeen&&toNative(doc)==before&&!history.undo(doc),"live preview cancel restores complete document without undo step");
+        cancelForm=false;formDriven=previewSeen=false;SetTimer(hwnd,903,10,drive);SendMessageW(hwnd,WM_COMMAND,ligandSpatialCommand,0);KillTimer(hwnd,903);check(formDriven&&previewSeen&&doc.atoms[0].depth&&history.undo(doc)&&toNative(doc)==before&&!history.undo(doc),"UI apply commits exactly one reversible edit");
         doc={};selection.clear();history.clear();DestroyWindow(hwnd);win=nullptr;
     }
     std::cout<<"Ligand templates, stereochemistry, projection, gray, storage and isolated UI passed\n";
