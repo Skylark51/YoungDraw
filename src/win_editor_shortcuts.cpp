@@ -1,3 +1,4 @@
+#include "win_theme.h"
 #include "win_editor_clipboard.h"
 #include "win_editor_commands.h"
 #include "win_editor_chrome.h"
@@ -142,7 +143,7 @@ void firstUseGuide(int id){
         if(preference(name.c_str())||std::find(shown.begin(),shown.end(),id)!=shown.end())return;
         shown.push_back(id);
         const auto text=std::wstring(guide.steps)+L"\r\n\r\n이 안내를 다시 보지 않으시겠습니까?";
-        if(MessageBoxW(win,text.c_str(),guide.title,MB_YESNO|MB_DEFBUTTON2|MB_ICONINFORMATION)==IDYES)
+        if(appearance::messageBox(win,text.c_str(),guide.title,MB_YESNO|MB_DEFBUTTON2|MB_ICONINFORMATION)==IDYES)
             setPreference(name.c_str(),1);
         return;
     }
@@ -167,6 +168,8 @@ void showHelp(){
         L"Del 선택 항목 또는 포인터 아래의 원자·결합·그리기 항목 삭제. Space 선택 도구, Shift+G 오비탈, F9/F10 아래·위첨자, Ctrl+D CDXML 복사, Ctrl+Shift+X 반응 배치. 선택 도구로 화살표를 선택한 뒤 양끝 원을 드래그해 길이와 방향을 조정합니다. Ctrl+우클릭 드래그로 화면을 이동합니다."});
     entries.push_back({L"작업 공간 · 스크롤, 도구 고정, 명령 검색",
         L"작은 창에서는 도구 영역에 마우스를 두고 휠을 돌립니다. 그리기 도구를 우클릭해 상단에 고정합니다. Ctrl+Shift+F를 누르고 명령을 검색해 Enter로 실행합니다."});
+    entries.push_back({L"구조 · 분자 주석",
+        L"원자나 결합을 선택하고 상단 주석 버튼을 누릅니다. Shift로 두 대상을 고르면 거리, 두 결합 또는 원자 세 개를 고르면 각도를 입력할 수 있습니다. 원자 세 개를 고를 때 중심 원자를 두 번째로 선택합니다. 주석 값을 지우면 해당 표시가 사라집니다."});
     entries.push_back({L"메커니즘 · 에너지 직접 편집과 이동",
         L"에너지를 더블클릭해 값을 바꿉니다. 드래그하면 붙여넣을 수 있는 구조 영역이 청록색으로 표시됩니다."});
     ui::search(win,L"YoungDraw 도움말 · F1",entries,L"확인",true);

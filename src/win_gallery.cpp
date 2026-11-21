@@ -105,7 +105,7 @@ void command(HWND hwnd,Gallery& f,int id){
         try{
             f.favoriteChanged(selected,value);f.favoriteOverrides[selected]=value;
             if(f.category==L"즐겨찾기"&&!value){const int page=f.page;filter(f);const int pages=std::max(1,int((f.filtered.size()+f.perPage-1)/f.perPage));f.page=std::clamp(page,0,pages-1);if(!f.filtered.empty())f.selected=int(f.filtered.at(size_t(f.page*f.perPage)));}
-        }catch(const std::exception& error){MessageBoxW(hwnd,ui::wide(error.what()).c_str(),L"즐겨찾기 저장",MB_OK|MB_ICONWARNING);}
+        }catch(const std::exception& error){appearance::messageBox(hwnd,ui::wide(error.what()).c_str(),L"즐겨찾기 저장",MB_OK|MB_ICONWARNING);}
     }
     else if(id>=410&&id<=414&&f.selected>=0){f.ok=true;f.done=true;f.action=id==410?TemplateAction::Favorite:id==411?TemplateAction::Edit:id==412?TemplateAction::Rename:id==413?TemplateAction::Move:TemplateAction::Remove;}
     else if(id==IDOK&&f.selected>=0){f.ok=true;f.done=true;f.action=TemplateAction::Insert;}

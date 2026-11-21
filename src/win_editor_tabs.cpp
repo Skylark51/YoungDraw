@@ -74,7 +74,7 @@ void startRecovery(){
         const auto root=projects::root().parent_path()/L"Recovery";
         recoverySession=std::make_unique<recovery::Session>(root);
         for(const auto& entry:recovery::abandoned(root)){
-            if(MessageBoxW(win,L"이전 실행에서 저장하지 못한 문서가 있습니다. 원본을 유지하고 새 탭으로 복구하시겠습니까?",L"문서 복구",MB_YESNO|MB_ICONQUESTION)!=IDYES)continue;
+            if(appearance::messageBox(win,L"이전 실행에서 저장하지 못한 문서가 있습니다. 원본을 유지하고 새 탭으로 복구하시겠습니까?",L"문서 복구",MB_YESNO|MB_ICONQUESTION)!=IDYES)continue;
             for(const auto& snapshot:entry.documents){
                 newDocumentTab(snapshot.document);doc=snapshot.document;history.clear();dirty=true;
                 status=L"복구한 문서 · "+(snapshot.path.empty()?L"제목 없음":fs::path(snapshot.path).filename().wstring())+L" · 다른 이름으로 저장하세요.";
@@ -142,7 +142,7 @@ bool save(bool as){if(officeDocument&&office::editing()&&!as){if(FAILED(office::
             throw std::runtime_error("CDXML 확장자로 저장하세요.");
     }
     writeFile(path,_wcsicmp(fs::path(path).extension().c_str(),L".ydraw")==0?toNative(doc):toCdxml(doc));filePath=path;rememberDocument(filePath);dirty=false;snapshotRecovery();title();status=_wcsicmp(fs::path(path).extension().c_str(),L".ydraw")==0?L"YoungDraw 문서를 저장했습니다.":L"CDXML을 저장했습니다. ChemDraw와 YoungDraw에서 열 수 있습니다.";redraw();return true;}
-bool discard(){if(!dirty)return true;int answer=MessageBoxW(win,L"변경 내용을 저장하시겠습니까?",L"YoungDraw",MB_YESNOCANCEL|MB_ICONQUESTION);return answer==IDNO||(answer==IDYES&&save());}
+bool discard(){if(!dirty)return true;int answer=appearance::messageBox(win,L"변경 내용을 저장하시겠습니까?",L"YoungDraw",MB_YESNOCANCEL|MB_ICONQUESTION);return answer==IDNO||(answer==IDYES&&save());}
 void storeDocumentTab(){
     if(documents.empty())documents.emplace_back();
     documents[activeDocument]={doc,history,filePath,status,selection,targetContainer,targetSlot,targetAbove,dirty,officeDocument,zoom,origin,tool};
@@ -241,7 +241,7 @@ void manageProjects(const std::wstring& initial){
         auto imported=isImage&&!fs::exists(path)?imageDocument(readFile(source)):fromCdxml(readFile(path));
         newDocumentTab(std::move(imported),path);
         if(isImage){filePath=source+L".cdxml";status=L"이미지 원본은 보관됩니다. 수정 후 Ctrl+S를 누르면 프로젝트 안에 편집 문서를 저장합니다.";if(!fs::exists(path))dirty=true;}
-        else if(!doc.importWarnings.empty())MessageBoxW(win,L"일부 CDXML 객체는 표시·편집되지 않을 수 있습니다. 지원하지 않는 XML은 CDXML 저장 시 보존됩니다.",L"CDXML 열기",MB_OK|MB_ICONINFORMATION);
+        else if(!doc.importWarnings.empty())appearance::messageBox(win,L"일부 CDXML 객체는 표시·편집되지 않을 수 있습니다. 지원하지 않는 XML은 CDXML 저장 시 보존됩니다.",L"CDXML 열기",MB_OK|MB_ICONINFORMATION);
         title();redraw();
     };
     callbacks.close=[](const std::vector<std::wstring>& paths){

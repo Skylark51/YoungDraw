@@ -12,6 +12,7 @@ bool has(const std::vector<int>& ids,int id){return std::find(ids.begin(),ids.en
 void eraseExact(Document& d,const std::vector<int>& ids){
     d.bonds.erase(std::remove_if(d.bonds.begin(),d.bonds.end(),[&](const Bond& b){return has(ids,b.id)||has(ids,b.a)||has(ids,b.b);}),d.bonds.end());
     d.atoms.erase(std::remove_if(d.atoms.begin(),d.atoms.end(),[&](const Atom& a){return has(ids,a.id);}),d.atoms.end());
+    d.pruneMeasurements();
     d.objects.erase(std::remove_if(d.objects.begin(),d.objects.end(),[&](const Object& o){return has(ids,o.id);}),d.objects.end());
     auto prune=[&](std::vector<int>& v){v.erase(std::remove_if(v.begin(),v.end(),[&](int id){return has(ids,id);}),v.end());};
     for(auto& g:d.groups)prune(g.members);
@@ -90,7 +91,7 @@ int collapsePhenyl(Document& d,const std::vector<int>& selection){
     }
     int count=0;
     for(auto& ring:rings){bool valid=true;int attachment=0,external=0,doubles=0,aromatics=0;std::vector<int> edges;
-        for(int id:ring){auto* a=d.atom(id);if(!a||a->charge||a->isotope||a->radical||a->protect||a->mullikenSpin||!a->label.empty()||!a->labelRuns.empty()){valid=false;break;}}
+        for(int id:ring){auto* a=d.atom(id);if(!a||a->charge||a->isotope||a->radical||a->protect||a->mullikenSpin||a->partialCharge.value||!a->label.empty()||!a->labelRuns.empty()){valid=false;break;}}
         if(!valid)continue;
         for(auto& b:d.bonds){bool a=has(ring,b.a),z=has(ring,b.b);if(a&&z){edges.push_back(b.id);doubles+=b.kind==BondKind::Double;aromatics+=b.kind==BondKind::Aromatic;if(b.kind!=BondKind::Single&&b.kind!=BondKind::Double&&b.kind!=BondKind::Aromatic)valid=false;}
             else if(a||z){external++;attachment=a?b.a:b.b;if(b.kind!=BondKind::Single)valid=false;}}

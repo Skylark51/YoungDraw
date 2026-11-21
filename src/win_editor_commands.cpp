@@ -82,7 +82,7 @@ void editDocumentStyle(){
 }
 
 void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==spinMultiplicityPlotCommand||id==reactionProfilePlotCommand||id==167||id==insertBranchArrowsCommand||id==externalMechanismCommand||id==bondAnimationCommand||id==recognizeMechanismCommand)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();
- if(id==thirdPartyNoticesCommand){MessageBoxW(win,ui::wide(thirdPartyNotices).c_str(),L"오픈소스 라이선스",MB_OK|MB_ICONINFORMATION);return;}
+ if(id==thirdPartyNoticesCommand){appearance::messageBox(win,ui::wide(thirdPartyNotices).c_str(),L"오픈소스 라이선스",MB_OK|MB_ICONINFORMATION);return;}
  if(id==184){appearance::picker(win,[](){refreshAppearance();});status=std::wstring(L"작업실 · ")+appearance::palette().name+L" / 테마는 출력에 포함되지 않습니다.";redraw();return;}
  if(id==156){pruneLockedSelection();textColorPalette(colorTarget);return;}
  if(id==155){pruneLockedSelection();atomColorPalette();return;}
@@ -138,6 +138,12 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  case 187:if(isolatedStructureEditing)DestroyWindow(win);break;
  case 185:manageProjects();break;
  case mullikenSpinCommand:editMullikenSpin();break;
+ case molecularAnnotationsCommand:editMolecularAnnotations();break;
+ case showMolecularAnnotationsCommand:
+    history.checkpoint(doc);
+    doc.showMolecularAnnotations=!doc.showMolecularAnnotations;
+    status=doc.showMolecularAnnotations?L"분자 주석을 표시합니다.":L"분자 주석을 숨겼습니다.";
+    changed();break;
  case abbreviateGroupsCommand:abbreviateGroups();break;
  case 166:{auto candidate=doc;auto ids=groupedSelection(selection);if(ids.empty())throw std::runtime_error("벤젠이 포함된 그룹이나 고리를 선택하세요.");int count=collapsePhenyl(candidate,ids);if(!count)throw std::runtime_error("단일 결합 하나로 연결된 비치환 벤젠을 찾지 못했습니다.");history.checkpoint(doc);doc=std::move(candidate);selection.erase(std::remove_if(selection.begin(),selection.end(),[&](int id){auto all=doc.allIds();return !contains(all,id);}),selection.end());changed();break;}
  case 167:arrangeImported();break;
@@ -151,7 +157,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
   case exportTiffCommand:{auto path=fileDialog(true,6);if(path){writeTiff(*path,selection.empty()?doc:selectedDocument());status=L"고해상도 TIFF 그림을 저장했습니다.";}break;}
   case 102:save();break;case 103:{auto p=fileDialog(true,1);if(p){writeFile(*p,toSvg(scene()));status=L"SVG를 내보냈습니다. 가져온 미지원 객체는 결과를 확인하세요.";}break;}case 108:{auto p=fileDialog(true,2);if(p){writeFile(*p,toCdxml(doc));status=L"CDXML을 내보냈습니다.";}break;}
   case 106:{
-      int choice=MessageBoxW(win,L"JACS 출판용 SVG\n\n예: 단일 열 (240 pt)\n아니요: 두 열 (504 pt)\n취소: 내보내기 중단",
+      int choice=appearance::messageBox(win,L"JACS 출판용 SVG\n\n예: 단일 열 (240 pt)\n아니요: 두 열 (504 pt)\n취소: 내보내기 중단",
                              L"JACS Publication",MB_YESNOCANCEL|MB_ICONQUESTION);
       if(choice==IDCANCEL)break;
       const double widthPt=choice==IDYES?240.:504.;
@@ -162,7 +168,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
                               +std::to_wstring(int(std::round(report.heightPt)))+L" pt\n\n";
           for(const auto& warning:report.warnings)details+=L"• "+ui::wide(warning)+L"\n";
           details+=L"\n경고를 검토했습니다. 그래도 SVG를 내보내시겠습니까?";
-          if(MessageBoxW(win,details.c_str(),L"JACS 출력 사전 검사",MB_OKCANCEL|MB_ICONWARNING)!=IDOK)break;
+          if(appearance::messageBox(win,details.c_str(),L"JACS 출력 사전 검사",MB_OKCANCEL|MB_ICONWARNING)!=IDOK)break;
       }
       if(auto path=fileDialog(true,1)){
           writeFile(*path,toSvg(prepared,widthPt));

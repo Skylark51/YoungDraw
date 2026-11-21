@@ -345,7 +345,7 @@ bool apply(Grid& g){
 void requestClose(Grid& g){
     commit(g);
     if((!g.columnEdit||g.columns==g.originalColumns)&&(g.stages?populatedRows(g):g.rows)==g.original){finish(g,false);return;}
-    int choice=MessageBoxW(g.win,L"표에 적용하지 않은 입력이 있습니다. 적용하고 닫을까요?\n\n예: 적용 후 닫기\n아니요: 입력 버리기\n취소: 표로 돌아가기",L"입력 내용 보관",MB_YESNOCANCEL|MB_ICONQUESTION|MB_DEFBUTTON3);
+    int choice=appearance::messageBox(g.win,L"표에 적용하지 않은 입력이 있습니다. 적용하고 닫을까요?\n\n예: 적용 후 닫기\n아니요: 입력 버리기\n취소: 표로 돌아가기",L"입력 내용 보관",MB_YESNOCANCEL|MB_ICONQUESTION|MB_DEFBUTTON3);
     if(choice==IDYES)apply(g);else if(choice==IDNO)finish(g,false);
 }
 LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){

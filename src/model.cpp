@@ -61,8 +61,31 @@ int Document::bondAt(Vec p,double t) const {
         if(ll<1e-12)continue; double u=std::clamp(((p-a).x*v.x+(p-a).y*v.y)/ll,0.,1.);double d=(p-a-v*u).length();if(d<t){t=d;id=b.id;}}
     return id;
 }
-void Document::eraseBond(int id){bonds.erase(std::remove_if(bonds.begin(),bonds.end(),[id](const Bond& b){return b.id==id;}),bonds.end());}
-void Document::eraseAtom(int id){bonds.erase(std::remove_if(bonds.begin(),bonds.end(),[id](const Bond& b){return b.a==id||b.b==id;}),bonds.end());atoms.erase(std::remove_if(atoms.begin(),atoms.end(),[id](const Atom& a){return a.id==id;}),atoms.end());}
+bool Document::validMeasurement(const MolecularMeasurement& annotation) const {
+    const auto& anchors=annotation.anchors;
+    if(!annotation.label.value||!std::isfinite(*annotation.label.value)||*annotation.label.value<0||
+       anchors.size()<2||anchors.size()>3||anchors.front()==anchors.back())return false;
+    if(annotation.kind==MeasurementKind::Distance)
+        return anchors.size()==2&&std::all_of(anchors.begin(),anchors.end(),[&](int id){return atom(id)||bond(id);});
+    if(annotation.kind==MeasurementKind::Angle)
+        return *annotation.label.value<=360&&
+            ((anchors.size()==3&&anchors[1]!=anchors[0]&&anchors[1]!=anchors[2]&&std::all_of(anchors.begin(),anchors.end(),[&](int id){return atom(id)!=nullptr;}))||
+             (anchors.size()==2&&bond(anchors[0])&&bond(anchors[1])));
+    return false;
+}
+void Document::pruneMeasurements(){
+    measurements.erase(std::remove_if(measurements.begin(),measurements.end(),
+        [&](const MolecularMeasurement& entry){return !validMeasurement(entry);}),measurements.end());
+}
+void Document::eraseBond(int id){
+    bonds.erase(std::remove_if(bonds.begin(),bonds.end(),[id](const Bond& b){return b.id==id;}),bonds.end());
+    pruneMeasurements();
+}
+void Document::eraseAtom(int id){
+    bonds.erase(std::remove_if(bonds.begin(),bonds.end(),[id](const Bond& b){return b.a==id||b.b==id;}),bonds.end());
+    atoms.erase(std::remove_if(atoms.begin(),atoms.end(),[id](const Atom& a){return a.id==id;}),atoms.end());
+    pruneMeasurements();
+}
 void Document::ring(Vec c,int n,bool alt){
     if(n<3||n>12)throw std::runtime_error("Invalid ring size");
     double r=style.bondLength*(n==6&&alt?benzeneBondScale:1.)/(2*std::sin(pi/n));std::vector<int> ids;

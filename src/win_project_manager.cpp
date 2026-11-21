@@ -229,7 +229,7 @@ struct Manager {
         std::sort(all.begin(),all.end(),[](auto& a,auto& b){return a.name<b.name;});int index=all.empty()?-1:0;
         for(size_t i=0;i<all.size();++i)if(all[i].folder==initial){index=int(i);break;}
         refreshProjects(index);
-        if(!errors.empty())MessageBoxW(window,(L"일부 프로젝트를 읽지 못했습니다. 원본은 유지됩니다.\n\n"+errors).c_str(),L"내 프로젝트",MB_OK|MB_ICONWARNING);
+        if(!errors.empty())appearance::messageBox(window,(L"일부 프로젝트를 읽지 못했습니다. 원본은 유지됩니다.\n\n"+errors).c_str(),L"내 프로젝트",MB_OK|MB_ICONWARNING);
     }
     std::optional<std::vector<std::string>> edit(const std::wstring& title,const std::wstring& name,const std::wstring& text=L""){
         return ui::form(window,title,{{L"이름 (최대 200자)",ui::utf8(name)},{L"노트",ui::utf8(text),true,{},false,7}});
@@ -238,12 +238,12 @@ struct Manager {
     void addFiles(const std::vector<fs::path>& files){
         auto p=project();if(!p)return;saveNote();int last=item;std::wstring errors;
         for(auto& path:files){try{last=int(p->add(path,currentFolder));}catch(const std::exception& e){errors+=path.filename().wstring()+L": "+ui::wide(e.what())+L"\n";}}
-        refreshItems(last);if(!errors.empty())MessageBoxW(window,errors.c_str(),L"추가하지 못한 파일",MB_OK|MB_ICONWARNING);
+        refreshItems(last);if(!errors.empty())appearance::messageBox(window,errors.c_str(),L"추가하지 못한 파일",MB_OK|MB_ICONWARNING);
     }
     void chooseFiles(){
         std::vector<wchar_t> buffer(65536);OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=window;f.lpstrFile=buffer.data();f.nMaxFile=DWORD(buffer.size());
         f.lpstrFilter=L"구조 및 이미지\0*.ydraw;*.cdxml;*.png;*.jpg;*.jpeg;*.gif\0\0";f.Flags=OFN_EXPLORER|OFN_ALLOWMULTISELECT|OFN_FILEMUSTEXIST|OFN_NOCHANGEDIR;
-        if(!GetOpenFileNameW(&f)){if(CommDlgExtendedError())throw std::runtime_error("파일을 선택하지 못했습니다. 파일 수를 줄여 다시 시도하세요.");return;}
+        if(!appearance::openFileDialog(f)){if(CommDlgExtendedError())throw std::runtime_error("파일을 선택하지 못했습니다. 파일 수를 줄여 다시 시도하세요.");return;}
         fs::path first(buffer.data());auto next=buffer.data()+wcslen(buffer.data())+1;std::vector<fs::path> files;
         if(!*next)files.push_back(first);else while(*next){files.push_back(first/next);next+=wcslen(next)+1;}addFiles(files);
     }
@@ -273,7 +273,7 @@ struct Manager {
         if(id==31){if(!p)return;auto chosen=selection();if(chosen.empty())return;std::vector<ui::SearchItem> choices{{L"⌂ 프로젝트 루트",L""}};std::vector<std::wstring> targets{L""};for(auto& entry:p->items)if(entry.isFolder){choices.push_back({folderPath(entry.file),L"폴더"});targets.push_back(entry.file);}if(auto match=ui::search(window,L"선택한 항목 이동",choices,L"이동",true)){p->relocate(chosen,targets[*match],p->items.size());refreshItems();}return;}
         if(id==17){if(!p)return;auto duplicated=p->duplicate(selection());std::vector<std::wstring> files;for(auto i:duplicated)files.push_back(p->items[i].file);refreshItems();restoreSelection(files);return;}
         if(id==18){if(!p)return;auto chosen=selection();if(chosen.empty())return;wchar_t path[32768]{};OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=window;f.lpstrFile=path;f.nMaxFile=32768;f.lpstrTitle=L"선택 항목 ZIP 내보내기";f.lpstrDefExt=L"zip";f.lpstrFilter=L"프로젝트 ZIP\0*.zip\0\0";f.Flags=OFN_EXPLORER|OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
-            if(!GetSaveFileNameW(&f)){if(CommDlgExtendedError())throw std::runtime_error("ZIP 저장 창을 열 수 없습니다.");return;}
+            if(!appearance::saveFileDialog(f)){if(CommDlgExtendedError())throw std::runtime_error("ZIP 저장 창을 열 수 없습니다.");return;}
             if(callbacks.saveForExport&&!callbacks.saveForExport(p->folder))return;ZipWorkspace temp;auto subset=p->copySelectionTo(temp.folder,chosen);exportZip(subset,path,callbacks.writePng);SetWindowTextW(hint,L"선택한 항목을 ZIP 파일로 내보냈습니다.");return;}
         if(id==37){if(!p||item<0||p->items[item].isFolder)return;ShellExecuteW(window,L"open",p->folder.c_str(),nullptr,nullptr,SW_SHOWNORMAL);return;}
 
@@ -283,7 +283,7 @@ struct Manager {
             wchar_t path[32768]{};OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=window;f.lpstrFile=path;f.nMaxFile=32768;
             f.lpstrTitle=L"프로젝트 ZIP 또는 기존 프로젝트 정보를 선택하세요";
             f.lpstrFilter=L"프로젝트 ZIP\0*.zip\0기존 프로젝트 정보\0*.ydproject\0\0";f.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
-            if(!GetOpenFileNameW(&f)){if(CommDlgExtendedError())throw std::runtime_error("프로젝트 선택 창을 열 수 없습니다.");return;}
+            if(!appearance::openFileDialog(f)){if(CommDlgExtendedError())throw std::runtime_error("프로젝트 선택 창을 열 수 없습니다.");return;}
             auto imported=_wcsicmp(fs::path(path).extension().c_str(),L".zip")==0?importZip(path):Project::importFrom(path,root());all.push_back(std::move(imported));refreshProjects(int(all.size()-1));
             SetWindowTextW(hint,L"이전 프로젝트를 이 PC에 복사했습니다. 항목을 선택하고 열기 / 편집을 누르세요.");return;
         }
@@ -294,13 +294,13 @@ struct Manager {
             OPENFILENAMEW f{};f.lStructSize=sizeof(f);f.hwndOwner=window;f.lpstrFile=path;f.nMaxFile=32768;
             f.lpstrTitle=L"프로젝트 ZIP 내보내기";f.lpstrDefExt=L"zip";
             f.lpstrFilter=L"프로젝트 ZIP\0*.zip\0\0";f.Flags=OFN_EXPLORER|OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
-            if(!GetSaveFileNameW(&f)){if(CommDlgExtendedError())throw std::runtime_error("ZIP 저장 창을 열 수 없습니다.");return;}
+            if(!appearance::saveFileDialog(f)){if(CommDlgExtendedError())throw std::runtime_error("ZIP 저장 창을 열 수 없습니다.");return;}
             if(callbacks.saveForExport&&!callbacks.saveForExport(p->folder))return;
             exportZip(*p,path,callbacks.writePng);
             SetWindowTextW(hint,L"프로젝트를 ZIP 파일로 내보냈습니다.");return;
         }
         if(id==11){auto value=edit(L"프로젝트 이름·노트",p->name,p->note);if(!value)return;auto before=*p;p->name=ui::wide((*value)[0]);p->note=ui::wide((*value)[1]);try{p->save();}catch(...){*p=before;throw;}refreshProjects(selected);return;}
-        if(id==12){if(MessageBoxW(window,L"이 프로젝트를 삭제하시겠습니까?\n파일은 프로젝트 휴지통에 보관됩니다.",L"프로젝트 삭제",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+        if(id==12){if(appearance::messageBox(window,L"이 프로젝트를 삭제하시겠습니까?\n파일은 프로젝트 휴지통에 보관됩니다.",L"프로젝트 삭제",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
             std::vector<std::wstring> paths;for(auto& entry:p->items)if(!entry.isFolder)paths.push_back((p->folder/entry.file).wstring());if(!callbacks.close(paths))return;
             auto trash=root().parent_path()/L"ProjectTrash";fs::create_directories(trash);auto dest=trash/p->folder.filename();while(fs::exists(dest))dest+=L"-deleted";fs::rename(p->folder,dest);all.erase(all.begin()+selected);refreshProjects(all.empty()?-1:std::min(selected,int(all.size()-1)));return;}
         if(id==20){auto value=edit(L"새 구조 문서",L"새 구조");if(!value)return;size_t i=p->addDrawing(ui::wide((*value)[0]),callbacks.blank,currentFolder);p->items[i].note=ui::wide((*value)[1]);p->save();refreshItems(int(i));open();return;}
@@ -311,7 +311,7 @@ struct Manager {
         if(id==23){open();return;}
         if(id==24){auto& entry=p->items[item];auto value=edit(L"파일 이름·노트",entry.name,entry.note);if(!value)return;auto before=entry;entry.name=ui::wide((*value)[0]);entry.note=ui::wide((*value)[1]);try{p->save();}catch(...){entry=before;throw;}refreshItems(item);return;}
         if(id==25){auto chosen=selection();if(chosen.empty())return;
-            if(MessageBoxW(window,L"선택한 항목과 하위 항목을 프로젝트에서 제외하시겠습니까?\n원본 파일은 복구를 위해 보관됩니다.",L"항목 삭제",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+            if(appearance::messageBox(window,L"선택한 항목과 하위 항목을 프로젝트에서 제외하시겠습니까?\n원본 파일은 복구를 위해 보관됩니다.",L"항목 삭제",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
             std::vector<std::wstring> removed,paths;for(auto i:chosen)removed.push_back(p->items[i].file);
             bool changed=true;while(changed){changed=false;for(auto& e:p->items)if(std::find(removed.begin(),removed.end(),e.parent)!=removed.end()&&std::find(removed.begin(),removed.end(),e.file)==removed.end()){removed.push_back(e.file);changed=true;}}
             for(auto& e:p->items)if(!e.isFolder&&std::find(removed.begin(),removed.end(),e.file)!=removed.end())paths.push_back((p->folder/e.file).wstring());
@@ -499,7 +499,7 @@ struct Manager {
             case WM_PAINT:self->paint();return 0;
             case WM_CLOSE:self->saveNote();DestroyWindow(h);return 0;
             case WM_DESTROY:self->stopDrag();KillTimer(h,2);self->rememberWidths();return 0;
-        }}catch(const std::exception& e){MessageBoxW(h,ui::wide(e.what()).c_str(),L"내 프로젝트",MB_OK|MB_ICONWARNING);if(msg==WM_CREATE)return -1;if(msg==WM_NOTIFY)return TRUE;}
+        }}catch(const std::exception& e){appearance::messageBox(h,ui::wide(e.what()).c_str(),L"내 프로젝트",MB_OK|MB_ICONWARNING);if(msg==WM_CREATE)return -1;if(msg==WM_NOTIFY)return TRUE;}
         return DefWindowProcW(h,msg,wp,lp);
     }
 };

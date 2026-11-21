@@ -25,6 +25,15 @@ struct Style {
 };
 enum class BondKind { Single, Double, Triple, Wedge, Hash, Dash, Bold, Wavy, Aromatic, Dative, Dot };
 struct TextRun { std::string text,color="#000000",font="Arial"; double size=10; int face=0; };
+inline constexpr char partialChargeColor[]="#17699d";
+inline constexpr char spinDensityColor[]="#a13e62";
+inline constexpr char mayerOrderColor[]="#6848a1";
+inline constexpr char distanceLabelColor[]="#21766a";
+inline constexpr char angleLabelColor[]="#a4591b";
+struct MolecularValue {
+    std::optional<double> value;
+    std::string color;
+};
 struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,radical=0; std::string label; bool protect=false; std::vector<TextRun> labelRuns; Vec labelOffset; std::string color="#000000"; Vec annotationOffset; bool annotationManual=false; double drawingScale=1;
     std::optional<double> mullikenSpin;
     // Depth in drawing points at drawingScale=1. XY remains directly editable.
@@ -33,6 +42,8 @@ struct Atom { int id; Vec p; int element=6; int charge=0,isotope=0,explicitH=-1,
     std::optional<double> labelAlignment; // Horizontal bond reference within the label: 0 left, 1 right.
     Vec labelAdjustment; // Additional label translation in drawing points; skeleton stays fixed.
     std::optional<int> labelFace;
+    MolecularValue partialCharge;
+    std::string mullikenSpinColor;
     void preserveStyle(const Style& from,const Style& to);
 };
 struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; std::string customOrder,customDisplay; std::string color="#000000"; double drawingScale=1;
@@ -40,6 +51,7 @@ struct Bond { int id, a, b; BondKind kind=BondKind::Single; int doubleSide=0; st
     std::optional<int> zOrder; // Imported 2D bond stacking; no invented 3D coordinates.
     std::string depthRearColor; // Local rear crossing accent; never the visible scaffold ink.
     std::string depthColor; // Original ink before automatic depth shading.
+    MolecularValue mayerOrder;
     void preserveStyle(const Style& from,const Style& to);
 };
 enum class ObjectKind { Line, Curve, Text, Ellipse, Rectangle, Image };
@@ -150,6 +162,12 @@ struct EnergyPlot {
     std::string energySymbol; // Empty preserves legacy axis titles; new graphs choose ΔE or ΔG.
 };
 struct Group { int id=0; std::vector<int> members; };
+enum class MeasurementKind { Distance, Angle };
+struct MolecularMeasurement {
+    MeasurementKind kind;
+    std::vector<int> anchors;
+    MolecularValue label;
+};
 struct Document {
     Style style;
     bool imagesLocked=false,graphsLocked=false;
@@ -162,6 +180,8 @@ struct Document {
     std::vector<Reaction> reactions;
     std::vector<EnergyPlot> plots;
     std::vector<Group> groups;
+    std::vector<MolecularMeasurement> measurements;
+    bool showMolecularAnnotations=true;
     // Original CDXML and ids let the writer patch editable objects while
     // retaining unsupported source objects, annotations, and references.
     std::string sourceXml;
@@ -177,6 +197,8 @@ struct Document {
     const Bond* bond(int id) const;
     int atomAt(Vec p, double tolerance) const;
     int bondAt(Vec p, double tolerance) const;
+    bool validMeasurement(const MolecularMeasurement& annotation) const;
+    void pruneMeasurements();
     void eraseAtom(int id);
     void eraseBond(int id);
     void ring(Vec center, int sides, bool alternating=false);

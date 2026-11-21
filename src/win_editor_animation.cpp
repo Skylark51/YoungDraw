@@ -363,7 +363,7 @@ std::optional<std::wstring> gifSaveFile(HWND owner){
             picker->SetFolder(item.Get());
     }
 
-    const auto result=picker->Show(owner);
+    const auto result=appearance::showFileDialog(owner,*picker.Get());
     if(result==HRESULT_FROM_WIN32(ERROR_CANCELLED))return {};
     ComPtr<IShellItem> file;
     PWSTR path=nullptr;
@@ -383,7 +383,7 @@ std::optional<std::wstring> animationFile(const wchar_t* title,HWND owner=nullpt
     picker.nMaxFile=DWORD(std::size(path));
     picker.lpstrFilter=L"ChemDraw / YoungDraw\0*.cdx;*.cdxml;*.ydraw\0\0";
     picker.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|OFN_FILEMUSTEXIST;
-    if(GetOpenFileNameW(&picker))return std::wstring(path);
+    if(appearance::openFileDialog(picker))return std::wstring(path);
     return {};
 }
 
@@ -882,15 +882,23 @@ struct ExportProgress {
     bool stopped=false;
     explicit ExportProgress(HWND parent):owner(parent){
         const RECT r=ui::ownedWindowRect(owner,420,176);
-        window=CreateWindowExW(0,L"STATIC",L"GIF 생성 중",WS_POPUP|WS_CAPTION,
-            r.left,r.top,420,176,owner,nullptr,nullptr,nullptr);
+        static const auto windowClass=[]{
+            WNDCLASSW wc{};
+            wc.lpfnWndProc=DefWindowProcW;
+            wc.hInstance=GetModuleHandleW(nullptr);
+            wc.lpszClassName=L"YoungDrawExportProgress";
+            return RegisterClassW(&wc);
+        }();
+        if(!windowClass)throw std::runtime_error("진행 창을 열 수 없습니다.");
+        window=CreateWindowExW(0,MAKEINTATOM(windowClass),L"GIF 생성 중",WS_POPUP|WS_CAPTION|WS_CLIPCHILDREN,
+            r.left,r.top,420,176,owner,nullptr,GetModuleHandleW(nullptr),nullptr);
         if(!window)throw std::runtime_error("진행 창을 열 수 없습니다.");
         readout=CreateWindowW(L"STATIC",L"첫 프레임 생성 중…",WS_CHILD|WS_VISIBLE,16,14,378,28,window,nullptr,nullptr,nullptr);
         bar=CreateWindowW(PROGRESS_CLASSW,L"",WS_CHILD|WS_VISIBLE,16,48,378,22,window,nullptr,nullptr,nullptr);
-        cancel=CreateWindowW(L"BUTTON",L"취소",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,290,83,104,28,window,nullptr,nullptr,nullptr);
+        cancel=CreateWindowW(L"BUTTON",L"취소",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,290,83,104,28,window,nullptr,nullptr,nullptr);
         for(auto child:{readout,cancel})SendMessageW(child,WM_SETFONT,WPARAM(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
         SetWindowSubclass(window,proc,1,reinterpret_cast<DWORD_PTR>(this));
-        appearance::titlebar(window);EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);SetFocus(cancel);
+        appearance::dialog(window);EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);SetFocus(cancel);
     }
     ~ExportProgress(){EnableWindow(owner,TRUE);DestroyWindow(window);SetActiveWindow(owner);}
     static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR data){
@@ -1102,7 +1110,7 @@ void previewAction(HWND hwnd,AnimationPreview& preview,int id){
         rememberGifFolder(*path);
         status=L"결합 애니메이션 GIF를 저장했습니다.";
         redraw();
-        MessageBoxW(hwnd,L"GIF를 저장했습니다.",L"결합 애니메이션",MB_OK|MB_ICONINFORMATION);
+        appearance::messageBox(hwnd,L"GIF를 저장했습니다.",L"결합 애니메이션",MB_OK|MB_ICONINFORMATION);
     }
 }
 
@@ -1126,9 +1134,10 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 0,0,0,0,hwnd,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);
             SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(preview->font),FALSE);
         }
-        HWND repeat=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
+        HWND repeat=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,
             0,0,0,0,hwnd,HMENU(INT_PTR(PreviewRepeat)),nullptr,nullptr);
         SendMessageW(repeat,WM_SETFONT,WPARAM(preview->font),FALSE);
+        ui::themeCombo(repeat);
         for(const auto& mode:loopModes)SendMessageW(repeat,CB_ADDSTRING,0,LPARAM(mode.c_str()));
         SendMessageW(repeat,CB_SETCURSEL,Playback::PingPong,0);
         for(auto id:{PreviewBackground,PreviewAdd,PreviewRemove,PreviewSegmentTiming,PreviewKeyframe}){
@@ -1152,7 +1161,7 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     case WM_SIZE:
         previewButtons(hwnd);InvalidateRect(hwnd,nullptr,FALSE);return 0;
     case WM_ERASEBKGND:return 1;
-    case WM_CTLCOLORSTATIC:return preview->colors.control(msg,reinterpret_cast<HDC>(wp));
+    case WM_CTLCOLORSTATIC:case WM_CTLCOLORLISTBOX:return preview->colors.control(msg,reinterpret_cast<HDC>(wp));
     case WM_DRAWITEM:{
         const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);
         preview->colors.draw(item,item.CtlID==PreviewSave);return TRUE;
@@ -1207,7 +1216,7 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             stages.erase(stages.begin()+from);
             stages.insert(stages.begin()+to,std::move(stage));
             try{preview->replace(std::move(stages),to);}
-            catch(const std::exception& e){MessageBoxW(hwnd,ui::wide(e.what()).c_str(),L"단계 순서",MB_OK|MB_ICONWARNING);}
+            catch(const std::exception& e){appearance::messageBox(hwnd,ui::wide(e.what()).c_str(),L"단계 순서",MB_OK|MB_ICONWARNING);}
         }
         refreshPreview(hwnd,*preview);return 0;
     }
@@ -1228,7 +1237,7 @@ LRESULT CALLBACK animationPreviewProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             // Pause while editing or choosing an export destination.
             if(id>=PreviewTiming)setPlaying(hwnd,*preview,false);
             try{previewAction(hwnd,*preview,id);}
-            catch(const std::exception& e){MessageBoxW(hwnd,ui::wide(e.what()).c_str(),L"결합 애니메이션",MB_OK|MB_ICONWARNING);}
+            catch(const std::exception& e){appearance::messageBox(hwnd,ui::wide(e.what()).c_str(),L"결합 애니메이션",MB_OK|MB_ICONWARNING);}
             refreshPreview(hwnd,*preview);
         }
         return 0;
@@ -1264,7 +1273,7 @@ struct RoutePicker {
             p->info=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE|SS_PATHELLIPSIS,14,9,r.right-28,22,hwnd,nullptr,nullptr,nullptr);
             for(auto [id,label,x]:std::vector<std::tuple<int,const wchar_t*,int>>{
                 {3,L"마지막 선택 취소",14},{IDOK,L"경로 적용",int(r.right)-228},{IDCANCEL,L"닫기",int(r.right)-116}}){
-                HWND button=CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|WS_TABSTOP,x,r.bottom-40,108,28,hwnd,HMENU(INT_PTR(id)),nullptr,nullptr);
+                HWND button=CreateWindowW(L"BUTTON",label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,x,r.bottom-40,108,28,hwnd,HMENU(INT_PTR(id)),nullptr,nullptr);
                 SendMessageW(button,WM_SETFONT,WPARAM(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
             }
             p->update(hwnd);return 0;
@@ -1275,23 +1284,27 @@ struct RoutePicker {
             PAINTSTRUCT ps{};HDC dc=BeginPaint(hwnd,&ps);
             RECT r{};GetClientRect(hwnd,&r);
             Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);
-            g.SetClip(RectF(0,36,float(r.right),float(r.bottom-84)));
+            const auto& palette=appearance::palette();
+            const RectF canvas(0,36,float(r.right),float(r.bottom-84));
+            SolidBrush paper(palette.canvas);
+            g.FillRectangle(&paper,canvas);
+            g.SetClip(canvas);
             const auto& b=p->scene.bounds;
             p->zoom=std::min((r.right-32)/std::max(1.,b.w),(r.bottom-98)/std::max(1.,b.h));
             p->origin={16-b.x*p->zoom,44-b.y*p->zoom};
             g.TranslateTransform(float(p->origin.x),float(p->origin.y));
-            g.ScaleTransform(float(p->zoom),float(p->zoom));render(g,p->scene);
+            g.ScaleTransform(float(p->zoom),float(p->zoom));render(g,p->scene,false,true);
             g.ResetTransform();
             for(size_t i=0;i<p->reaction.slots.size();++i){
                 if(!p->available[i])continue;
                 const Vec c=p->origin+reactionSlot(p->reaction,i)*p->zoom;
                 const auto found=std::find(p->route.begin(),p->route.end(),i);
                 const bool selected=found!=p->route.end();
-                Pen pen(selected?Color(0,135,120):Color(155,160,164),selected?2.f:1.f);
+                Pen pen(selected?palette.accent:palette.muted,selected?2.f:1.f);
                 const float w=float(p->reaction.slotWidth*p->zoom),h=float(p->reaction.slotHeight*p->zoom);
                 g.DrawRectangle(&pen,float(c.x)-w/2,float(c.y)-h/2,w,h);
                 if(selected)ui::drawLabel(g,std::to_wstring(found-p->route.begin()+1),
-                    RectF(float(c.x)-w/2+2,float(c.y)-h/2+2,25,18),14,Color(0,100,90),true);
+                    RectF(float(c.x)-w/2+2,float(c.y)-h/2+2,25,18),14,palette.canvasInk,true);
             }
             EndPaint(hwnd,&ps);return 0;
         }
@@ -1341,14 +1354,14 @@ std::optional<std::vector<size_t>> pickRoute(const Document& source,const Reacti
     static const auto registered=[]{
         WNDCLASSW wc{};wc.lpfnWndProc=RoutePicker::proc;wc.hInstance=GetModuleHandleW(nullptr);
         wc.lpszClassName=L"YoungDrawRoutePicker";wc.hCursor=LoadCursorW(nullptr,IDC_HAND);
-        wc.hbrBackground=HBRUSH(COLOR_WINDOW+1);return RegisterClassW(&wc);
+        return RegisterClassW(&wc);
     }();
     if(!registered)return {};
     const RECT r=ui::ownedWindowRect(win,1040,670);
     HWND hwnd=CreateWindowExW(0,L"YoungDrawRoutePicker",L"분기 메커니즘 경로",
         WS_POPUP|WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN,r.left,r.top,r.right-r.left,r.bottom-r.top,win,nullptr,nullptr,&picker);
     if(!hwnd)return {};
-    appearance::titlebar(hwnd);EnableWindow(win,FALSE);ShowWindow(hwnd,SW_SHOW);
+    appearance::dialog(hwnd);EnableWindow(win,FALSE);ShowWindow(hwnd,SW_SHOW);
     MSG msg{};BOOL got=1;
     while(!picker.done&&(got=GetMessageW(&msg,nullptr,0,0))>0){
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE)picker.done=true;

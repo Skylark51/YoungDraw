@@ -1,8 +1,10 @@
 // Render the real editor and exercise the appearance dialog without modifying user preferences.
 #include "win_button_help.h"
 #include "win_gallery.h"
+#include "win_editor_animation.h"
 #include "win_editor_canvas.h"
 #include "win_editor_chrome.h"
+#include "win_editor_files.h"
 #include "win_editor_images.h"
 #include "win_editor_pointer.h"
 #include "win_editor_plot.h"
@@ -12,12 +14,130 @@
 #include "win_theme.h"
 #include "win_dialogs.h"
 #include <commctrl.h>
+#include <shobjidl_core.h>
+#include <wrl/client.h>
 
 using namespace yd;
 using namespace yd::editor;
 #include <iostream>
 namespace {
 int requested=0;bool driven=false,valid=true,plotSettingsValid=true;
+enum class NativeCase { AlignmentWarning, Open, Save, GifSave };
+NativeCase nativeCase;
+bool nativeDialogSeen=false;
+
+void CALLBACK inspectNativeDialog(HWND owner,UINT,UINT_PTR timer,DWORD){
+    HWND dialog=nullptr;
+    EnumThreadWindows(GetCurrentThreadId(),[](HWND hwnd,LPARAM result)->BOOL{
+        wchar_t type[16]{};
+        GetClassNameW(hwnd,type,int(std::size(type)));
+        if(wcscmp(type,L"#32770")!=0||!IsWindowVisible(hwnd))return TRUE;
+        wchar_t title[100]{};
+        if(!GetWindowTextW(hwnd,title,int(std::size(title))))return TRUE;
+        if(nativeCase==NativeCase::AlignmentWarning&&wcscmp(title,L"YoungDraw")!=0)return TRUE;
+        if(nativeCase==NativeCase::GifSave&&wcscmp(title,L"GIF 저장 테마 검증")!=0)return TRUE;
+        *reinterpret_cast<HWND*>(result)=hwnd;
+        return FALSE;
+    },LPARAM(&dialog));
+    if(!dialog)return;
+    KillTimer(owner,timer);
+    nativeDialogSeen=true;
+
+    const auto& palette=appearance::palette();
+    Bitmap snapshot(8,8,PixelFormat32bppARGB);
+    Graphics graphics(&snapshot);
+    const auto dc=graphics.GetHDC();
+    SendMessageW(dialog,WM_ERASEBKGND,WPARAM(dc),0);
+    const auto background=GetPixel(dc,4,4);
+    const auto child=GetWindow(dialog,GW_CHILD);
+    auto brush=reinterpret_cast<HBRUSH>(SendMessageW(dialog,WM_CTLCOLORSTATIC,WPARAM(dc),LPARAM(child)));
+    LOGBRUSH brushInfo{};
+    GetObjectW(brush,sizeof(brushInfo),&brushInfo);
+    const bool themed=background==palette.panel.ToCOLORREF()&&brushInfo.lbColor==background&&
+        GetTextColor(dc)==palette.text.ToCOLORREF();
+    graphics.ReleaseHDC(dc);
+
+    if(!themed){
+        wchar_t title[100]{};
+        GetWindowTextW(dialog,title,int(std::size(title)));
+        std::cerr<<"Native dialog "<<int(nativeCase)<<" ("<<ui::utf8(title)<<") missed palette "
+                 <<requested<<" panel="<<background<<" control="<<brushInfo.lbColor<<'\n';
+        valid=false;
+    }
+    PostMessageW(dialog,WM_CLOSE,0,0);
+}
+
+void checkNativeDialogs(HWND owner){
+    auto exercise=[&](NativeCase type,const auto& open){
+        nativeCase=type;
+        nativeDialogSeen=false;
+        SetTimer(owner,994,15,inspectNativeDialog);
+        open();
+        KillTimer(owner,994);
+        if(!nativeDialogSeen){
+            std::cerr<<"Native dialog "<<int(type)<<" did not open\n";
+            valid=false;
+        }
+    };
+    const auto before=doc;
+    doc=Document{};
+    exercise(NativeCase::AlignmentWarning,[&]{SendMessageW(owner,WM_COMMAND,125,0);});
+    doc=before;
+
+    if(requested!=2&&requested!=5)return;
+    exercise(NativeCase::Open,[&]{valid=openDocumentFiles().empty()&&valid;});
+    exercise(NativeCase::Save,[&]{valid=!fileDialog(true,1)&&valid;});
+    Microsoft::WRL::ComPtr<IFileSaveDialog> dialog;
+    if(FAILED(CoCreateInstance(CLSID_FileSaveDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog)))){
+        valid=false;
+        return;
+    }
+    dialog->SetTitle(L"GIF 저장 테마 검증");
+    exercise(NativeCase::GifSave,[&]{
+        valid=(appearance::showFileDialog(owner,*dialog.Get())==HRESULT_FROM_WIN32(ERROR_CANCELLED))&&valid;
+    });
+}
+
+bool routeDialogSeen=false;
+
+void CALLBACK inspectRoute(HWND owner,UINT,UINT_PTR timer,DWORD){
+    if(const auto form=FindWindowW(L"YoungDrawForm",L"결합 애니메이션 GIF");
+        form&&GetWindow(form,GW_OWNER)==owner){
+        PostMessageW(form,WM_COMMAND,IDOK,0);
+        return;
+    }
+    const auto route=FindWindowW(L"YoungDrawRoutePicker",nullptr);
+    if(!route||GetWindow(route,GW_OWNER)!=owner)return;
+    KillTimer(owner,timer);
+    routeDialogSeen=true;
+
+    const auto& palette=appearance::palette();
+    const auto label=FindWindowExW(route,nullptr,L"Static",nullptr);
+    const auto dc=GetDC(route);
+    auto brush=reinterpret_cast<HBRUSH>(SendMessageW(route,WM_CTLCOLORSTATIC,WPARAM(dc),LPARAM(label)));
+    LOGBRUSH brushInfo{};
+    GetObjectW(brush,sizeof(brushInfo),&brushInfo);
+    valid=label&&GetTextColor(dc)==palette.text.ToCOLORREF()&&
+        brushInfo.lbColor==palette.panel.ToCOLORREF()&&valid;
+    ReleaseDC(route,dc);
+    PostMessageW(route,WM_COMMAND,IDCANCEL,0);
+}
+
+void checkRouteDialog(HWND owner){
+    const auto before=doc;
+    doc=mechanismDemo();
+    doc.reactions.front().links={{0,1},{0,2}};
+    routeDialogSeen=false;
+    SetTimer(owner,993,15,inspectRoute);
+    createBondAnimation();
+    KillTimer(owner,993);
+    if(!routeDialogSeen){
+        std::cerr<<"Branched animation route dialog did not open\n";
+        valid=false;
+    }
+    doc=before;
+}
+
 void CALLBACK inspectGallery(HWND owner,UINT,UINT_PTR timer,DWORD){HWND gallery=nullptr;while((gallery=FindWindowExW(nullptr,gallery,L"YoungDrawTemplateGallery",nullptr))){DWORD process=0;GetWindowThreadProcessId(gallery,&process);if(process==GetCurrentProcessId()&&GetWindow(gallery,GW_OWNER)==owner)break;}if(!gallery)return;KillTimer(owner,timer);UpdateWindow(gallery);valid=valid&&ui::regionHelpCount(gallery)==25;SendMessageW(gallery,WM_COMMAND,109,0);UpdateWindow(gallery);valid=valid&&ui::regionHelpCount(gallery)==11;PostMessageW(gallery,WM_COMMAND,IDCANCEL,0);}
 void CALLBACK inspectSearch(HWND owner,UINT,UINT_PTR timer,DWORD){
  HWND dialog=nullptr;while((dialog=FindWindowExW(nullptr,dialog,L"YoungDrawSearch",L"테마 검색 검증"))){if(GetWindow(dialog,GW_OWNER)==owner)break;}if(!dialog)return;KillTimer(owner,timer);
@@ -126,6 +246,8 @@ void CALLBACK chooseTheme(HWND,UINT,UINT_PTR timer,DWORD){
   KillTimer(win,999);
  }
  auto popup=CreatePopupMenu();AppendMenuW(popup,MF_STRING,9001,L"테마 팝업 검증");SendMessageW(win,WM_INITMENUPOPUP,(WPARAM)popup,0);MENUITEMINFOW mi{sizeof(mi)};mi.fMask=MIIM_FTYPE|MIIM_DATA;GetMenuItemInfoW(popup,0,TRUE,&mi);valid=valid&&(mi.fType&MFT_OWNERDRAW)&&mi.dwItemData;DestroyMenu(popup);
+ checkNativeDialogs(win);
+ if(requested==5)checkRouteDialog(win);
  const auto& palette=appearance::palette();auto settings=appearance::settings();
  valid=valid&&settings.theme==requested&&settings.pattern==requested%6&&settings.intensity==2;
  Color rendered=appearance::documentColor(Color(255,0,0,0));
@@ -163,10 +285,10 @@ void CALLBACK chooseTheme(HWND,UINT,UINT_PTR timer,DWORD){
 }
 }
 int main(){
- OleInitialize(nullptr);GdiplusStartupInput start;ULONG_PTR token;GdiplusStartup(&token,&start,nullptr);int result=0;
+ OleInitialize(nullptr);GdiplusStartupInput start;ULONG_PTR token;GdiplusStartup(&token,&start,nullptr);int result=0;HWND hwnd=nullptr;
  try{
   WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawThemeRegression";RegisterClassW(&wc);
-  HWND hwnd=CreateWindowW(wc.lpszClassName,L"Theme regression",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
+  hwnd=CreateWindowW(wc.lpszClassName,L"Theme regression",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
   if(!hwnd)throw std::runtime_error("Cannot create editor");
   doc=coordinateDemo();fit();const auto original=appearance::settings();const auto native=toNative(doc),svg=toSvg(scene());
   for(requested=0;requested<7;requested++){
@@ -175,7 +297,8 @@ int main(){
    if(toNative(doc)!=native||toSvg(scene())!=svg)throw std::runtime_error("Appearance changed document or export");
   }
   Document sample;sample.addAtom({0,0},26);sample.atoms[0].label="M";ui::TemplateCard card;card.name=L"설명 검증";card.category=L"기본";card.document=sample;card.preview=makeScene(sample);card.path=L"test-template.ydraw";SetTimer(hwnd,997,10,inspectGallery);ui::templateGallery(hwnd,{card},L"전체",[](Graphics&,const Scene&,RectF){});if(!valid)throw std::runtime_error("gallery button tooltip coverage regression");
-   DestroyWindow(hwnd);if(!plotSettingsValid)throw std::runtime_error("Graph settings theme or tab navigation regression");std::cout<<"7 themes, 6 patterns, preview rollback, dark contrast, render cache, document and SVG isolation passed\n";
+   if(!plotSettingsValid)throw std::runtime_error("Graph settings theme or tab navigation regression");std::cout<<"7 themes, 6 patterns, preview rollback, dark contrast, render cache, document and SVG isolation passed\n";
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';result=1;}
+ if(IsWindow(hwnd))DestroyWindow(hwnd);
  imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return result;
 }

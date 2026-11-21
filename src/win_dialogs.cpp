@@ -892,7 +892,7 @@ std::optional<size_t> search(HWND owner,const std::wstring& title,const std::vec
     auto hwnd=CreateWindowExW(0,L"YoungDrawSearch",title.c_str(),
         WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,rect.left,rect.top,652,393,owner,nullptr,nullptr,&state);
     if(!hwnd)return {};
-    appearance::titlebar(hwnd);EnableWindow(owner,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(state.query);
+    appearance::dialog(hwnd);EnableWindow(owner,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(state.query);
     MSG msg{};BOOL got=1;
     while(!state.done&&(got=GetMessageW(&msg,nullptr,0,0))>0){
         if(msg.message==WM_KEYDOWN&&msg.hwnd==state.query&&msg.wParam==VK_DOWN)SetFocus(state.list);

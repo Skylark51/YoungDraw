@@ -146,13 +146,15 @@ void Document::erase(const std::vector<int>& selection){auto ids=editableExpansi
     bonds.erase(std::remove_if(bonds.begin(),bonds.end(),[&](const Bond& b){return ids.count(b.id)||ids.count(b.a)||ids.count(b.b);}),bonds.end());
     auto remove=[&](auto& entries){entries.erase(std::remove_if(entries.begin(),entries.end(),[&](const auto& e){return ids.count(e.id)>0;}),entries.end());};
     remove(atoms);remove(objects);remove(reactions);remove(plots);remove(groups);
+    pruneMeasurements();
     auto prune=[&](std::vector<int>& members){members.erase(std::remove_if(members.begin(),members.end(),[&](int id){return ids.count(id)>0;}),members.end());};
     for(auto& r:reactions){for(auto& s:r.slots)prune(s.members);for(auto& l:r.links)prune(l.members);}for(auto& p:plots)for(auto& s:p.states){prune(s.above);prune(s.below);}for(auto& g:groups)prune(g.members);
 }
 Document Document::subset(const std::vector<int>& selection) const {
-    Document out;out.style=style;auto ids=editableExpansion(*this,selection);
+    Document out;out.style=style;out.showMolecularAnnotations=showMolecularAnnotations;auto ids=editableExpansion(*this,selection);
     for(auto& a:atoms)if(ids.count(a.id))out.atoms.push_back(a);
     for(auto& b:bonds)if(ids.count(b.a)&&ids.count(b.b))out.bonds.push_back(b);
+    for(const auto& annotation:measurements)if(out.validMeasurement(annotation))out.measurements.push_back(annotation);
     for(auto& o:objects){
         const bool includedAnchors=o.kind==ObjectKind::Line&&!o.head&&o.autoRoute&&
             o.sourceAtom&&o.targetAtom&&ids.count(o.sourceAtom)&&ids.count(o.targetAtom)&&!isLocked(o.id);
@@ -198,6 +200,11 @@ void Document::append(const Document& other,Vec delta){
     auto remap=[&](std::vector<int>& ids){for(int& id:ids)id=mapping.at(id);};
     for(auto a:other.atoms){a.id=mapping[a.id];a.p=a.p+delta;a.preserveStyle(other.style,style);atoms.push_back(a);}
     for(auto b:other.bonds){b.id=mapping[b.id];b.a=mapping[b.a];b.b=mapping[b.b];b.preserveStyle(other.style,style);bonds.push_back(b);}
+    for(auto annotation:other.measurements){
+        if(!other.validMeasurement(annotation))continue;
+        remap(annotation.anchors);
+        measurements.push_back(std::move(annotation));
+    }
     for(auto o:other.objects){o.sourceAtom=mapping.count(o.sourceAtom)?mapping[o.sourceAtom]:0;o.targetAtom=mapping.count(o.targetAtom)?mapping[o.targetAtom]:0;o.sourceBond=mapping.count(o.sourceBond)?mapping[o.sourceBond]:0;o.targetBond=mapping.count(o.targetBond)?mapping[o.targetBond]:0;o.id=mapping[o.id];for(auto& p:o.points)p=p+delta;objects.push_back(o);}
     for(auto r:other.reactions){r.id=mapping[r.id];r.p=r.p+delta;for(auto& s:r.slots)remap(s.members);for(auto& l:r.links)remap(l.members);reactions.push_back(r);}
     for(auto p:other.plots){p.id=mapping[p.id];p.p=p.p+delta;for(auto& s:p.states){remap(s.above);remap(s.below);}plots.push_back(p);}

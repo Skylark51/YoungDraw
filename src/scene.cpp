@@ -181,24 +181,89 @@ Scene makeScene(const Document& d,const Measure& measure){
         }
         mark.points={best};labels.push_back(mark);
     }
-    for(const auto& a:d.atoms)if(a.mullikenSpin){
-        Primitive mark;mark.type=Primitive::Text;mark.owner=a.id;mark.textRole=mullikenSpinTextRole;
-        mark.fontSize=std::max(6.,a.labelSize.value_or(d.style.fontSize)*.70)*a.drawingScale;
-        mark.color=a.color;
-        std::ostringstream value;
-        value.imbue(std::locale::classic());
-        const double rounded=std::round(*a.mullikenSpin*1000)/1000;
-        value<<std::showpos<<std::fixed<<std::setprecision(3)<<(rounded==0?0.:rounded);
-        mark.text=value.str();
-        double y=a.p.y-3;
-        for(const auto& label:labels)if(label.owner==a.id)y=std::min(y,label.points.front().y-2);
-        const double width=textWidth(measure,mark.text,mark.fontSize,mark.font,mark.face);
-        mark.points={{a.p.x-width/2,y-mark.fontSize}};
-        labels.push_back(std::move(mark));
+    if(d.showMolecularAnnotations){
+        auto addLabel=[&](int owner,Vec anchor,double size,int role,const std::string& color,std::string text){
+            Primitive mark;
+            mark.type=Primitive::Text;
+            mark.owner=owner;
+            mark.textRole=role;
+            mark.fontSize=size;
+            mark.font=d.style.labelFont;
+            mark.color=color;
+            mark.text=std::move(text);
+            const double width=textWidth(measure,mark.text,size,mark.font,mark.face);
+            const double left=anchor.x-width/2;
+            double y=anchor.y-size-3;
+            // Move above overlapping labels while keeping the horizontal anchor.
+            bool clear=false;
+            while(!clear){
+                clear=true;
+                for(const auto& other:labels){
+                    const Vec p=other.points.front();
+                    const double right=p.x+textWidth(measure,other.text,other.fontSize,other.font,other.face);
+                    if(left<right+2&&left+width>p.x-2&&y<p.y+other.fontSize+2&&y>p.y-size-2){
+                        y=p.y-size-2;
+                        clear=false;
+                    }
+                }
+            }
+            mark.points={{left,y}};
+            labels.push_back(std::move(mark));
+        };
+        auto value=[](double number,bool sign=false){
+            std::ostringstream text;
+            text.imbue(std::locale::classic());
+            if(sign)text<<std::showpos;
+            text<<std::setprecision(10)<<(number==0?0.:number);
+            return text.str();
+        };
+        for(const auto& a:d.atoms){
+            const double size=std::max(6.,a.labelSize.value_or(d.style.fontSize)*.70)*a.drawingScale;
+            if(a.partialCharge.value) addLabel(a.id,a.p,size,molecularAnnotationTextRole,
+                a.partialCharge.color.empty()?partialChargeColor:a.partialCharge.color,
+                "q "+value(*a.partialCharge.value,true)+" e");
+            if(a.mullikenSpin&&!a.mullikenSpinColor.empty()){
+                addLabel(a.id,a.p,size,mullikenSpinTextRole,a.mullikenSpinColor,"spin "+value(*a.mullikenSpin,true));
+            }else if(a.mullikenSpin){
+                // Preserve the existing label format for older documents.
+                Primitive mark;mark.type=Primitive::Text;mark.owner=a.id;mark.textRole=mullikenSpinTextRole;
+                mark.fontSize=size;mark.color=a.color;
+                std::ostringstream text;
+                text.imbue(std::locale::classic());
+                const double rounded=std::round(*a.mullikenSpin*1000)/1000;
+                text<<std::showpos<<std::fixed<<std::setprecision(3)<<(rounded==0?0.:rounded);
+                mark.text=text.str();
+                double y=a.p.y-3;
+                for(const auto& label:labels)if(label.owner==a.id)y=std::min(y,label.points.front().y-2);
+                const double width=textWidth(measure,mark.text,mark.fontSize,mark.font,mark.face);
+                mark.points={{a.p.x-width/2,y-mark.fontSize}};
+                labels.push_back(std::move(mark));
+            }
+        }
+        auto anchorPosition=[&](int id){
+            if(const auto* atom=d.atom(id))return atom->p;
+            const auto* bond=d.bond(id);
+            return (d.atom(bond->a)->p+d.atom(bond->b)->p)*.5;
+        };
+        const double size=std::max(6.,d.style.fontSize*.70);
+        for(const auto& b:d.bonds)if(b.mayerOrder.value){
+            addLabel(b.id,anchorPosition(b.id),size*b.drawingScale,molecularAnnotationTextRole,
+                b.mayerOrder.color.empty()?mayerOrderColor:b.mayerOrder.color,"MBO "+value(*b.mayerOrder.value));
+        }
+        for(const auto& entry:d.measurements)if(d.validMeasurement(entry)){
+            const auto& anchors=entry.anchors;
+            const bool distance=entry.kind==MeasurementKind::Distance;
+            const Vec position=anchors.size()==3?anchorPosition(anchors[1]):
+                (anchorPosition(anchors[0])+anchorPosition(anchors[1]))*.5;
+            const char* fallback=distance?distanceLabelColor:angleLabelColor;
+            addLabel(anchors.front(),position,size,molecularAnnotationTextRole,
+                entry.label.color.empty()?fallback:entry.label.color,
+                value(*entry.label.value)+(distance?" Å":"°"));
+        }
     }
     // Clip against ink spans, not the empty space underneath oxidation superscripts.
     std::map<int,std::vector<Rect>> inkBoxes;
-    for(auto& t:labels)if(t.type==Primitive::Text&&!t.points.empty()&&t.textRole!=13&&t.textRole!=mullikenSpinTextRole){const auto& atom=*d.atom(t.owner);double m=atom.labelMargin.value_or(d.style.margin)*atom.drawingScale;inkBoxes[t.owner].push_back({t.points[0].x-m,t.points[0].y-m,textWidth(measure,t.text,t.fontSize,t.font,t.face)+2*m,t.fontSize+2*m});}
+    for(auto& t:labels)if(t.type==Primitive::Text&&!t.points.empty()&&t.textRole!=13&&!isMolecularAnnotation(t.textRole)){const auto& atom=*d.atom(t.owner);double m=atom.labelMargin.value_or(d.style.margin)*atom.drawingScale;inkBoxes[t.owner].push_back({t.points[0].x-m,t.points[0].y-m,textWidth(measure,t.text,t.fontSize,t.font,t.face)+2*m,t.fontSize+2*m});}
     auto clip=[&](int id,Vec from,Vec to){
         Vec v=to-from;double end=0;
         for(auto& r:inkBoxes[id]){

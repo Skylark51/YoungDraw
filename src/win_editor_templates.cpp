@@ -1,3 +1,4 @@
+#include "win_theme.h"
 #include "win_editor_clipboard.h"
 #include "win_editor_files.h"
 #include "win_editor_render.h"
@@ -110,7 +111,7 @@ void saveCurrentTemplate(){
     auto result=ui::form(win,L"템플릿 저장",{{L"템플릿 이름","새 템플릿"},{L"분류(폴더)","일반"}});
     if(!result)return;
     auto path=templateLocation(ui::wide((*result)[0]),ui::wide((*result)[1]));
-    if(fs::exists(path)&&MessageBoxW(win,L"같은 이름의 템플릿을 덮어쓰시겠습니까?",L"템플릿 저장",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+    if(fs::exists(path)&&appearance::messageBox(win,L"같은 이름의 템플릿을 덮어쓰시겠습니까?",L"템플릿 저장",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
     fs::create_directories(path.parent_path());
     writeFile(path.wstring(),toCdxml(fragment));
     status=L"사용자 템플릿을 저장했습니다. · 삽입 > 템플릿에서 관리할 수 있습니다.";
@@ -158,7 +159,7 @@ void library(const std::wstring& initialCategory){
         }
         if(result->action==ui::TemplateAction::Remove){
             if(card.path.empty())continue;
-            if(MessageBoxW(win,(L"다음 사용자 템플릿을 삭제하시겠습니까?\n"+card.name).c_str(),L"템플릿 삭제",MB_YESNO|MB_ICONWARNING)!=IDYES)continue;
+            if(appearance::messageBox(win,(L"다음 사용자 템플릿을 삭제하시겠습니까?\n"+card.name).c_str(),L"템플릿 삭제",MB_YESNO|MB_ICONWARNING)!=IDYES)continue;
             auto path=fs::path(card.path);fs::remove(path);
             auto favorites=loadFavorites();if(favorites.erase(templateKey(card)))saveFavorites(favorites);
             retargetTemplateTabs(path,std::nullopt);

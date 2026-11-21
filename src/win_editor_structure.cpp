@@ -12,7 +12,6 @@
 #include "cdxml.h"
 #include "win_dialogs.h"
 #include "win_dialog_style.h"
-#include "win_dialog_style.h"
 #include "win_scripts.h"
 #include "win_ui.h"
 #include <commdlg.h>
@@ -69,6 +68,160 @@ void editMullikenSpin(){
         spin=value;
     }
     if(updated){history.checkpoint(doc);doc=std::move(candidate);changed();}
+}
+
+namespace {
+enum class MolecularField { Charge, Spin, MayerOrder, Distance, Angle };
+struct MolecularInput {
+    MolecularField kind;
+    std::wstring name;
+    MolecularValue initial;
+    std::string defaultColor;
+    double minimum,maximum;
+};
+
+std::wstring molecularTargetName(const Document& drawing,int id){
+    if(const auto* atom=drawing.atom(id))
+        return ui::wide(symbol(atom->element))+L" #"+std::to_wstring(id);
+    const auto& bond=*drawing.bond(id);
+    return molecularTargetName(drawing,bond.a)+L"–"+molecularTargetName(drawing,bond.b);
+}
+
+std::wstring molecularTargetName(const Document& drawing,const std::vector<int>& anchors){
+    std::wstring text;
+    for(int id:anchors){
+        if(!text.empty())text+=L" / ";
+        text+=molecularTargetName(drawing,id);
+    }
+    return text;
+}
+
+auto findMeasurement(Document& drawing,MeasurementKind kind,const std::vector<int>& anchors){
+    return std::find_if(drawing.measurements.begin(),drawing.measurements.end(),[&](const auto& entry){
+        return entry.kind==kind&&(entry.anchors==anchors||
+            std::equal(entry.anchors.begin(),entry.anchors.end(),anchors.rbegin(),anchors.rend()));
+    });
+}
+
+void editMolecularTargets(const std::vector<int>& anchors){
+    std::vector<MolecularInput> inputs;
+    std::vector<int> distanceAnchors=anchors;
+    const int id=anchors.front();
+    if(anchors.size()==1){
+        if(const auto* atom=doc.atom(id)){
+            inputs.push_back({MolecularField::Charge,L"부분 전하 (e)",atom->partialCharge,partialChargeColor,-1000,1000});
+            inputs.push_back({MolecularField::Spin,L"Mulliken 스핀 밀도",
+                {atom->mullikenSpin,atom->mullikenSpinColor},
+                atom->mullikenSpin?atom->color.c_str():spinDensityColor,-1000,1000});
+        }else{
+            const auto& bond=*doc.bond(id);
+            inputs.push_back({MolecularField::MayerOrder,L"MBO (Mayer 결합 차수)",bond.mayerOrder,mayerOrderColor,-1000,1000});
+            distanceAnchors={bond.a,bond.b};
+        }
+    }
+    auto addMeasurement=[&](MolecularField field,MeasurementKind kind,const std::vector<int>& targets,
+        const wchar_t* title,const char* color,double maximum){
+        auto existing=findMeasurement(doc,kind,targets);
+        inputs.push_back({field,title,existing==doc.measurements.end()?MolecularValue{}:existing->label,color,0,maximum});
+    };
+    if(distanceAnchors.size()==2)
+        addMeasurement(MolecularField::Distance,MeasurementKind::Distance,distanceAnchors,L"거리 (Å)",distanceLabelColor,1e8);
+    if(anchors.size()==3||(anchors.size()==2&&doc.bond(anchors[0])&&doc.bond(anchors[1])))
+        addMeasurement(MolecularField::Angle,MeasurementKind::Angle,anchors,L"각도 (°)",angleLabelColor,360);
+
+    std::vector<ui::Field> fields;
+    for(const auto& input:inputs)
+        fields.push_back({input.name,input.initial.value?number(*input.initial.value):""});
+    for(const auto& input:inputs)
+        fields.push_back({input.name+L" 색",input.initial.color.empty()?input.defaultColor:input.initial.color,false,{},true});
+
+    const Document before=doc;
+    auto update=[&](const std::vector<std::string>& values)->std::wstring{
+        Document candidate=before;
+        for(size_t i=0;i<inputs.size();++i){
+            const auto& input=inputs[i];
+            const auto first=values[i].find_first_not_of(" \t\r\n");
+            MolecularValue value;
+            if(first!=std::string::npos){
+                const auto last=values[i].find_last_not_of(" \t\r\n");
+                value.value=values[i]==fields[i].value?input.initial.value:
+                    std::optional<double>(numeric(values[i].substr(first,last-first+1),input.minimum,input.maximum));
+                value.color=colorValue(values[i+inputs.size()]);
+            }
+            switch(input.kind){
+            case MolecularField::Charge:
+                candidate.atom(id)->partialCharge=std::move(value);
+                break;
+            case MolecularField::Spin:{
+                auto& atom=*candidate.atom(id);
+                atom.mullikenSpin=value.value;
+                if(!input.initial.color.empty()||value.value!=input.initial.value||values[i+inputs.size()]!=fields[i+inputs.size()].value)
+                    atom.mullikenSpinColor=std::move(value.color);
+                break;
+            }
+            case MolecularField::MayerOrder:
+                candidate.bond(id)->mayerOrder=std::move(value);
+                break;
+            case MolecularField::Distance:case MolecularField::Angle:{
+                const bool distance=input.kind==MolecularField::Distance;
+                const auto kind=distance?MeasurementKind::Distance:MeasurementKind::Angle;
+                const auto& targets=distance?distanceAnchors:anchors;
+                auto existing=findMeasurement(candidate,kind,targets);
+                if(!value.value){
+                    if(existing!=candidate.measurements.end())candidate.measurements.erase(existing);
+                }else if(existing==candidate.measurements.end())candidate.measurements.push_back({kind,targets,std::move(value)});
+                else existing->label=std::move(value);
+                break;
+            }
+            }
+        }
+        doc=std::move(candidate);
+        redraw();
+        return {};
+    };
+    const auto title=L"분자 주석 · "+molecularTargetName(before,anchors)+L" · 빈칸은 생략";
+    if(!ui::form(win,title,fields,update)){
+        doc=before;
+        redraw();
+        return;
+    }
+    if(toNative(doc)!=toNative(before)){
+        history.checkpoint(before);
+        if(!doc.showMolecularAnnotations)status=L"값을 저장했습니다. 보기 → 분자 주석 표시에서 확인할 수 있습니다.";
+        changed();
+    }
+}
+}
+
+void editMolecularAnnotations(){
+    std::vector<int> anchors;
+    for(int id:selection)if(doc.atom(id)||doc.bond(id))anchors.push_back(id);
+    if(anchors.size()==1||anchors.size()==2||(anchors.size()==3&&
+        std::all_of(anchors.begin(),anchors.end(),[](int id){return doc.atom(id)!=nullptr;}))){
+        editMolecularTargets(anchors);
+        return;
+    }
+
+    const auto scope=selection.empty()?doc:doc.subset(selection);
+    std::vector<ui::SearchItem> entries;
+    std::vector<std::vector<int>> targets;
+    auto add=[&](std::vector<int> ids,const wchar_t* type,const wchar_t* detail){
+        entries.push_back({std::wstring(type)+L" · "+molecularTargetName(scope,ids),detail});
+        targets.push_back(std::move(ids));
+    };
+    for(const auto& atom:scope.atoms)add({atom.id},L"원자",L"부분 전하 · Mulliken 스핀 밀도");
+    for(const auto& bond:scope.bonds)add({bond.id},L"결합",L"MBO · 거리");
+    for(const auto& entry:scope.measurements){
+        if(entry.kind==MeasurementKind::Distance)add(entry.anchors,L"거리",L"거리 값과 표시 색");
+        else add(entry.anchors,L"각도",L"각도 값과 표시 색");
+    }
+    if(entries.empty()){
+        status=L"분자 주석을 달 원자 또는 결합을 그리세요.";
+        redraw();
+        return;
+    }
+    if(auto chosen=ui::search(win,L"분자 주석 · 대상 선택",entries,L"편집",true))
+        editMolecularTargets(targets[*chosen]);
 }
 
 void abbreviateGroups(){

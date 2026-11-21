@@ -33,10 +33,12 @@ inline constexpr int exportTiffCommand = 257;
 inline constexpr int rotateToolCommand = 258;
 inline constexpr int arrowColorCommand = 259;
 inline constexpr int ligandSpatialCommand = 260;
+inline constexpr int molecularAnnotationsCommand = 261;
+inline constexpr int showMolecularAnnotationsCommand = 262;
 inline constexpr int exportPngCommand = 247;
 inline constexpr int copyPngCommand = 248;
 
-inline constexpr bool isEditorCommand(int id){return (id>=100&&id<=ligandSpatialCommand)||(id>=301&&id<=418);}
+inline constexpr bool isEditorCommand(int id){return (id>=100&&id<=showMolecularAnnotationsCommand)||(id>=301&&id<=418);}
 void command(int id);
 
 } // namespace yd::editor

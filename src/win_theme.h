@@ -1,7 +1,10 @@
 #pragma once
 #include <windows.h>
+#include <commdlg.h>
 #include <gdiplus.h>
 #include <functional>
+
+struct IFileDialog;
 
 namespace appearance {
 struct Settings { int theme=2,pattern=1,intensity=1; };
@@ -19,5 +22,10 @@ void background(Gdiplus::Graphics& g,Gdiplus::RectF box);
 Gdiplus::Color documentColor(Gdiplus::Color color,bool backing=false);
 void picker(HWND parent,const std::function<void()>& refresh);
 void titlebar(HWND hwnd);
+void dialog(HWND hwnd);
 void nativeControl(HWND hwnd);
+int messageBox(HWND owner,const wchar_t* text,const wchar_t* caption,UINT type);
+BOOL openFileDialog(OPENFILENAMEW& options);
+BOOL saveFileDialog(OPENFILENAMEW& options);
+HRESULT showFileDialog(HWND owner,IFileDialog& dialog);
 }

@@ -3,6 +3,7 @@
 #include "win_ui.h"
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <shobjidl_core.h>
 #include <windowsx.h>
 #include <algorithm>
 #include <array>
@@ -348,17 +349,31 @@ void themePopup(HMENU menu){
     }
 }
 struct NativeColors {ui::DialogColors colors;int theme=settings().theme;};
-LRESULT CALLBACK themedWindow(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR){
+constexpr UINT_PTR windowThemeId=991;
+
+LRESULT CALLBACK themedWindow(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR paintClient){
+    if(msg==WM_NCDESTROY){
+        RemoveWindowSubclass(h,themedWindow,id);
+        delete static_cast<NativeColors*>(RemovePropW(h,L"YoungDraw.NativeColors"));
+        return DefSubclassProc(h,msg,wp,lp);
+    }
     auto* state=static_cast<NativeColors*>(GetPropW(h,L"YoungDraw.NativeColors"));
-    if(!state||state->theme!=settings().theme){delete state;state=new NativeColors;SetPropW(h,L"YoungDraw.NativeColors",state);}
+    if(!state||state->theme!=settings().theme){
+        auto next=std::make_unique<NativeColors>();
+        if(!SetPropW(h,L"YoungDraw.NativeColors",next.get()))return DefSubclassProc(h,msg,wp,lp);
+        delete state;
+        state=next.release();
+    }
     auto& colors=state->colors;
     if(msg==WM_INITMENUPOPUP)themePopup(reinterpret_cast<HMENU>(wp));
     if(msg==WM_MEASUREITEM){auto* item=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(item->CtlType==ODT_MENU&&menuData.count(item->itemData)){
         HDC dc=GetDC(h);auto old=SelectObject(dc,GetStockObject(DEFAULT_GUI_FONT));SIZE size{};auto label=reinterpret_cast<const wchar_t*>(item->itemData);GetTextExtentPoint32W(dc,label,int(wcslen(label)),&size);SelectObject(dc,old);ReleaseDC(h,dc);item->itemWidth=size.cx+56;item->itemHeight=28;return TRUE;
     }}
     if(msg==WM_DRAWITEM){auto* item=reinterpret_cast<DRAWITEMSTRUCT*>(lp);
-        wchar_t ownerClass[80]{};GetClassNameW(h,ownerClass,80);
-        if(!wcscmp(ownerClass,L"YoungDrawSearch")&&(item->CtlType==ODT_BUTTON||item->CtlType==ODT_LISTBOX)){colors.draw(*item,item->CtlID==IDOK);return TRUE;}
+        if(paintClient&&(item->CtlType==ODT_BUTTON||item->CtlType==ODT_LISTBOX)){
+            colors.draw(*item,item->CtlID==IDOK);
+            return TRUE;
+        }
 
         if(item->CtlType==ODT_MENU&&menuData.count(item->itemData)){
             const auto& p=palette();bool selected=item->itemState&ODS_SELECTED;SetDCBrushColor(item->hDC,(selected?p.hover:p.panel).ToCOLORREF());FillRect(item->hDC,&item->rcItem,(HBRUSH)GetStockObject(DC_BRUSH));
@@ -372,25 +387,130 @@ LRESULT CALLBACK themedWindow(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DW
         }
         if(item->CtlType==ODT_TAB&&GetPropW(item->hwndItem,L"YoungDraw.NativeTab")){wchar_t label[128]{};TCITEMW tab{};tab.mask=TCIF_TEXT;tab.pszText=label;tab.cchTextMax=128;TabCtrl_GetItem(item->hwndItem,item->itemID,&tab);SetDCBrushColor(item->hDC,((item->itemState&ODS_SELECTED)?palette().raised:palette().panel).ToCOLORREF());FillRect(item->hDC,&item->rcItem,(HBRUSH)GetStockObject(DC_BRUSH));SetBkMode(item->hDC,TRANSPARENT);SetTextColor(item->hDC,palette().text.ToCOLORREF());auto r=item->rcItem;DrawTextW(item->hDC,label,-1,&r,DT_SINGLELINE|DT_VCENTER|DT_CENTER);return TRUE;}
     }
-    wchar_t cls[80]{};GetClassNameW(h,cls,80);
-    if(!wcscmp(cls,L"YoungDrawSearch")){
-        if(msg==WM_ERASEBKGND||msg==WM_PRINTCLIENT){RECT r{};GetClientRect(h,&r);FillRect((HDC)wp,&r,colors.panel);return TRUE;}
-        if(msg==WM_CTLCOLORSTATIC||msg==WM_CTLCOLOREDIT||msg==WM_CTLCOLORLISTBOX||msg==WM_CTLCOLORBTN)return colors.control(msg,(HDC)wp);
+    if(paintClient){
+        if(msg==WM_ERASEBKGND||msg==WM_PRINTCLIENT){
+            RECT r{};GetClientRect(h,&r);
+            FillRect(reinterpret_cast<HDC>(wp),&r,colors.panel);
+            return TRUE;
+        }
+        if(msg==WM_CTLCOLORDLG)return reinterpret_cast<LRESULT>(colors.panel);
+        if(msg==WM_CTLCOLORSTATIC||msg==WM_CTLCOLOREDIT||msg==WM_CTLCOLORLISTBOX||msg==WM_CTLCOLORBTN)
+            return colors.control(msg,reinterpret_cast<HDC>(wp));
     }
-    if(msg==WM_NOTIFY){auto* notice=reinterpret_cast<NMHDR*>(lp);wchar_t kind[32]{};GetClassNameW(notice->hwndFrom,kind,32);
-        if(notice->code==NM_CUSTOMDRAW&&!_wcsicmp(kind,L"Button")&&((GetWindowLongPtrW(notice->hwndFrom,GWL_STYLE)&BS_TYPEMASK)==BS_PUSHBUTTON||(GetWindowLongPtrW(notice->hwndFrom,GWL_STYLE)&BS_TYPEMASK)==BS_DEFPUSHBUTTON)){
-            auto* custom=reinterpret_cast<NMCUSTOMDRAW*>(lp);DRAWITEMSTRUCT draw{};draw.CtlType=ODT_BUTTON;draw.hwndItem=notice->hwndFrom;draw.hDC=custom->hdc;draw.rcItem=custom->rc;draw.itemState=custom->uItemState;colors.draw(draw,GetDlgCtrlID(notice->hwndFrom)==IDOK);return CDRF_SKIPDEFAULT;
+    if(msg==WM_NOTIFY){
+        auto* notice=reinterpret_cast<NMHDR*>(lp);
+        if(notice->code==TTN_SHOW)nativeControl(notice->hwndFrom);
+        if(notice->code==NM_CUSTOMDRAW){
+            wchar_t kind[32]{};GetClassNameW(notice->hwndFrom,kind,32);
+            const auto type=GetWindowLongPtrW(notice->hwndFrom,GWL_STYLE)&BS_TYPEMASK;
+            auto* custom=reinterpret_cast<NMCUSTOMDRAW*>(lp);
+            if(!_wcsicmp(kind,L"Button")&&(type==BS_PUSHBUTTON||type==BS_DEFPUSHBUTTON)&&custom->dwDrawStage==CDDS_PREPAINT){
+                DRAWITEMSTRUCT draw{};
+                draw.CtlType=ODT_BUTTON;draw.hwndItem=notice->hwndFrom;
+                draw.hDC=custom->hdc;draw.rcItem=custom->rc;draw.itemState=custom->uItemState;
+                const auto preferred=SendMessageW(h,DM_GETDEFID,0,0);
+                const int primary=HIWORD(preferred)==DC_HASDEFID?LOWORD(preferred):IDOK;
+                colors.draw(draw,GetDlgCtrlID(notice->hwndFrom)==primary);
+                return CDRF_SKIPDEFAULT;
+            }
         }
     }
-    if(msg==WM_NCDESTROY){RemoveWindowSubclass(h,themedWindow,id);RemovePropW(h,L"YoungDraw.NativeColors");delete state;}
     return DefSubclassProc(h,msg,wp,lp);
 }
+
+bool isDark(Color color){
+    return color.GetR()*299+color.GetG()*587+color.GetB()*114<128000;
+}
+
+void styleWindow(HWND hwnd,bool paintClient){
+    SetWindowSubclass(hwnd,themedWindow,windowThemeId,paintClient);
+    const auto& p=palette();
+    const BOOL dark=isDark(p.chrome);
+    const COLORREF border=p.edge.ToCOLORREF(),caption=p.chrome.ToCOLORREF(),text=p.text.ToCOLORREF();
+    DwmSetWindowAttribute(hwnd,DWMWA_USE_IMMERSIVE_DARK_MODE,&dark,sizeof(dark));
+    DwmSetWindowAttribute(hwnd,DWMWA_BORDER_COLOR,&border,sizeof(border));
+    DwmSetWindowAttribute(hwnd,DWMWA_CAPTION_COLOR,&caption,sizeof(caption));
+    DwmSetWindowAttribute(hwnd,DWMWA_TEXT_COLOR,&text,sizeof(text));
+    EnumChildWindows(hwnd,[](HWND child,LPARAM)->BOOL{nativeControl(child);return TRUE;},0);
+}
+
+bool isSystemDialog(HWND hwnd){
+    wchar_t type[16]{};
+    GetClassNameW(hwnd,type,int(std::size(type)));
+    return wcscmp(type,L"#32770")==0;
+}
+
+BOOL CALLBACK styleShellControl(HWND child,LPARAM){
+    wchar_t type[64]{};
+    GetClassNameW(child,type,int(std::size(type)));
+    if(isSystemDialog(child))SetWindowSubclass(child,themedWindow,windowThemeId,TRUE);
+    const auto& p=palette();
+    if(!_wcsicmp(type,WC_LISTVIEWW)){
+        ListView_SetBkColor(child,p.raised.ToCOLORREF());
+        ListView_SetTextBkColor(child,p.raised.ToCOLORREF());
+        ListView_SetTextColor(child,p.text.ToCOLORREF());
+    }else if(!_wcsicmp(type,WC_TREEVIEWW)){
+        TreeView_SetBkColor(child,p.raised.ToCOLORREF());
+        TreeView_SetTextColor(child,p.text.ToCOLORREF());
+    }
+    return TRUE;
+}
+
+void styleNativeDialog(HWND root){
+    if(!isSystemDialog(root))return;
+    if(!GetWindowSubclass(root,themedWindow,windowThemeId,nullptr))styleWindow(root,true);
+    EnumChildWindows(root,styleShellControl,0);
+}
+
+// Keep Windows' file navigation, validation and keyboard behavior. Some shell
+// dialogs build their controls after initialization, just before activation.
+class NativeDialogTheme {
+    static LRESULT CALLBACK observe(int code,WPARAM wp,LPARAM lp){
+        if(code>=0){
+            const auto& event=*reinterpret_cast<const CWPRETSTRUCT*>(lp);
+            if((event.message==WM_INITDIALOG||event.message==WM_SHOWWINDOW)&&isSystemDialog(event.hwnd))
+                styleNativeDialog(GetAncestor(event.hwnd,GA_ROOT));
+        }
+        return CallNextHookEx(nullptr,code,wp,lp);
+    }
+    static LRESULT CALLBACK activate(int code,WPARAM wp,LPARAM lp){
+        if(code==HCBT_ACTIVATE)styleNativeDialog(reinterpret_cast<HWND>(wp));
+        return CallNextHookEx(nullptr,code,wp,lp);
+    }
+    HHOOK initHook=SetWindowsHookExW(WH_CALLWNDPROCRET,observe,nullptr,GetCurrentThreadId());
+    HHOOK activationHook=SetWindowsHookExW(WH_CBT,activate,nullptr,GetCurrentThreadId());
+public:
+    ~NativeDialogTheme(){
+        if(activationHook)UnhookWindowsHookEx(activationHook);
+        if(initHook)UnhookWindowsHookEx(initHook);
+    }
+};
 }
 void nativeControl(HWND h){
-    if(!IsWindow(h))return;wchar_t cls[80]{};GetClassNameW(h,cls,80);
-    const auto panel=palette().panel;const bool dark=(panel.GetR()+panel.GetG()+panel.GetB())<384;
-    if(!_wcsicmp(cls,L"Edit")||!_wcsicmp(cls,L"ListBox")||!_wcsicmp(cls,L"ComboBox")||!_wcsicmp(cls,WC_LISTVIEWW))SetWindowTheme(h,dark?L"DarkMode_Explorer":L"Explorer",nullptr);
-    if(!_wcsicmp(cls,WC_TABCONTROLW)&&!(GetWindowLongPtrW(h,GWL_STYLE)&TCS_OWNERDRAWFIXED)){SetPropW(h,L"YoungDraw.NativeTab",(HANDLE)1);SetWindowTheme(h,L"",L"");SetWindowLongPtrW(h,GWL_STYLE,GetWindowLongPtrW(h,GWL_STYLE)|TCS_OWNERDRAWFIXED);}
+    if(!IsWindow(h))return;
+    wchar_t cls[80]{};
+    GetClassNameW(h,cls,int(std::size(cls)));
+    const auto& p=palette();
+    if(!_wcsicmp(cls,TOOLTIPS_CLASSW)){
+        const auto theme=reinterpret_cast<HANDLE>(INT_PTR(settings().theme+1));
+        constexpr auto tooltipTheme=L"YoungDraw.TooltipTheme";
+        if(GetPropW(h,tooltipTheme)==theme)return;
+        SetPropW(h,tooltipTheme,theme);
+        SetWindowTheme(h,L"",L"");
+        SendMessageW(h,TTM_SETTIPBKCOLOR,p.raised.ToCOLORREF(),0);
+        SendMessageW(h,TTM_SETTIPTEXTCOLOR,p.text.ToCOLORREF(),0);
+    }else if(!_wcsicmp(cls,PROGRESS_CLASSW)){
+        SetWindowTheme(h,L"",L"");
+        SendMessageW(h,PBM_SETBKCOLOR,0,p.raised.ToCOLORREF());
+        SendMessageW(h,PBM_SETBARCOLOR,0,p.accent.ToCOLORREF());
+    }else if(!_wcsicmp(cls,L"Edit")||!_wcsicmp(cls,L"ListBox")||!_wcsicmp(cls,L"ComboLBox")||
+        !_wcsicmp(cls,L"ComboBox")||!_wcsicmp(cls,WC_LISTVIEWW)||!_wcsicmp(cls,WC_TREEVIEWW)){
+        SetWindowTheme(h,isDark(p.panel)?L"DarkMode_Explorer":L"Explorer",nullptr);
+    }else if(!_wcsicmp(cls,WC_TABCONTROLW)&&!(GetWindowLongPtrW(h,GWL_STYLE)&TCS_OWNERDRAWFIXED)){
+        SetPropW(h,L"YoungDraw.NativeTab",(HANDLE)1);
+        SetWindowTheme(h,L"",L"");
+        SetWindowLongPtrW(h,GWL_STYLE,GetWindowLongPtrW(h,GWL_STYLE)|TCS_OWNERDRAWFIXED);
+    }
 }
 void titlebar(HWND hwnd){
     auto instance=GetModuleHandleW(nullptr);
@@ -399,12 +519,27 @@ void titlebar(HWND hwnd){
         GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_SHARED);
     if(largeIcon)SendMessageW(hwnd,WM_SETICON,ICON_BIG,reinterpret_cast<LPARAM>(largeIcon));
     if(smallIcon)SendMessageW(hwnd,WM_SETICON,ICON_SMALL,reinterpret_cast<LPARAM>(smallIcon));
-    SetWindowSubclass(hwnd,themedWindow,991,0);
-    EnumChildWindows(hwnd,[](HWND child,LPARAM)->BOOL{nativeControl(child);return TRUE;},0);
-    BOOL dark=current.theme!=2&&current.theme!=6;
-    DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));
-    COLORREF caption=palette().chrome.ToCOLORREF();
-    DwmSetWindowAttribute(hwnd,35,&caption,sizeof(caption));
+    styleWindow(hwnd,false);
+}
+void dialog(HWND hwnd){
+    titlebar(hwnd);
+    SetWindowSubclass(hwnd,themedWindow,windowThemeId,TRUE);
+}
+int messageBox(HWND owner,const wchar_t* text,const wchar_t* caption,UINT type){
+    NativeDialogTheme theme;
+    return MessageBoxW(owner,text,caption,type);
+}
+BOOL openFileDialog(OPENFILENAMEW& options){
+    NativeDialogTheme theme;
+    return GetOpenFileNameW(&options);
+}
+BOOL saveFileDialog(OPENFILENAMEW& options){
+    NativeDialogTheme theme;
+    return GetSaveFileNameW(&options);
+}
+HRESULT showFileDialog(HWND owner,IFileDialog& dialog){
+    NativeDialogTheme theme;
+    return dialog.Show(owner);
 }
 void picker(HWND parent,const std::function<void()>& refresh){Picker p;p.parent=parent;p.before=current;p.refresh=refresh;WNDCLASSW wc{};wc.lpfnWndProc=pickerProc;wc.hInstance=GetModuleHandleW(nullptr);wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.lpszClassName=L"YoungDrawAppearance";RegisterClassW(&wc);RECT r{0,0,916,700};AdjustWindowRectEx(&r,WS_CAPTION|WS_SYSMENU,FALSE,0);RECT parentRect{};GetWindowRect(parent,&parentRect);int width=r.right-r.left,height=r.bottom-r.top;HMONITOR monitor=MonitorFromWindow(parent,MONITOR_DEFAULTTONEAREST);MONITORINFO info{sizeof(info)};GetMonitorInfoW(monitor,&info);int x=std::clamp(int(parentRect.left+(parentRect.right-parentRect.left-width)/2),int(info.rcWork.left),std::max(int(info.rcWork.left),int(info.rcWork.right)-width));int y=std::clamp(int(parentRect.top+(parentRect.bottom-parentRect.top-height)/2),int(info.rcWork.top),std::max(int(info.rcWork.top),int(info.rcWork.bottom)-height));HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"YoungDraw · 배경과 테마",WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN,x,y,width,height,parent,nullptr,wc.hInstance,&p);if(!hwnd)return;titlebar(hwnd);EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);SetFocus(hwnd);MSG msg{};bool quit=false;while(!p.done){BOOL result=GetMessageW(&msg,nullptr,0,0);if(result<=0){quit=result==0;break;}TranslateMessage(&msg);DispatchMessageW(&msg);}if(p.accepted)save();else current=p.before;resetCache();EnableWindow(parent,TRUE);DestroyWindow(hwnd);SetActiveWindow(parent);refresh();if(quit)PostQuitMessage(int(msg.wParam));}
 }

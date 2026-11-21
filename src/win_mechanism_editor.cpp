@@ -149,7 +149,7 @@ struct Editor {
         if(callbacks.chooseStructure)return callbacks.chooseStructure(window);
         wchar_t path[32768]{};OPENFILENAMEW file{};file.lStructSize=sizeof(file);file.hwndOwner=window;file.lpstrFile=path;file.nMaxFile=32768;
         file.lpstrFilter=L"구조 및 이미지\0*.cdxml;*.ydraw;*.png;*.jpg;*.jpeg;*.gif\0\0";file.Flags=OFN_FILEMUSTEXIST|OFN_NOCHANGEDIR;
-        if(!GetOpenFileNameW(&file))return {};
+        if(!appearance::openFileDialog(file))return {};
         auto bytes=readFile(path);return imageMime(bytes).empty()?fromCdxml(bytes):imageDocument(bytes);
     }
     void structure(int action){

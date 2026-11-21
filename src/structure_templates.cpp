@@ -110,7 +110,7 @@ void matchTemplate(const Document& d,const std::vector<int>& candidates,const Do
             const auto& neighbors=actual.at(id);
             if(atom.element!=reference.element||atom.charge!=reference.charge||atom.radical||
                atom.isotope||!atom.label.empty()||!atom.labelRuns.empty()||atom.protect||
-               (substituent&&atom.mullikenSpin)||neighbors.size()!=edges.size()||
+               (substituent&&(atom.mullikenSpin||atom.partialCharge.value))||neighbors.size()!=edges.size()||
                d.hydrogens(id)!=pattern.hydrogens(reference.id)||
                std::find(mapped.begin(),mapped.end(),id)!=mapped.end())return;
             for(size_t i=0;i<mapped.size();++i){

@@ -121,7 +121,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  loadFavorites();
  constexpr int structureHeaderWidth=418;
  const int toolbarWidth=isolatedStructureEditing?ww-structureHeaderWidth:ww;
- topLimit=std::max(0,(isolatedStructureEditing?988:1260)+int(favorites.size())*48-toolbarWidth);
+ topLimit=std::max(0,(isolatedStructureEditing?1036:1308)+int(favorites.size())*48-toolbarWidth);
  topOffset=std::min(topOffset,topLimit);
  const auto toolbarClip=RectF(0,0,float(toolbarWidth),63);
  auto toolbarState=g.Save();g.SetClip(toolbarClip);g.TranslateTransform(float(-topOffset),0);
@@ -134,18 +134,18 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
          Color tint=active?palette.onAccent:(id==101||id==102)?palette.accent:ink;
          icon(g,id,{box.X+9,box.Y,26,26},tint);
          std::wstring label=helpText(id);auto cut=label.find_first_of(L"\n ·([");if(cut!=std::wstring::npos)label.resize(cut);
-         switch(id){case 100:label=L"새 문서";break;case 104:label=L"되돌림";break;case 105:label=L"재실행";break;case 107:label=L"맞춤";break;case 125:label=L"정렬";break;case 155:label=L"원자 색";break;case arrowColorCommand:label=L"화살표 색";break;case rotateToolCommand:label=L"직접 회전";break;case 156:label=L"글자 색";break;case 160:label=L"좌우 반전";break;case 161:label=L"상하 반전";break;case 162:label=L"좌회전";break;case 163:label=L"우회전";break;case 164:label=L"각도";break;case 185:label=L"프로젝트";break;case bondAnimationCommand:label=L"움짤";break;case copyPngCommand:label=L"그림복사";break;}
+         switch(id){case 100:label=L"새 문서";break;case 104:label=L"되돌림";break;case 105:label=L"재실행";break;case 107:label=L"맞춤";break;case 125:label=L"정렬";break;case molecularAnnotationsCommand:label=L"주석";break;case 155:label=L"원자 색";break;case arrowColorCommand:label=L"화살표 색";break;case rotateToolCommand:label=L"직접 회전";break;case 156:label=L"글자 색";break;case 160:label=L"좌우 반전";break;case 161:label=L"상하 반전";break;case 162:label=L"좌회전";break;case 163:label=L"우회전";break;case 164:label=L"각도";break;case 185:label=L"프로젝트";break;case bondAnimationCommand:label=L"움짤";break;case copyPngCommand:label=L"그림복사";break;}
          ui::drawLabel(g,label,{box.X-2,box.Y+28,48,15},9.5f,active?palette.onAccent:palette.text,false,true);toolbarX+=48;
      }
  };
  auto separator=[&](){rule(g,toolbarX+2,22,toolbarX+2,58,border);toolbarX+=16;};
- if(isolatedStructureEditing)group({102,arrowColorCommand,155,156});
+ if(isolatedStructureEditing)group({102,molecularAnnotationsCommand,arrowColorCommand,155,156});
  else {
      group({100,101,102});
      separator();
      group({185});
      separator();group({104,105});separator();
-     group({107,125,arrowColorCommand,155,156});
+     group({107,125,molecularAnnotationsCommand,arrowColorCommand,155,156});
  }
  separator();group({rotateToolCommand,162,163,164,160,161});
  if(isolatedStructureEditing){

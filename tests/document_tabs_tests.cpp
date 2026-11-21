@@ -196,6 +196,75 @@ static void CALLBACK driveChemistryMenu(HWND parent,UINT,UINT_PTR timer,DWORD){
         PostMessageW(dialog,WM_COMMAND,IDOK,0);
     }
 }
+static std::vector<std::wstring> molecularInputs;
+static bool molecularFormOpened=false;
+static bool cancelMolecularForm=false;
+static void CALLBACK driveMolecularForm(HWND owner,UINT,UINT_PTR timer,DWORD){
+    const auto dialog=GetLastActivePopup(owner);
+    wchar_t title[160]{};
+    GetWindowTextW(dialog,title,int(std::size(title)));
+    if(std::wstring(title).find(L"분자 주석 · ")!=0)return;
+    KillTimer(owner,timer);
+    molecularFormOpened=true;
+    for(size_t i=0;i<molecularInputs.size();++i)
+        SetDlgItemTextW(dialog,100+int(i),molecularInputs[i].c_str());
+    const bool applicable=IsWindowEnabled(GetDlgItem(dialog,IDOK));
+    molecularFormOpened=molecularFormOpened&&applicable;
+    PostMessageW(dialog,WM_COMMAND,applicable&&!cancelMolecularForm?IDOK:IDCANCEL,0);
+}
+
+static void checkMolecularAnnotations(HWND hwnd){
+    doc=Document{};
+    history.clear();
+    const int a=doc.addAtom({0,0},27),b=doc.addAtom({42,0},8),c=doc.addAtom({68,32},6);
+    const int ab=doc.addBond(a,b),bc=doc.addBond(b,c);
+    auto edit=[&](std::vector<int> anchors,std::vector<std::wstring> values,bool cancel=false){
+        selection=std::move(anchors);
+        molecularInputs=std::move(values);
+        cancelMolecularForm=cancel;
+        molecularFormOpened=false;
+        SetTimer(hwnd,978,10,driveMolecularForm);
+        SendMessageW(hwnd,WM_COMMAND,molecularAnnotationsCommand,0);
+        KillTimer(hwnd,978);
+        check(molecularFormOpened,"molecular annotation command opens its contextual form");
+    };
+    edit({a},{L"-0.21",L"0.314",L"#126aaa",L"#a7336e"});
+    check(doc.atom(a)->partialCharge.value==-.21&&doc.atom(a)->mullikenSpin==.314&&
+          !doc.atom(b)->partialCharge.value&&!doc.atom(b)->mullikenSpin,"charge and spin are optional per atom");
+    edit({ab},{L"0.75",L"1.43"});
+    check(doc.bond(ab)->mayerOrder.value==.75&&doc.measurements.size()==1,"bond order and bond length can be entered together");
+    edit({ab,bc},{L"2.67",L"121.4"});
+    edit({a,b,c},{L"116.5"});
+    const auto drawing=toNative(doc);
+    edit({c,b,a},{L"30"},true);
+    check(toNative(doc)==drawing,"cancelling a preview restores prior measurements");
+    edit({c,b,a},{L""});
+    check(doc.measurements.size()==3&&history.undo(doc)&&toNative(doc)==drawing,
+          "clearing reversed angle targets removes the same annotation and is undoable");
+    redraw();
+    const auto svg=toSvg(scene());
+    check(svg.find("MBO 0.75")!=std::string::npos&&svg.find("#126aaa")!=std::string::npos&&
+          svg.find("121.4°")!=std::string::npos&&svg.find("2.67 Å")!=std::string::npos,
+          "SVG includes colored numerical annotation labels and units");
+    const auto xml=toCdxml(doc);
+    check(xml.find("MBO 0.75")!=std::string::npos&&toNative(fromCdxml(xml))==drawing,
+          "CDXML contains visible labels and preserves editable annotation data");
+    SendMessageW(hwnd,WM_COMMAND,showMolecularAnnotationsCommand,0);
+    check(toSvg(scene()).find("MBO 0.75")==std::string::npos&&doc.bond(ab)->mayerOrder.value==.75,
+          "visibility toggle keeps annotation data");
+    SendMessageW(hwnd,WM_COMMAND,showMolecularAnnotationsCommand,0);
+    auto fragment=doc.subset({a,b,c});
+    Document copy;
+    copy.addAtom({-60,0});
+    copy.append(fragment,{150,0});
+    check(copy.measurements.size()==4&&copy.measurements.front().anchors.front()!=a,
+          "copy remaps all measurement anchors");
+    copy.eraseBond(copy.bonds.front().id);
+    check(copy.measurements.size()==2,"deleting a bond removes measurements that reference that bond");
+    selection.clear();
+    history.clear();
+}
+
 static int mechanismGridAction=0;
 static int mechanismLayoutChoice=0;
 static bool mechanismDraftHidden=false;
@@ -1309,6 +1378,7 @@ int main(int argc,char** argv){
         }
 
         carbonRadicalChecks(hwnd);
+        checkMolecularAnnotations(hwnd);
 
         {
             doc={};history.clear();int a=doc.addAtom({20,20},27),b=doc.addAtom({70,20},8);doc.atom(a)->label="CoIII";selection={a};hoverAtom=hoverBond=0;tool=Select;

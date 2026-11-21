@@ -90,17 +90,18 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIA
      isolatedStructureResult=argv[3];
      if(argc==5){structureHost=reinterpret_cast<HWND>(_wcstoui64(argv[4],nullptr,10));if(!IsWindow(structureHost))return 1;}
  }
+ appearance::load();
  const bool powerPointImport=argc==2&&std::wstring(argv[1])==L"--open-powerpoint-chemdraw";
  std::vector<std::pair<Document,std::wstring>> startupDocuments;
  if(powerPointImport){
      try{startupDocuments.emplace_back(office::fromChemDrawEmbedding(readPowerPointEmbedding()),L"");}
      catch(const std::exception& e){
-         MessageBoxW(nullptr,ui::wide(e.what()).c_str(),L"PowerPoint · YoungDraw",MB_OK|MB_ICONWARNING);
+         appearance::messageBox(nullptr,ui::wide(e.what()).c_str(),L"PowerPoint · YoungDraw",MB_OK|MB_ICONWARNING);
          LocalFree(argv);GdiplusShutdown(token);OleUninitialize();return 1;
      }
  }
  StartupSplash splash(instance,!embedding && !isolatedStructureEditing && show!=SW_HIDE && show!=SW_SHOWMINIMIZED && show!=SW_SHOWMINNOACTIVE && show!=SW_MINIMIZE);
- if(isolatedStructureEditing){try{startupDocuments.push_back({fromNative(readFile(argv[2])),argv[2]});}catch(const std::exception& e){MessageBoxW(nullptr,ui::wide(e.what()).c_str(),L"구조 편집",MB_OK|MB_ICONWARNING);LocalFree(argv);return 1;}}
+ if(isolatedStructureEditing){try{startupDocuments.push_back({fromNative(readFile(argv[2])),argv[2]});}catch(const std::exception& e){appearance::messageBox(nullptr,ui::wide(e.what()).c_str(),L"구조 편집",MB_OK|MB_ICONWARNING);LocalFree(argv);return 1;}}
  else if(!embedding&&!powerPointImport)for(int i=1;i<argc;i++){try{startupDocuments.push_back({fromCdxml(readFile(argv[i])),argv[i]});}catch(...){}}
  if(!startupDocuments.empty()){doc=std::move(startupDocuments[0].first);filePath=startupDocuments[0].second;Document beforeUpgrade=doc;if(!isolatedStructureEditing)normalizeChemicalLabels(doc);dirty=!isolatedStructureEditing&&(upgradeBondGeometry(doc)||toNative(doc)!=toNative(beforeUpgrade));if(dirty)history.checkpoint(beforeUpgrade);tool=Select;}
  if(powerPointImport){dirty=true;status=L"PowerPoint의 ChemDraw 개체를 가져왔습니다. Ctrl+S로 CDXML을 저장할 수 있습니다.";}
@@ -116,7 +117,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){SetProcessDPIA
      if(startup.dwFlags&STARTF_USESIZE){width=int(startup.dwXSize);height=int(startup.dwYSize);}
  }
  if(structureHost){RECT r{};GetClientRect(structureHost,&r);x=0;y=0;width=r.right;height=std::max(1L,r.bottom-42);}
- LocalFree(argv);WNDCLASSW wc{};wc.style=CS_DBLCLKS;wc.lpfnWndProc=proc;wc.hInstance=instance;wc.lpszClassName=L"YoungDrawWindow";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(101));RegisterClassW(&wc);HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"YoungDraw",(structureHost?WS_CHILD:WS_OVERLAPPEDWINDOW)|WS_CLIPCHILDREN,x,y,width,height,structureHost,nullptr,instance,nullptr);if(!hwnd)return 1;SendMessageW(hwnd,WM_SETICON,ICON_SMALL,reinterpret_cast<LPARAM>(LoadImageW(instance,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_SHARED)));fit();for(size_t i=1;i<startupDocuments.size();i++)newDocumentTab(std::move(startupDocuments[i].first),startupDocuments[i].second);if(!isolatedStructureEditing&&FAILED(office::start({hwnd,[](const Document& d){storeDocumentTab();for(auto& tab:documents)tab.office=false;officeDocument=false;newDocumentTab(d,L"",true);},[](){return officeCurrentDocument();},officePicture},embedding)))MessageBoxW(hwnd,L"Office 편집 개체를 등록하지 못했습니다.",L"YoungDraw",MB_OK|MB_ICONWARNING);if(structureHost)ShowWindow(hwnd,SW_SHOW);else if(!embedding)splash.finish(hwnd,show);if(!embedding&&!isolatedStructureEditing)startRecovery();fit();UpdateWindow(hwnd);ACCEL commandSearch{FVIRTKEY|FCONTROL|FSHIFT,'F',230};
+ LocalFree(argv);WNDCLASSW wc{};wc.style=CS_DBLCLKS;wc.lpfnWndProc=proc;wc.hInstance=instance;wc.lpszClassName=L"YoungDrawWindow";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(101));RegisterClassW(&wc);HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"YoungDraw",(structureHost?WS_CHILD:WS_OVERLAPPEDWINDOW)|WS_CLIPCHILDREN,x,y,width,height,structureHost,nullptr,instance,nullptr);if(!hwnd)return 1;SendMessageW(hwnd,WM_SETICON,ICON_SMALL,reinterpret_cast<LPARAM>(LoadImageW(instance,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_SHARED)));fit();for(size_t i=1;i<startupDocuments.size();i++)newDocumentTab(std::move(startupDocuments[i].first),startupDocuments[i].second);if(!isolatedStructureEditing&&FAILED(office::start({hwnd,[](const Document& d){storeDocumentTab();for(auto& tab:documents)tab.office=false;officeDocument=false;newDocumentTab(d,L"",true);},[](){return officeCurrentDocument();},officePicture},embedding)))appearance::messageBox(hwnd,L"Office 편집 개체를 등록하지 못했습니다.",L"YoungDraw",MB_OK|MB_ICONWARNING);if(structureHost)ShowWindow(hwnd,SW_SHOW);else if(!embedding)splash.finish(hwnd,show);if(!embedding&&!isolatedStructureEditing)startRecovery();fit();UpdateWindow(hwnd);ACCEL commandSearch{FVIRTKEY|FCONTROL|FSHIFT,'F',230};
  auto accelerators=CreateAcceleratorTableW(&commandSearch,1);
  MSG msg{};
  while(GetMessageW(&msg,nullptr,0,0)>0){
