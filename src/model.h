@@ -91,6 +91,7 @@ struct EnergyState {
     int breakStyle=0; // 0 double slash, 1 wave with automatic empty-energy interval selection.
     std::optional<double> breakLow,breakHigh; // Explicit compressed energy interval; both empty selects automatically.
     std::string gapLabel; // Empty: automatically calculated signed delta G (double dagger for TS).
+    int photoPath=-1; // Selected path for an hν arrow to the adjacent material level.
 };
 inline constexpr double maxStageArrowWidth=100.;
 struct MechanismStage {

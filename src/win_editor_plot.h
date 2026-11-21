@@ -22,6 +22,7 @@ void editPlotAppearance(int id,int field);
 bool adjustSelectedPlotWeight(bool increase);
 void editPlotCrossings(int id);
 void editPlotAnnotations(int id);
+void editPlotPhotoExcitation(int id);
 std::optional<std::pair<int,size_t>> plotStateAt(Vec at); // Canvas coordinates.
 void setPlotTransitionState(int id,size_t index,bool enabled);
 bool plotContextMenu(Vec at);

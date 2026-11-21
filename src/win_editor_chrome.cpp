@@ -124,6 +124,10 @@ void icon(Graphics& g,int id,RectF box,Color color){
     case 149:arrow();line(-19,-15,19,-15);line(-19,-20,-19,-10);line(19,-20,19,-10);break;
     case 135:line(20,0,1,0);line(1,0,-18,-14);line(1,0,-18,14);
         line(-18,-14,-10,-13);line(-18,-14,-15,-7);line(-18,14,-10,13);line(-18,14,-15,7);break;
+    case 4405:
+        g.DrawBezier(&pen,-19.f,17.f,2.f,23.f,-15.f,1.f,1.f,4.f);
+        g.DrawBezier(&pen,1.f,4.f,16.f,8.f,1.f,-10.f,17.f,-16.f);
+        line(17,-16,8,-18);line(17,-16,15,-7);break;
     case 4402:
         line(-22,0,-4,0);line(-4,0,18,-13);line(-4,0,18,13);
         line(18,-13,10,-13);line(18,-13,15,-7);line(18,13,10,13);line(18,13,15,7);break;

@@ -943,6 +943,51 @@ Scene makeScene(const Document& d,const Measure& measure){
             }
             if(inRange){Primitive curve;curve.type=Primitive::Bezier;curve.owner=owner;curve.width=path.width;curve.color=path.color;curve.dash=path.dash;curve.points={a,c1,c2,b};s.items.push_back(curve);}
         };
+        auto photonArrow=[&](Vec a,Vec b,const EnergySeries& path){
+            if(a.y<b.y)std::swap(a,b);
+            const double length=(b-a).length();
+            if(length<1e-6||a.y<topY||b.y>y0||std::abs(a.y-b.y)<1e-6)return;
+            const auto along=(b-a)*(1/length);
+            const Vec normal{-along.y,along.x};
+            if(a.y>y0)a=a+along*((y0-a.y)/along.y);
+            if(b.y>=a.y)return;
+            const bool tipVisible=b.y>=topY;
+            if(!tipVisible)b=a+along*((topY-a.y)/along.y);
+            const double span=(b-a).length();
+            const double headLength=tipVisible?std::min(8.,span*.23):0.;
+            const Vec shaftEnd=b-along*headLength*.94;
+            const double shaftLength=(shaftEnd-a).length();
+            const int lobes=std::clamp(int(std::round(shaftLength/9)),3,24);
+            const double step=shaftLength/lobes;
+            const double amplitude=std::min(5.,step*.75);
+            const double width=std::clamp(path.width*.65,1.,2.5)/inkFactor;
+            for(int lobe=0;lobe<lobes;++lobe){
+                const Vec start=a+along*(step*lobe),end=start+along*step;
+                const auto side=normal*(lobe%2?-amplitude:amplitude);
+                Primitive wave;wave.owner=owner;wave.color=path.color;
+                wave.width=width;wave.type=Primitive::Bezier;
+                wave.points={start,start+along*(step/3)+side,end-along*(step/3)+side,end};
+                s.items.push_back(wave);
+                remember(start,end);
+            }
+            if(tipVisible){
+                Primitive head;head.owner=owner;head.type=Primitive::Polygon;head.color=path.color;head.width=0;head.filled=true;
+                const Vec base=b-along*headLength;
+                head.points={b,base+normal*(headLength*.45),base-normal*(headLength*.45)};
+                s.items.push_back(head);
+            }
+            const std::string label="hν";
+            const double font=std::clamp(tickFont,8.,22.);
+            const Vec center=(a+b)*.5;
+            const double gap=amplitude+5+font*.55;
+            Rect caption{center.x+normal.x*gap-widthOf(label,font)/2,
+                         center.y+normal.y*gap-font*.65,widthOf(label,font),font*1.3};
+            if(std::any_of(external.begin(),external.end(),[&](auto box){return overlaps(caption,box);})){
+                caption.x-=2*normal.x*gap;caption.y-=2*normal.y*gap;
+            }
+            plotText(label,{caption.x,caption.y},font,path.color);
+            external.push_back(caption);
+        };
         for(size_t pathIndex=0;pathIndex<paths.size();pathIndex++){const auto& basePath=paths[pathIndex];if(basePath.values.size()!=plot.states.size())continue;auto path=basePath;
             struct RoutePoint { Vec left,right; size_t index; bool crossing; };
             std::vector<RoutePoint> route;
@@ -966,6 +1011,11 @@ Scene makeScene(const Document& d,const Measure& measure){
                 const auto colorIndex=right.crossing?right.index:left.index;
                 path.color=colorIndex<basePath.segmentColors.size()&&!basePath.segmentColors[colorIndex].empty()
                     ?basePath.segmentColors[colorIndex]:basePath.color;
+                if(!left.crossing&&!right.crossing&&plot.states[left.index].photoPath==int(pathIndex)&&
+                    std::abs(left.right.y-right.left.y)>1e-6){
+                    photonArrow(left.right,right.left,path);
+                    continue;
+                }
                 double breakX=std::numeric_limits<double>::quiet_NaN();
                 if(left.index<plot.states.size()&&plot.states[left.index].breakAfter&&left.index+1<plot.states.size()){
                     const double inset=plot.mode>=2?half:0;

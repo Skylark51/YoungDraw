@@ -451,6 +451,57 @@ bool plotContextMenu(Vec at){
     if(choice==4)compressPlotEnergyInterval(id,index);
     return true;
 }
+void editPlotPhotoExcitation(int id){
+    const auto* selected=plot(id);
+    if(!selected||doc.isLocked(id)||selected->states.size()<2||selected->mode==independentEnergyLevels)
+        throw std::runtime_error("두 준위가 연결된 에너지 그래프를 선택하세요.");
+    const auto original=*selected;
+    const Document before=doc;
+    std::vector<ui::SearchItem> segments;
+    for(size_t i=0;i+1<original.states.size();++i){
+        auto stateName=[&](size_t index){
+            return std::to_wstring(index+1)+L". "+ui::wide(original.states[index].label);
+        };
+        segments.push_back({stateName(i)+L" → "+stateName(i+1),
+            original.states[i].photoPath>=0?L"광여기 적용됨":L"두 준위 사이의 연결"});
+    }
+    const auto segment=ui::search(win,L"광여기 hν · 구간 선택",segments,L"편집",true);
+    if(!segment)return;
+    const size_t i=*segment;
+    std::vector<std::wstring> choices={L"일반 연결"};
+    auto entry=[&](const std::string& label,double a,double b){
+        return ui::wide(label)+L" · "+ui::wide(number(std::min(a,b)))+L" → "+ui::wide(number(std::max(a,b)));
+    };
+    if(original.series.empty())choices.push_back(entry("Path 1",original.states[i].energy,original.states[i+1].energy));
+    else for(const auto& path:original.series)choices.push_back(path.hasValue(i)&&path.hasValue(i+1)?
+        entry(path.name,path.values[i],path.values[i+1]):ui::wide(path.name)+L" · 에너지 값 없음");
+    auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
+        auto graph=original;
+        const int index=std::stoi(values[0])-1;
+        if(index>=0){
+            double a=graph.states[i].energy,b=graph.states[i+1].energy;
+            if(!graph.series.empty()){
+                const auto& path=graph.series.at(size_t(index));
+                if(!path.hasValue(i)||!path.hasValue(i+1))return L"선택한 경로에 두 에너지 값이 모두 있어야 합니다.";
+                a=path.values[i];b=path.values[i+1];
+            }
+            if(std::abs(a-b)<1e-9)return L"서로 다른 에너지 준위를 선택하세요.";
+            for(const auto& crossing:graph.crossings)
+                if(crossing.segment==int(i)&&(crossing.firstPath==index||crossing.secondPath==index))
+                    return L"이 경로와 구간에 스핀 교차점이 설정되어 있습니다. 교차점을 옮기거나 제거하세요.";
+            auto& from=graph.states[i];
+            if(from.breakAfter&&from.breakPath==index)from.breakAfter=false;
+        }
+        graph.states[i].photoPath=index;
+        validateEnergyAnnotations(graph);
+        doc=before;*plot(id)=std::move(graph);redraw();UpdateWindow(win);return {};
+    }catch(const std::exception& error){return ui::wide(error.what());}};
+    const auto applied=ui::form(win,L"광여기 hν · "+segments[i].title,
+        {{L"광여기를 적용할 경로",std::to_string(original.states[i].photoPath+1),false,choices}},update);
+    if(applied){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+    else{doc=before;redraw();}
+}
+
 void editPlotAnnotations(int id){
     auto* p=plot(id);if(!p||doc.isLocked(id)||p->states.empty())throw std::runtime_error("편집할 에너지 그래프를 선택하세요.");
     std::vector<ui::SearchItem> entries;std::vector<std::wstring> states,paths;

@@ -161,7 +161,8 @@ void validateEnergyAnnotations(const EnergyPlot& p){
            (s.breakLow&&(!std::isfinite(*s.breakLow)||!std::isfinite(*s.breakHigh)||std::abs(*s.breakLow)>1e6||std::abs(*s.breakHigh)>1e6||*s.breakHigh-*s.breakLow<1e-6))||
            !std::isfinite(s.breakScale)||s.breakScale<.01||s.breakScale>4||s.breakPath<0||size_t(s.breakPath)>=paths||
            s.gapFrom< -1||(s.gapFrom>=0&&(size_t(s.gapFrom)>=p.states.size()||size_t(s.gapFrom)==i))||
-           s.gapPath<0||size_t(s.gapPath)>=paths||!offset(s.gapOffset))throw std::runtime_error("Invalid energy profile annotation");
+           s.gapPath<0||size_t(s.gapPath)>=paths||!offset(s.gapOffset)||
+            s.photoPath< -1||(s.photoPath>=0&&(size_t(s.photoPath)>=paths||i+1>=p.states.size())))throw std::runtime_error("Invalid energy profile annotation");
     }
 }
 double plotStateFraction(const EnergyPlot& plot,size_t index){
@@ -218,6 +219,7 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
     for(size_t i=0;i<result.states.size();++i){auto& state=result.states[i];
         if(i<n-1){state.labelPath=int(result.series.size())-1;state.gapPath=state.labelPath;if(state.gapFrom>=0)state.gapFrom=int(n)-1-state.gapFrom;state.breakAfter=original.states[n-2-i].breakAfter;state.breakPosition=1-original.states[n-2-i].breakPosition;state.breakScale=original.states[n-2-i].breakScale;state.breakOmit=original.states[n-2-i].breakOmit;state.breakUpperScale=original.states[n-2-i].breakUpperScale;state.breakStyle=original.states[n-2-i].breakStyle;state.breakLow=original.states[n-2-i].breakLow;state.breakHigh=original.states[n-2-i].breakHigh;state.breakPath=int(result.series.size())-1;}
         else if(state.gapFrom>=0)state.gapFrom+=int(n)-1;
+        if(i<n-1)state.photoPath=original.states[n-2-i].photoPath==int(sourcePath)?int(result.series.size())-1:-1;
     }
     for(auto& crossing:result.crossings)crossing.segment+=int(n)-1;
     result.stages.clear();
@@ -321,6 +323,11 @@ EnergyPlot publicationPlot(const EnergyPlot& original){
 void validateEnergyCrossings(const EnergyPlot& plot){
     std::set<int> segments;
     for(const auto& crossing:plot.crossings){
+        if(crossing.segment>=0&&size_t(crossing.segment)<plot.states.size()){
+            const int photo=plot.states[size_t(crossing.segment)].photoPath;
+            if(photo>=0&&(photo==crossing.firstPath||photo==crossing.secondPath))
+                throw std::runtime_error("광여기와 스핀 교차점은 같은 경로·구간에 놓을 수 없습니다.");
+        }
         if(!std::isfinite(crossing.leaderWidth)||crossing.leaderWidth<0||crossing.leaderWidth>6)
             throw std::runtime_error("Crossing leader width must be between 0 and 6 pt.");
         if(crossing.labelOffset&&(!std::isfinite(crossing.labelOffset->x)||!std::isfinite(crossing.labelOffset->y)||
@@ -413,7 +420,7 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
     if(!sameOrder)for(auto& state:states)state.position.reset();
     for(size_t i=0;i<states.size();++i){auto& state=states[i];
         if(state.gapFrom>=0){auto from=std::find(mapping.begin(),mapping.end(),state.gapFrom);state.gapFrom=from==mapping.end()?-1:int(from-mapping.begin());if(state.gapFrom==int(i))state.gapFrom=-1;}
-        if(i+1>=states.size()||mapping[i]<0||mapping[i+1]!=mapping[i]+1)state.breakAfter=false;
+        if(i+1>=states.size()||mapping[i]<0||mapping[i+1]!=mapping[i]+1){state.breakAfter=false;state.photoPath=-1;}
     }
     plot.states=std::move(states);plot.series=std::move(series);
     plot.crossings.clear();

@@ -228,6 +228,34 @@ int main(){try{
         std::ofstream("reaction-arrow-style-preview.svg")<<toSvg(makeScene(arrows));
     }
     {
+        Document light;EnergyPlot example;example.id=light.nextId++;example.mode=3;
+        example.states={{"Ground",-36},{"Excited",0},{"TS",5.6}};
+        example.series={{"Light path","#286688",{-36,0,5.6},0,2,0},
+                        {"Other path","#ad405b",{-34,-2,4},0,2,0}};
+        example.states[0].photoPath=0;
+        light.plots={example};
+        const auto scene=makeScene(light);
+        const auto axes=scene.plotAxes.at(example.id);
+        check(std::any_of(scene.items.begin(),scene.items.end(),[](const auto& item){
+            return item.type==Primitive::Text&&item.text=="hν";
+        }),"light excitation has its own photon label");
+        int lobes=0,heads=0,otherLobes=0;
+        for(const auto& item:scene.items){
+            if(item.type==Primitive::Bezier){
+                lobes+=item.color=="#286688";otherLobes+=item.color=="#ad405b";
+            }
+            if(item.type==Primitive::Polygon&&item.color=="#286688"&&item.points.size()==3){
+                ++heads;check(item.points.front().y<item.points[1].y&&item.points.front().y<axes.origin.y,
+                    "the light arrow points from the -36 level toward the 0 level");
+            }
+        }
+        check(lobes>=3&&heads==1&&otherLobes==0,"photon wave replaces only the selected path connection");
+#ifdef TEST_CDXML
+        for(const auto& edited:{fromNative(toNative(light)),fromCdxml(toCdxml(light))})
+            check(edited.plots[0].states[0].photoPath==0,"photoexcitation round trips in both formats");
+#endif
+    }
+    {
         Document profile;auto graph=newEnergyPlot(0,true);graph.id=profile.nextId++;graph.states={{"A2",7.7},{"A2-TS",19.8},{"B2",-56.9},{"C2",-60.1},{"D2",-53.3},{"E2",-87.4}};
         graph.series[0].values={7.7,19.8,-56.9,-60.1,-53.3,-87.4};graph.states[1].transitionState=true;profile.plots={graph};
         auto vertical=[&](const Scene& scene,int state){for(auto point:scene.plotSnapPoints.at(graph.id))if(point.state==state&&point.path==0&&point.edge==0)return point.p.y;throw std::runtime_error("missing profile state");};
