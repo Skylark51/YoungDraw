@@ -247,6 +247,14 @@ Scene makeScene(const Document& d,const Measure& measure){
     }
     // Resolve occlusion on the bond axis, including wedge polygons and hash strokes.
     // Gray accents are local; the rest of every visible skeleton stays in original ink.
+    auto depthEnvelope=[&](const Bond& b){
+        const bool broad=b.kind==BondKind::Wedge||b.kind==BondKind::Hash||b.kind==BondKind::Bold||b.customDisplay=="Bold";
+        double width=(broad?b.boldWidth.value_or(d.style.boldWidth):b.lineWidth.value_or(d.style.lineWidth))*b.drawingScale;
+        if(b.kind==BondKind::Double||b.kind==BondKind::Triple||b.kind==BondKind::Aromatic)width+=2*b.doubleGap.value_or(d.style.bondLength*d.style.bondSpacing)*b.drawingScale;
+        if(b.kind==BondKind::Wavy)width+=1.6*b.drawingScale;
+        if(b.kind==BondKind::Dative&&b.customDisplay!="Solid")width=std::max(width,2.8*b.drawingScale);
+        return width;
+    };
     const auto depthCrossings=spatialCrossings(d);
     if(!depthCrossings.empty()){
         std::vector<Primitive> resolved;
@@ -258,17 +266,19 @@ Scene makeScene(const Document& d,const Measure& measure){
             const std::string ink=bond->depthColor.empty()?item.color:bond->depthColor;
             const std::string rear=bond->depthRearColor.empty()?bond->color:bond->depthRearColor;
             std::vector<std::pair<double,double>> holes,accents,fronts;std::vector<double> cuts{0,1};
-            auto interval=[&](auto& list,double t,double radius){double a=std::clamp(t-radius,0.,1.),b=std::clamp(t+radius,0.,1.);list.push_back({a,b});cuts.push_back(a);cuts.push_back(b);};
+            auto between=[&](auto& list,double first,double last){double a=std::clamp(first,0.,1.),b=std::clamp(last,0.,1.);if(b<=a)return;list.push_back({a,b});cuts.push_back(a);cuts.push_back(b);};
+            auto interval=[&](auto& list,double t,double radius){between(list,t-radius,t+radius);};
             for(const auto& crossing:depthCrossings){
                 if(crossing.front!=bond->id&&crossing.back!=bond->id)continue;
                 const double t=position(crossing.point);
-                if(crossing.front==bond->id){interval(fronts,t,(item.width+2*bond->drawingScale)/length);continue;}
+                if(crossing.front==bond->id){interval(fronts,t,(depthEnvelope(*bond)+2*bond->drawingScale)/length);continue;}
                 const auto* front=d.bond(crossing.front);const Vec frontAxis=d.atom(front->b)->p-d.atom(front->a)->p;
                 const double sine=std::abs(axis.x*frontAxis.y-axis.y*frontAxis.x)/std::max(1e-8,length*frontAxis.length());
-                const bool broad=front->kind==BondKind::Wedge||front->kind==BondKind::Hash||front->kind==BondKind::Bold;
-                const double width=(broad?front->boldWidth.value_or(d.style.boldWidth):front->lineWidth.value_or(d.style.lineWidth))*front->drawingScale;
-                const double padding=(width*.5+item.width*.5+1.2*front->drawingScale)/std::max(.12,sine)/length;
-                interval(holes,t,padding);interval(accents,t,padding+4*bond->drawingScale/length);
+                const double clearance=(depthEnvelope(*front)*.5+std::max(item.width,depthEnvelope(*bond))*.5+1.2*front->drawingScale)/length;
+                const double padding=clearance/std::max(1e-6,sine);
+                const double first=position(d.atom(front->a)->p),last=position(d.atom(front->b)->p);
+                const double a=std::max(t-padding,std::min(first,last)-clearance),b=std::min(t+padding,std::max(first,last)+clearance);
+                between(holes,a,b);between(accents,a-4*bond->drawingScale/length,b+4*bond->drawingScale/length);
             }
             if(holes.empty()){item.color=ink;resolved.push_back(std::move(item));continue;}
             std::sort(cuts.begin(),cuts.end());

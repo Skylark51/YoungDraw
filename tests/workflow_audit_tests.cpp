@@ -20,6 +20,12 @@ using namespace yd;
 using namespace yd::editor;
 static void check(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
 static double segmentDistance(Vec point,Vec a,Vec b){Vec v=b-a;double ll=v.x*v.x+v.y*v.y;if(ll<1e-9)return (point-a).length();double t=std::clamp(((point-a).x*v.x+(point-a).y*v.y)/ll,0.,1.);return (point-a-v*t).length();}
+
+static double segmentsDistance(Vec a,Vec b,Vec c,Vec d){
+    auto cross=[](Vec x,Vec y){return x.x*y.y-x.y*y.x;};Vec first=b-a,second=d-c;double denominator=cross(first,second);
+    if(std::abs(denominator)>1e-10){double t=cross(c-a,second)/denominator,u=cross(c-a,first)/denominator;if(t>=0&&t<=1&&u>=0&&u<=1)return 0;}
+    return std::min({segmentDistance(a,c,d),segmentDistance(b,c,d),segmentDistance(c,a,b),segmentDistance(d,a,b)});
+}
 static bool galleryDriven=false;static int favoriteCalls=0;
 static void CALLBACK drivePage(HWND owner,UINT,UINT_PTR timer,DWORD){HWND dialog=nullptr;while((dialog=FindWindowExW(nullptr,dialog,L"YoungDrawTemplateGallery",nullptr)))if(GetWindow(dialog,GW_OWNER)==owner)break;if(!dialog)return;KillTimer(owner,timer);UpdateWindow(dialog);SendMessageW(dialog,WM_COMMAND,202,0);PostMessageW(dialog,WM_COMMAND,IDOK,0);}
 static int inputMode=0;static bool inputFocusMoved=false;
@@ -58,6 +64,23 @@ int main(){try{
     for(const auto& p:visual.items)if(p.type==Primitive::Line&&p.points.size()==2){auto distance=segmentDistance(crosses[0].point,p.points[0],p.points[1]);if(p.owner==foreground)nearDistance=std::min(nearDistance,distance);if(p.owner==background)farDistance=std::min(farDistance,distance);}
     check(nearDistance<1e-8&&farDistance>1,"only the rear stroke is cut; the foreground remains continuous");
     bool rearBlack=false,rearGray=false;for(const auto& p:visual.items)if(p.owner==background){rearBlack|=p.color=="#000000";rearGray|=p.color==crossing.bond(background)->depthRearColor;}check(rearBlack&&rearGray,"rear bond has only a short gray crossing accent, with the remaining visible stroke black");
+    auto kindName=[](BondKind kind){return kind==BondKind::Double?"double":kind==BondKind::Triple?"triple":kind==BondKind::Aromatic?"aromatic":kind==BondKind::Wavy?"wavy":"single";};
+    for(const auto& test:std::vector<std::pair<BondKind,int>>{{BondKind::Double,2},{BondKind::Triple,3},{BondKind::Aromatic,2},{BondKind::Wavy,24}})for(BondKind rearKind:{BondKind::Single,BondKind::Double,BondKind::Triple})for(int angle:{5,15,45,90}){
+        auto multiple=crossing;multiple.bond(foreground)->kind=test.first;multiple.bond(foreground)->doubleSide=0;multiple.bond(background)->kind=rearKind;multiple.bond(background)->doubleSide=0;
+        const double radians=angle*std::acos(-1.)/180.;const Vec center{-40,0},rearAxis{std::cos(radians),std::sin(radians)};multiple.atom(c)->p=center-rearAxis*40;multiple.atom(e)->p=center+rearAxis*40;
+        const auto multipleScene=makeScene(multiple);int frontStrokes=0;bool rearBefore=false,rearAfter=false;
+        const std::string label=std::string(kindName(test.first))+" front / "+kindName(rearKind)+" rear / "+std::to_string(angle)+" degrees: ";
+        for(const auto& frontStroke:multipleScene.items)if(frontStroke.owner==foreground&&frontStroke.type==Primitive::Line&&frontStroke.points.size()==2){
+            frontStrokes++;check(frontStroke.color=="#000000",(label+"every foreground stroke retains original black ink").c_str());
+            for(const auto& rearStroke:multipleScene.items)if(rearStroke.owner==background&&rearStroke.type==Primitive::Line&&rearStroke.points.size()==2){
+                const double separation=segmentsDistance(frontStroke.points[0],frontStroke.points[1],rearStroke.points[0],rearStroke.points[1]);
+                check(separation>(frontStroke.width+rearStroke.width)/2+.2,(label+"rear ink clears every actual foreground stroke including offset strokes").c_str());
+            }
+        }
+        for(const auto& rearStroke:multipleScene.items)if(rearStroke.owner==background&&rearStroke.type==Primitive::Line&&rearStroke.points.size()==2)for(auto point:rearStroke.points){Vec delta=point-center;double position=delta.x*rearAxis.x+delta.y*rearAxis.y;rearBefore|=position<-20;rearAfter|=position>20;}
+        check(frontStrokes==test.second&&rearBefore&&(angle<45||rearAfter),(label+"all foreground strokes and rear portions outside the finite foreground survive").c_str());
+        writePreview(ui::wide(std::string("depth-crossing-front-")+kindName(test.first)+"-rear-"+kindName(rearKind)+"-"+std::to_string(angle)+".png"),multiple);
+    }
     auto wedge=crossing;wedge.bond(background)->kind=BondKind::Wedge;auto wedgeScene=makeScene(wedge);bool blackWedge=false,grayWedge=false;
     auto inPolygon=[](const std::vector<Vec>& vertices,Vec p){bool inside=false;for(size_t i=0,j=vertices.size()-1;i<vertices.size();j=i++){auto a=vertices[i],b=vertices[j];if(((a.y>p.y)!=(b.y>p.y))&&(p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x))inside=!inside;}return inside;};
     for(const auto& p:wedgeScene.items)if(p.owner==background&&p.type==Primitive::Polygon){check(!inPolygon(p.points,crosses[0].point),"rear wedge cannot cover the foreground crossing");blackWedge|=p.color=="#000000";grayWedge|=p.color==wedge.bond(background)->depthRearColor;}check(blackWedge&&grayWedge,"rear wedge retains black visible regions and local gray accent");
