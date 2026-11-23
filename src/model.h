@@ -252,9 +252,10 @@ Vec bondEndpoint(const Document& d,int atom,Vec desired,BondKind kind=BondKind::
 enum class OrbitalKind { S, P, D, Hybrid };
 std::vector<int> addOrbital(Document& d,Vec center,Vec tip,OrbitalKind kind=OrbitalKind::P,int phaseStyle=0);
 int delocalizeBonds(Document& d,const std::vector<int>& selection);
-// Positive angles turn clockwise in canvas coordinates. Molecules remain rigid.
 std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,double factor,std::optional<Vec> center=std::nullopt);
-std::vector<int> transformStructures(Document& d,const std::vector<int>& selection,double degrees,bool flipX=false,bool flipY=false,Vec* pivot=nullptr);
+// Positive angles turn clockwise. By default molecules remain rigid; false
+// limits rotation to selected atoms, bond endpoints and explicitly selected groups.
+std::vector<int> transformStructures(Document& d,const std::vector<int>& selection,double degrees,bool flipX=false,bool flipY=false,Vec* pivot=nullptr,bool wholeMolecules=true);
 enum class AlignMode { Left, CenterX, Right, Top, MiddleY, Bottom, DistributeHorizontal, DistributeVertical };
 bool alignObjects(Document& d,const std::vector<int>& selection,AlignMode mode);
 bool toggleAromaticDisplay(Document& d,const std::vector<int>& selection);

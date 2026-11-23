@@ -210,13 +210,24 @@ int drawingItemAt(Vec p){
 static void beginRotation(Vec p){
     auto ids=selection;
     const int hit=drawingItemAt(p);
-    if(hit&&!contains(ids,hit))ids=groupedSelection({hit});
+    // Bonds between selected atoms and endpoints of selected bonds belong to
+    // the selection even when their IDs were not added by the selection tool.
+    auto selectedAtom=[&](int id){
+        if(contains(ids,id))return true;
+        for(const auto& b:doc.bonds)if(contains(ids,b.id)&&(b.a==id||b.b==id))return true;
+        return false;
+    };
+    bool selectedHit=contains(ids,hit);
+    if(const auto* b=doc.bond(hit))selectedHit=selectedAtom(b->a)&&selectedAtom(b->b);
+    else if(doc.atom(hit))selectedHit=selectedAtom(hit);
+    const bool wholeMolecules=hit&&!selectedHit;
+    if(wholeMolecules)ids=groupedSelection({hit});
     if(ids.empty())return;
     try{
         dragBefore=dragBase=doc;
         Vec pivot;
-        selection=transformStructures(dragBase,ids,0,false,false,&pivot);
-        rotationDrag=RotationDrag{pivot,std::move(ids)};
+        selection=transformStructures(dragBase,ids,0,false,false,&pivot,wholeMolecules);
+        rotationDrag=RotationDrag{pivot,selection};
         dragging=true;
         moved=copyDrag=false;
         SetCapture(win);
@@ -239,7 +250,7 @@ static void updateRotation(){
     }
     if(GetKeyState(VK_SHIFT)&0x8000)degrees=std::round(degrees/15)*15;
     doc=dragBase;
-    transformStructures(doc,rotationDrag->ids,degrees);
+    transformStructures(doc,rotationDrag->ids,degrees,false,false,nullptr,false);
     status=L"회전 "+ui::wide(number(degrees))+L"° · Shift: 15° 단위 · Esc: 취소";
 }
 
