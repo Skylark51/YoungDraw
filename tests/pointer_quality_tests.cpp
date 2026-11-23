@@ -112,6 +112,41 @@ static void editorToolRegression(HWND hwnd){
     arrowColor="#ff0000";
     selection.clear();tool=Select;
 }
+static void partialRotationRegression(HWND hwnd){
+    auto point=[&](UINT message,Vec p){SendMessageW(hwnd,message,0,MAKELPARAM(int(p.x),int(p.y)));};
+    BYTE keys[256]{};SetKeyboardState(keys);
+    for(bool grouped:{false,true})for(int pick:{0,1,2}){
+        doc={};selection.clear();history.clear();tool=Select;zoom=2;origin={400,300};
+        int a=doc.addAtom({0,0}),b=doc.addAtom({40,0}),c=doc.addAtom({80,0}),d=doc.addAtom({120,30});
+        int ab=doc.addBond(a,b);doc.addBond(b,c);doc.addBond(c,d,BondKind::Wedge);
+        if(grouped)doc.groups.push_back({doc.nextId++,{a,b,c,d,ab}});
+        const auto original=toNative(doc);const auto viewport=origin;
+        selection=pick==1?std::vector<int>{ab}:std::vector<int>{a,b};
+        const auto originalSelection=selection;
+        changed();dirty=false;SendMessageW(hwnd,WM_COMMAND,rotateToolCommand,0);
+        const Vec start=screen(pick==2?Vec{30,0}:Vec{40,0});
+        const Vec finish=screen(pick==2?Vec{20,10}:Vec{20,20});
+        point(WM_LBUTTONDOWN,start);point(WM_MOUSEMOVE,finish);
+        check((doc.atom(a)->p-Vec{20,-20}).length()<1e-8&&(doc.atom(b)->p-Vec{20,20}).length()<1e-8,"direct rotation uses the selected fragment center");
+        check((doc.atom(c)->p-Vec{80,0}).length()==0&&(doc.atom(d)->p-Vec{120,30}).length()==0,"direct rotation leaves connected unselected atoms fixed, including group members");
+        check(!contains(selection,c)&&!contains(selection,d),"direct rotation does not expand the explicit selection to the molecule or group");
+        SendMessageW(hwnd,WM_KEYDOWN,VK_ESCAPE,0);point(WM_LBUTTONUP,finish);
+        check(toNative(doc)==original&&selection==originalSelection&&!history.undo(doc)&&!dirty,"partial rotation Escape restores the exact document and selection without an undo entry");
+        point(WM_LBUTTONDOWN,start);point(WM_LBUTTONUP,finish);
+        auto expected=fromNative(original);expected.atom(a)->p={20,-20};expected.atom(b)->p={20,20};
+        check(toNative(doc)==toNative(expected),"partial rotation changes only selected atom coordinates; bonds, groups and other chemical data remain intact");
+        check((origin-viewport).length()==0&&zoom==2,"partial rotation preserves the viewport");
+        check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"partial rotation commits exactly one undo step");
+        check(history.redo(doc)&&toNative(doc)==toNative(expected),"partial rotation supports redo");
+        doc=fromNative(original);history.clear();selection=originalSelection;changed();dirty=false;
+        point(WM_LBUTTONDOWN,start);point(WM_LBUTTONUP,start);
+        check(toNative(doc)==original&&!dirty&&!history.undo(doc),"partial rotation without movement is not an edit");
+        selection=originalSelection;
+        point(WM_LBUTTONDOWN,start);point(WM_MOUSEMOVE,finish);SendMessageW(hwnd,WM_CAPTURECHANGED,0,0);point(WM_LBUTTONUP,finish);
+        check(toNative(doc)==original&&selection==originalSelection&&!history.undo(doc),"capture loss cancels partial rotation");
+    }
+    selection.clear();history.clear();tool=Select;hoverAtom=hoverBond=0;
+}
 static void editingRegression(HWND hwnd){
     BYTE keys[256]{};SetKeyboardState(keys);showLayers=false;targetContainer=0;origin={400,300};zoom=2;
     Bitmap image(1440,940);Graphics graphics(&image);auto repaint=[&](){HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);};
@@ -181,12 +216,18 @@ int main(int argc,char** argv){
         check(RegisterClassW(&wc)!=0,"register hidden test window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Quality",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd!=nullptr,"create hidden editor");
+        if(argc==2&&std::string(argv[1])=="--partial-rotation-only"){
+            partialRotationRegression(hwnd);
+            DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();
+            std::cout<<"PASS: selected-fragment direct rotation\n";return 0;
+        }
         if(argc==4&&std::string(argv[1])=="--fit-profile-preview"){
             doc=fromNative(readFile(ui::wide(argv[2])));for(const auto& graph:doc.plots){size_t index=0;for(size_t i=0;i+1<graph.states.size();++i)if(graph.states[i].breakAfter){index=i;break;}compressPlotEnergyInterval(graph.id,index);break;}
             const auto prefix=ui::wide(argv[3]);writePreview(prefix+L".png",doc);writeFile(prefix+L".ydraw",toNative(doc));writeFile(prefix+L".cdxml",toCdxml(doc));writeFile(prefix+L".svg",toSvg(scene()));
             DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }
 
+        BYTE initialKeys[256]{};check(SetKeyboardState(initialKeys)!=FALSE,"initialize the isolated pointer test keyboard state");
         doc={};int a=doc.addAtom({50,50}),b=doc.addAtom({80,50});doc.addBond(a,b);history.clear();dirty=false;selection={a};zoom=2;origin={300,200};tool=Select;
         auto before=toNative(doc);Vec start=screen(doc.atom(a)->p);
         mouseDown(start);mouseUp(start+Vec{24,18});
@@ -339,6 +380,7 @@ int main(int argc,char** argv){
         }
         editingRegression(hwnd);
         editorToolRegression(hwnd);
+        partialRotationRegression(hwnd);
         DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();
         std::cout<<"PASS: hidden editor pointer, tab, save and zoom checks\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}

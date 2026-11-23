@@ -5,6 +5,7 @@
 #include "win_scripts.h"
 #include "mechanism_data.h"
 #include "win_editor_state.h"
+#include "win_editor_chrome.h"
 #include <commctrl.h>
 #include <windowsx.h>
 #include <uxtheme.h>
@@ -316,6 +317,7 @@ static int rowHeight(const Field& field){
 using FormTabs=std::vector<std::pair<std::wstring,std::vector<size_t>>>;
 struct Form {
     FormTabs tabs;
+    FormTabStyle tabStyle;
     HWND tab=nullptr;
     HWND wheelInput=nullptr;
     int wheelDelta=0;
@@ -327,7 +329,7 @@ struct Form {
     DialogColors colors;
     std::vector<Field> fields;std::vector<HWND> edits;
     std::vector<std::string> result;Preview preview;
-    bool done=false,ok=false;HFONT font=nullptr;HWND error=nullptr,apply=nullptr;
+    bool done=false,ok=false,synchronizing=false;HFONT font=nullptr;HWND error=nullptr,apply=nullptr;
     bool ownsStorage=false,embedded=false;
     Preview embeddedApply;
     std::function<void()> dismiss;
@@ -395,11 +397,17 @@ static void drawFormTabs(HWND hwnd,HDC dc){
         const bool active=i==selected;
         wchar_t label[128]{};
         TCITEMW item{};
-        item.mask=TCIF_TEXT;
+        item.mask=TCIF_TEXT|TCIF_PARAM;
         item.pszText=label;
         item.cchTextMax=int(std::size(label));
         TabCtrl_GetItem(hwnd,i,&item);
         const auto labelColor=active?(keyboardFocus?palette.accent:palette.text):palette.muted;
+        if(item.lParam){
+            Gdiplus::Graphics graphics(dc);
+            graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+            yd::editor::icon(graphics,int(item.lParam),{float(tab.left+5),float((tab.top+tab.bottom-18)/2),18,18},labelColor);
+            tab.left+=24;
+        }
         SetTextColor(dc,colorRef(labelColor));
         DrawTextW(dc,label,-1,&tab,DT_SINGLELINE|DT_CENTER|DT_VCENTER|DT_NOPREFIX);
     }
@@ -596,12 +604,18 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             f->tab=CreateWindowW(WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP,16,10,644,35,hwnd,nullptr,nullptr,nullptr);
             SendMessageW(f->tab,WM_SETFONT,WPARAM(f->font),TRUE);
             TabCtrl_SetPadding(f->tab,14,5);
+            if(!f->tabStyle.icons.empty()){
+                SetWindowLongPtrW(f->tab,GWL_STYLE,GetWindowLongPtrW(f->tab,GWL_STYLE)|TCS_FIXEDWIDTH);
+                TabCtrl_SetItemSize(f->tab,88,30);
+            }
             SetWindowSubclass(f->tab,formTabProc,1,0);
             for(auto& group:f->tabs){
-                TCITEMW item{};item.mask=TCIF_TEXT;item.pszText=group.first.data();
+                TCITEMW item{};item.mask=TCIF_TEXT|TCIF_PARAM;item.pszText=group.first.data();
+                const auto index=size_t(TabCtrl_GetItemCount(f->tab));
+                item.lParam=index<f->tabStyle.icons.size()?f->tabStyle.icons[index]:0;
                 TabCtrl_InsertItem(f->tab,TabCtrl_GetItemCount(f->tab),&item);
             }
-            TabCtrl_SetCurSel(f->tab,0);y=52;std::vector<ui::HelpRegion> help;for(size_t i=0;i<f->tabs.size();i++){RECT rect{};if(TabCtrl_GetItemRect(f->tab,int(i),&rect))help.push_back({UINT_PTR(i+1),rect,f->tabs[i].first+L" 설정 항목을 표시합니다. 다른 탭의 입력값은 유지됩니다."});}ui::setRegionHelp(f->tab,help);
+            TabCtrl_SetCurSel(f->tab,std::clamp(f->tabStyle.initial,0,int(f->tabs.size())-1));y=52;std::vector<ui::HelpRegion> help;for(size_t i=0;i<f->tabs.size();i++){RECT rect{};if(TabCtrl_GetItemRect(f->tab,int(i),&rect))help.push_back({UINT_PTR(i+1),rect,f->tabs[i].first+L" 설정 항목을 표시합니다. 다른 탭의 입력값은 유지됩니다."});}ui::setRegionHelp(f->tab,help);
         }
         for(size_t i=0;i<f->fields.size();i++){
             auto& field=f->fields[i];HWND label=CreateWindowW(L"STATIC",field.label.c_str(),WS_CHILD|WS_VISIBLE,16,y+4,210,labelHeight(field),hwnd,nullptr,nullptr,nullptr);SendMessageW(label,WM_SETFONT,(WPARAM)f->font,TRUE);
@@ -741,6 +755,16 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         }
         if(id==IDOK||id==IDCANCEL){if(id==IDOK){if(!preview(*f))return 0;f->result=read(*f);f->ok=true;}f->done=true;PostMessageW(hwnd,WM_NULL,0,0);return 0;}
         if(f->apply&&f->edits.size()==f->fields.size()&&(HIWORD(wp)==EN_CHANGE||HIWORD(wp)==CBN_SELCHANGE||HIWORD(wp)==CBN_EDITCHANGE)){
+            if(f->synchronizing)return 0;
+            if(HIWORD(wp)==CBN_SELCHANGE&&id>=100&&size_t(id-100)<f->fields.size()){
+                const auto& binding=f->fields[size_t(id-100)].choiceUpdate;
+                const auto choice=SendMessageW(f->edits[size_t(id-100)],CB_GETCURSEL,0,0);
+                if(binding&&binding->field<f->edits.size()&&choice>=0&&size_t(choice)<binding->values.size()&&binding->values[size_t(choice)]){
+                    f->synchronizing=true;
+                    SetWindowTextW(f->edits[binding->field],wide(*binding->values[size_t(choice)]).c_str());
+                    f->synchronizing=false;
+                }
+            }
             preview(*f);
             if(f->illustration)InvalidateRect(hwnd,&f->picture,TRUE);
         }
@@ -761,9 +785,9 @@ HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fie
 }
 
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& callback,const FormTabs& tabs,
-    const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration,int illustrationHeight){
+    const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration,int illustrationHeight,const FormTabStyle& tabStyle){
     static bool registered=false;if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawForm";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);registered=true;}
-    Form f;f.fields=fields;f.preview=callback;f.tabs=tabs;f.illustration=illustration;f.illustrationHeight=std::clamp(illustrationHeight,124,360);
+    Form f;f.fields=fields;f.preview=callback;f.tabs=tabs;f.tabStyle=tabStyle;f.illustration=illustration;f.illustrationHeight=std::clamp(illustrationHeight,124,360);
     if(tabs.empty())for(auto& v:fields)f.contentBottom+=rowHeight(v);
     else{
         INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_TAB_CLASSES};InitCommonControlsEx(&controls);

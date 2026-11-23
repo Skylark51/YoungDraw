@@ -13,6 +13,14 @@ static bool textContains(const Scene& s,const std::string& text){for(const auto&
 static size_t curves(const Scene& s){return std::count_if(s.items.begin(),s.items.end(),[](const auto& p){return p.type==Primitive::Bezier;});}
 static Vec caption(const Scene& s,int i){for(const auto& p:s.items)if(p.type==Primitive::Text&&p.textRole==6&&p.textIndex==i)return p.points.front();throw std::runtime_error("missing caption");}
 int main(){try{
+    for(const std::string symbol:{"ΔE","ΔG"})for(bool top:{false,true}){
+        Document legacy;auto graph=reactionProfilePlot();graph.id=legacy.nextId++;graph.yLabel=symbol;graph.energySymbol.clear();graph.energyAtTop=top;legacy.plots={graph};
+        check(textContains(makeScene(legacy),symbol),"an existing Delta axis title is preserved when placed above the axis");
+        check(plotEnergySymbol(graph)==symbol,"energy gap notation follows an existing Delta axis title");
+#ifdef TEST_CDXML
+        for(const auto& copy:{fromNative(toNative(legacy)),fromCdxml(toCdxml(legacy))})check(textContains(makeScene(copy),symbol),"existing Delta axis titles survive round trip and both placements");
+#endif
+    }
     for(int mode=0;mode<=4;++mode)for(bool freeEnergy:{false,true}){
         auto p=newEnergyPlot(mode,freeEnergy);validateEnergyAnnotations(p);check(p.mode==mode&&p.energySymbol==(freeEnergy?"ΔG":"ΔE")&&p.yLabel==p.energySymbol,"new graph applies selected shape and quantity");
         check(std::all_of(p.states.begin(),p.states.end(),[](const auto& state){return state.gapFrom==-1&&!state.breakAfter;}),"new graphs have no unsolicited gaps or breaks");

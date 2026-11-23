@@ -32,6 +32,11 @@ static std::set<int> editableExpansion(const Document& d,const std::vector<int>&
     expand(d,ids);for(auto i=ids.begin();i!=ids.end();)if(d.isLocked(*i))i=ids.erase(i);else ++i;
     return ids;
 }
+static std::set<int> explicitEditableSelection(const Document& d,const std::vector<int>& selection){
+    std::set<int> ids;for(int id:selection)if(!d.isLocked(id))ids.insert(id);
+    bool expanded=true;while(expanded){size_t before=ids.size();for(const auto& g:d.groups)if(ids.count(g.id))for(int id:g.members)if(!d.isLocked(id))ids.insert(id);expanded=before!=ids.size();}
+    return ids;
+}
 static bool missingAnchor(const Document& d,const Object& o,const std::set<int>& ids){
     auto missingBond=[&](int id){auto* b=d.bond(id);return id&&(!b||!ids.count(b->a)||!ids.count(b->b));};
     return (o.sourceAtom&&!ids.count(o.sourceAtom))||(o.targetAtom&&!ids.count(o.targetAtom))||missingBond(o.sourceBond)||missingBond(o.targetBond);
@@ -41,8 +46,7 @@ std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,d
     if(selection.empty())throw std::runtime_error("크기를 조정할 구조·이미지를 먼저 선택하세요.");
     if(!std::isfinite(factor)||factor<.01||factor>10)throw std::runtime_error("배율은 1~1000%로 입력하세요.");
     // Scaling follows the explicit selection, even within a molecule or group.
-    std::set<int> ids;for(int id:selection)if(!d.isLocked(id))ids.insert(id);
-    bool expanded=true;while(expanded){size_t before=ids.size();for(auto& g:d.groups)if(ids.count(g.id))for(int id:g.members)if(!d.isLocked(id))ids.insert(id);expanded=before!=ids.size();}
+    auto ids=explicitEditableSelection(d,selection);
     for(auto& r:d.reactions)if(ids.count(r.id))throw std::runtime_error("메커니즘의 구조 삽입 영역이나 원자·결합을 선택하세요.");
     for(auto& p:d.plots)if(ids.count(p.id))throw std::runtime_error("그래프의 구조 삽입 영역이나 원자·결합을 선택하세요.");
     for(auto& b:d.bonds)if(ids.count(b.id)){ids.insert(b.a);ids.insert(b.b);}
@@ -58,15 +62,17 @@ std::vector<int> scaleStructures(Document& d,const std::vector<int>& selection,d
     for(auto& o:d.objects)if(ids.count(o.id)){for(auto& p:o.points)p=anchor+(p-anchor)*factor;if(o.kind!=ObjectKind::Image){o.width*=factor;if(o.cross.enabled){o.cross.width*=factor;o.cross.size*=factor;}}if(o.kind==ObjectKind::Text){o.fontSize*=factor;for(auto& run:o.runs)run.size*=factor;}}
     return {ids.begin(),ids.end()};
 }
-std::vector<int> transformStructures(Document& d,const std::vector<int>& selection,double degrees,bool flipX,bool flipY,Vec* pivot){
+std::vector<int> transformStructures(Document& d,const std::vector<int>& selection,double degrees,bool flipX,bool flipY,Vec* pivot,bool wholeMolecules){
     if(selection.empty())throw std::runtime_error("회전·반전할 구조를 먼저 선택하세요.");
     if(!std::isfinite(degrees)||std::abs(degrees)>36000)throw std::runtime_error("회전 각도는 -36000~36000도 범위로 입력하세요.");
-    auto ids=editableExpansion(d,selection);
+    auto ids=wholeMolecules?editableExpansion(d,selection):explicitEditableSelection(d,selection);
     for(auto& r:d.reactions)if(ids.count(r.id))throw std::runtime_error("반응 블록 안에서 회전할 원자·결합을 선택하세요.");
     for(auto& p:d.plots)if(ids.count(p.id))throw std::runtime_error("그래프 안에서 회전할 구조의 원자·결합을 선택하세요.");
     for(auto& b:d.bonds)if(ids.count(b.id)){ids.insert(b.a);ids.insert(b.b);}
-    std::vector<int> seeds;for(auto& a:d.atoms)if(ids.count(a.id))seeds.push_back(a.id);
-    for(int seed:seeds){auto comp=d.component(seed);ids.insert(comp.begin(),comp.end());}
+    if(wholeMolecules){
+        std::vector<int> seeds;for(auto& a:d.atoms)if(ids.count(a.id))seeds.push_back(a.id);
+        for(int seed:seeds){auto comp=d.component(seed);ids.insert(comp.begin(),comp.end());}
+    }
     for(auto& b:d.bonds)if(ids.count(b.a)&&ids.count(b.b))ids.insert(b.id);
     for(auto& o:d.objects)if(ids.count(o.id)&&(o.kind==ObjectKind::Image||o.kind==ObjectKind::Ellipse||o.kind==ObjectKind::Rectangle)&&o.text.rfind("YoungDraw.Orbital:",0)!=0)throw std::runtime_error("이미지·타원·사각형을 제외하고 원자·결합을 선택하세요.");
     double l=1e20,t=1e20,r=-1e20,b=-1e20;Vec sum;size_t count=0;auto bound=[&](Vec p){sum=sum+p;count++;l=std::min(l,p.x);r=std::max(r,p.x);t=std::min(t,p.y);b=std::max(b,p.y);};

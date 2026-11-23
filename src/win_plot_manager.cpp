@@ -20,11 +20,12 @@ HWND plotManagerWindow=nullptr;
 namespace {
 constexpr int tabFirst=4000,slotControl=4200,sideControl=4201,panelBack=4400,pathControl=4401,verticalBranch=4402,distributeStages=4403,dataFont=4404,photoExcitation=4405;
 constexpr int editStructure=4300,pasteStructure=4301,fileStructure=4302,sizeStructure=4303,removeStructure=4304;
+constexpr int axesManager=4406;
 int tableFontPoints=12;
 struct Card{int action,icon;const wchar_t* label;const wchar_t* detail;int slot=-1;};
 const std::vector<std::vector<Card>> pages={
     {{131,131,L"데이터 표",L"상태·에너지 입력"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상하 분기",L"공통 상태에서 갈라짐"}},
-    {{137,137,L"그래프 설정",L"제목·크기·표시"},{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"},{241,241,L"데이터 값 크기",L"에너지 숫자",4},{242,242,L"X축 관리",L"길이·제목·선·화살촉",5},{243,243,L"Y축 관리",L"범위·눈금·제목 간격",6},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치",7}},
+    {{137,137,L"그래프 설정",L"제목·크기·표시"},{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"},{241,241,L"데이터 값 크기",L"에너지 숫자",4},{axesManager,242,L"축 관리",L"X·Y축 선·제목·눈금·단위",5},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치",7}},
     {{139,139,L"반응 이름·화살표",L"이름 배치·줄·위치"},{136,136,L"화살표 자석 배치",L"캔버스에서 두 점 선택"},{plotAnnotationsCommand,236,L"TS·이름 위치",L"생략·갭·라벨 위치"},{addEnergyGapCommand,237,L"에너지 갭 추가",L"캔버스에 지시선 배치"},{151,151,L"스핀 교차점",L"교차 에너지·라벨"},{photoExcitation,4405,L"광여기 hν",L"빛에 의한 준위 전이"}},
     {{editStructure,186,L"구조 그리기·편집",L"선택한 위·아래 영역"},{pasteStructure,123,L"구조 붙여넣기",L"클립보드에서 삽입"},{fileStructure,124,L"구조 파일 삽입",L"CDXML·이미지 파일"},{sizeStructure,165,L"구조 크기",L"선택 구조 확대·축소"},{removeStructure,144,L"구조 제거",L"선택 영역만 비우기"}},
     {{244,244,L"곡선 굵기",L"경로 선 굵기"},{245,245,L"그림 선 굵기",L"선택 후 + / - 조절"},{plotWaveWidthCommand,250,L"물결 관리",L"물결 굵기·곡선 간격"}}
@@ -482,7 +483,9 @@ struct Manager{
         if(card){
             const float left=(box.Width-36)/2;
             appearance::rounded(g,{left,3,36,36},9,keyboardFocus||pressed?palette.hover:palette.raised);
-            icon(g,card->icon,{left+4,7,28,28},color);ui::drawLabel(g,card->label,{box.X+4,box.Y+42,box.Width-8,22},13.f,color,true,true);auto current=value(card->action);ui::drawLabel(g,current.empty()?card->detail:current,{box.X+4,box.Y+67,box.Width-8,17},11.f,palette.muted,false,true);}
+            if(card->action==axesManager){icon(g,242,{left+1,8,23,23},color);icon(g,243,{left+17,8,23,23},color);}
+            else icon(g,card->icon,{left+4,7,28,28},color);
+            ui::drawLabel(g,card->label,{box.X+4,box.Y+42,box.Width-8,22},13.f,color,true,true);auto current=value(card->action);ui::drawLabel(g,current.empty()?card->detail:current,{box.X+4,box.Y+67,box.Width-8,17},11.f,palette.muted,false,true);}
         else if(item.CtlID==dataFont){
             appearance::rounded(g,{0,0,box.Height,box.Height},7,keyboardFocus||pressed?palette.hover:palette.raised);
             icon(g,241,{4,4,box.Height-8,box.Height-8},color);
@@ -532,6 +535,7 @@ struct Manager{
         if(!graph())throw std::runtime_error("편집할 그래프가 없습니다.");if(doc.isLocked(owner))throw std::runtime_error("그래프 잠금을 해제한 뒤 편집하세요.");
         selection={owner};
         if(action==137){plotSettings(owner,true);return;}
+        if(action==axesManager){editPlotAxes(owner);return;}
         if(action==verticalBranch){openVerticalBranch();return;}
         if(action==photoExcitation){editPlotPhotoExcitation(owner);return;}
         if(action==139){openStages();return;}
