@@ -469,8 +469,8 @@ struct Manager {
             case WM_GETMINMAXINFO:{MONITORINFO monitor{sizeof(monitor)};GetMonitorInfoW(MonitorFromWindow(h,MONITOR_DEFAULTTONEAREST),&monitor);reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={std::min(640L,monitor.rcWork.right-monitor.rcWork.left),std::min(480L,monitor.rcWork.bottom-monitor.rcWork.top)};return 0;}
             case WM_SIZE:self->layout();return 0;
             case WM_COMMAND:
-                if(LOWORD(wp)==IDCANCEL){SendMessageW(h,WM_CLOSE,0,0);return 0;}
-                if(LOWORD(wp)==IDOK){self->open();return 0;}
+                if(LOWORD(wp)==IDCANCEL&&HIWORD(wp)==BN_CLICKED){SendMessageW(h,WM_CLOSE,0,0);return 0;}
+                if(LOWORD(wp)==IDOK&&HIWORD(wp)==BN_CLICKED){self->open();return 0;}
                 if(LOWORD(wp)==40&&HIWORD(wp)==LBN_SELCHANGE&&!self->refreshing){self->saveNote();self->selected=int(SendMessageW(self->projects,LB_GETCURSEL,0,0));self->currentFolder.clear();SetWindowTextW(self->search,L"");self->refreshItems();return 0;}
                 if(LOWORD(wp)==42&&HIWORD(wp)==EN_CHANGE&&!self->refreshing){self->noteDirty=true;SetWindowTextW(GetDlgItem(h,36),L"저장 중…");SetTimer(h,2,650,nullptr);return 0;}
                 if(LOWORD(wp)==44&&HIWORD(wp)==EN_CHANGE&&!self->refreshing){self->saveNote();auto files=self->selectedFiles();self->refreshItems();self->restoreSelection(files);return 0;}
@@ -547,7 +547,7 @@ void manage(HWND owner,const Callbacks& callbacks,const fs::path& initial){
         auto labelEdit=ListView_GetEditControl(manager.items);
         if(labelEdit&&(msg.hwnd==labelEdit||IsChild(labelEdit,msg.hwnd))){
             if(msg.message==WM_KEYDOWN&&(msg.wParam==VK_RETURN||msg.wParam==VK_ESCAPE)){
-                SendMessageW(manager.items,LVM_ENDEDITLABELNOW,msg.wParam==VK_ESCAPE,0);continue;
+                DispatchMessageW(&msg);continue;
             }
             TranslateMessage(&msg);DispatchMessageW(&msg);continue;
         }
