@@ -10,36 +10,6 @@ namespace {
 std::string failure;fs::path projectFolder;int phase=0,openCalls=0;bool fullEditorSeen=false;
 void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 void command(HWND h,int id){SendMessageW(h,WM_COMMAND,MAKEWPARAM(id,BN_CLICKED),0);}
-void labelState(const char* step,HWND manager,HWND list,HWND edit){
-    const auto focus=GetFocus(),current=ListView_GetEditControl(list);
-    std::cerr<<"LABEL phase="<<phase<<" step="<<step<<" edit="<<reinterpret_cast<UINT_PTR>(edit)
-        <<" alive="<<IsWindow(edit)<<" visible="<<IsWindowVisible(edit)
-        <<" current="<<reinterpret_cast<UINT_PTR>(current)<<" focus="<<reinterpret_cast<UINT_PTR>(focus)
-        <<" focusId="<<GetDlgCtrlID(focus)<<" parent="<<reinterpret_cast<UINT_PTR>(GetParent(edit))
-        <<" managerAlive="<<IsWindow(manager)<<" selected="<<ListView_GetSelectedCount(list)<<'\n';
-}
-LRESULT CALLBACK labelTrace(HWND edit,UINT message,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR){
-    if(message==WM_SETTEXT||message==WM_KILLFOCUS||message==WM_DESTROY||message==WM_NCDESTROY)
-        std::cerr<<"LABEL message="<<message<<" edit="<<reinterpret_cast<UINT_PTR>(edit)
-            <<" wp="<<wp<<" focus="<<reinterpret_cast<UINT_PTR>(GetFocus())<<'\n';
-    if(message==WM_NCDESTROY)RemoveWindowSubclass(edit,labelTrace,id);
-    return DefSubclassProc(edit,message,wp,lp);
-}
-LRESULT CALLBACK managerTrace(HWND manager,UINT message,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR){
-    if(message==WM_NOTIFY){
-        auto* header=reinterpret_cast<NMHDR*>(lp);
-        if(header->hwndFrom==GetDlgItem(manager,41)&&
-           (header->code==LVN_BEGINLABELEDITW||header->code==LVN_ENDLABELEDITW||header->code==LVN_ITEMCHANGED)){
-            std::cerr<<"MANAGER notify="<<int(header->code)<<" phase="<<phase;
-            if(header->code==LVN_ITEMCHANGED){auto* item=reinterpret_cast<NMLISTVIEW*>(lp);std::cerr<<" row="<<item->iItem<<" old="<<item->uOldState<<" new="<<item->uNewState<<" changed="<<item->uChanged;}
-            std::cerr<<'\n';
-        }
-    }
-    if(message==WM_COMMAND||message==WM_APP+70||message==WM_CLOSE)
-        std::cerr<<"MANAGER message="<<message<<" id="<<LOWORD(wp)<<" code="<<HIWORD(wp)<<" phase="<<phase<<'\n';
-    if(message==WM_NCDESTROY)RemoveWindowSubclass(manager,managerTrace,id);
-    return DefSubclassProc(manager,message,wp,lp);
-}
 void CALLBACK cancelFullEditor(HWND manager,UINT,UINT_PTR timer,DWORD){
     HWND form=nullptr;while((form=FindWindowExW(nullptr,form,L"YoungDrawForm",L"파일 이름·노트")))if(GetWindow(form,GW_OWNER)==manager)break;
     if(!form)return;KillTimer(manager,timer);
@@ -53,15 +23,13 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
     try{
         ui::attachWindowHelp(manager);for(int id=10;id<=35;id++){auto control=GetDlgItem(manager,id);if(control)check(ui::hasButtonHelp(control),"every project action has tooltip help");}
         auto list=GetDlgItem(manager,41),search=GetDlgItem(manager,44),note=GetDlgItem(manager,42);
-        SetWindowSubclass(manager,managerTrace,904,0);
         if(phase==1){
             auto saved=Project::load(projectFolder);
             check(!ListView_GetEditControl(list)&&IsWindow(manager)&&openCalls==0,"inline rename Enter finishes without opening the drawing or closing the manager");
             check(saved.items[2].name==L"Nested renamed"&&saved.items[2].note==L"needle"&&saved.items[0].name==L"폴더"&&saved.items[1].name==L"Root","filtered inline rename persists the underlying nested item and preserves siblings and note");
             check(ListView_GetItemCount(list)==1&&ListView_GetSelectedCount(list)==1,"rename refresh preserves selection in filtered results");
             command(manager,38);auto edit=ListView_GetEditControl(list);check(edit!=nullptr,"quick rename reopens the native label editor");
-            labelState("cancel-start",manager,list,edit);SetWindowSubclass(edit,labelTrace,904,0);
-            SetWindowTextW(edit,L"Discarded rename");labelState("cancel-after-settext",manager,list,edit);
+            SetWindowTextW(edit,L"Discarded rename");
             check(PostMessageW(edit,WM_KEYDOWN,VK_ESCAPE,0)!=FALSE,"queue native label cancellation");
             phase=2;SetTimer(owner,1,20,drive);return;
         }
@@ -81,10 +49,8 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
         ListView_SetItemState(list,0,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);
         const auto nested=Project::load(projectFolder).items[2];
         command(manager,38);auto edit=ListView_GetEditControl(list);check(edit!=nullptr,"quick rename opens a native editor on the filtered row");
-        labelState("commit-start",manager,list,edit);SetWindowSubclass(edit,labelTrace,904,0);
-        const auto textSet=SetWindowTextW(edit,L"Nested renamed");
-        std::cerr<<"LABEL SetWindowText result="<<textSet<<'\n';labelState("commit-after-settext",manager,list,edit);
-        const auto onDisk=Project::load(projectFolder);labelState("commit-after-project-load",manager,list,edit);
+        SetWindowTextW(edit,L"Nested renamed");
+        const auto onDisk=Project::load(projectFolder);
         check(onDisk.items[2].name==nested.name,"typing a rename does not save before Enter");
         // Post through the production message loop: IsDialogMessage must not turn Enter into Open.
         check(PostMessageW(edit,WM_KEYDOWN,VK_RETURN,0)!=FALSE,"queue native label commit");phase=1;SetTimer(owner,1,20,drive);return;
