@@ -28,13 +28,14 @@ LRESULT CALLBACK observe(int code,WPARAM wp,LPARAM lp){if(code>=0&&dispatcher){c
 }
 std::wstring labelHelp(const std::wstring& source){std::wstring label;for(auto c:source)if(c!=L'&')label+=c;auto match=[&](const wchar_t* key){return label.find(key)!=std::wstring::npos;};
     if(label==L"표시 중"||label==L"숨김 상태")return L"클릭하여 이 축을 표시하거나 숨깁니다. 굵기와 화살촉 설정은 유지됩니다.";
-    if(label==L"...")return L"색상 선택창을 열어 옆 항목의 색을 바꿉니다.";
+    if(label==L"..."||label==L"…")return L"색상 선택창을 열어 옆 항목의 색을 바꿉니다.";
+    if(match(L"빠른 이름 변경"))return L"목록에서 선택한 항목의 이름만 바로 바꿉니다. Ctrl+F2로도 실행할 수 있습니다. 이름과 노트는 F2로 함께 편집합니다.";
     if(match(L"x²")||match(L"x2"))return L"선택한 글자를 위첨자로 바꿉니다. 선택이 없으면 위첨자 입력 모드를 전환합니다.";
     if(match(L"x₂"))return L"선택한 글자를 아래첨자로 바꿉니다. 선택이 없으면 아래첨자 입력 모드를 전환합니다.";
     const std::vector<std::pair<std::wstring,std::wstring>> rules={
         {L"되돌리",L"직전 편집을 되돌립니다. 적용 전 미리보기 창에서는 그 창의 편집만 되돌립니다."},{L"실행 취소",L"직전 편집을 한 단계 되돌립니다."},{L"다시 실행",L"되돌렸던 편집을 다시 적용합니다."},
-        {L"행 추가",L"표에 새 행을 추가합니다. 새 행에 이름이나 값을 입력할 수 있습니다."},{L"행 복제",L"선택한 행을 복제하여 같은 형식의 새 항목을 만듭니다."},{L"행 삭제",L"선택한 행을 표에서 제거합니다. 되돌리기로 복구할 수 있습니다."},
-        {L"취소",L"이 창에서 미리 본 변경을 취소하고 이전 상태로 돌아갑니다."},{L"적용",L"현재 미리보기와 입력값을 원본 문서에 적용하고 편집을 확정합니다."},{L"닫기",L"현재 창을 닫습니다. 즉시 적용되는 관리 창의 변경은 실행 취소로 복원할 수 있습니다."},
+        {L"행 추가",L"표에 새 행을 추가합니다. 새 행에 이름이나 값을 입력할 수 있습니다."},{L"행 복제",L"선택한 행을 복제하여 같은 형식의 새 항목을 만듭니다."},{L"행 삭제",L"선택한 행을 표에서 제거합니다."},
+        {L"취소",L"현재 작업을 취소하고 창을 닫습니다."},{L"적용",L"현재 선택과 입력값을 적용합니다."},{L"닫기",L"현재 창을 닫습니다."},
         {L"저장",L"현재 내용과 출력 설정을 선택한 파일에 저장합니다."},{L"열기",L"선택한 항목을 열어 내용을 확인하거나 편집합니다."},{L"만들기",L"선택한 종류와 설정으로 새 항목을 만듭니다."},{L"삽입",L"선택한 구조나 항목을 현재 문서의 지정 영역에 넣습니다."},
         {L"붙여넣",L"클립보드의 구조·이미지·표 내용을 현재 선택 영역에 넣습니다."},{L"복제",L"선택한 항목을 복제합니다. 원본은 유지됩니다."},{L"복사",L"선택한 내용을 클립보드에 복사하여 다른 위치에 붙여넣을 수 있게 합니다."},
         {L"위로",L"선택한 항목을 목록에서 한 칸 위로 옮깁니다."},{L"아래로",L"선택한 항목을 목록에서 한 칸 아래로 옮깁니다."},{L"이전",L"앞 페이지나 이전 단계로 이동합니다."},{L"다음",L"다음 페이지나 다음 단계로 이동합니다."},
@@ -49,12 +50,20 @@ std::wstring labelHelp(const std::wstring& source){std::wstring label;for(auto c
     return label.empty()?L"현재 창에서 선택한 항목의 동작을 실행합니다.":label+L" 기능을 선택합니다. 관련 설정이나 선택 대상에 이 동작을 적용합니다.";
 }
 std::wstring buttonHelpText(HWND button){auto root=GetAncestor(button,GA_ROOT);auto type=classOf(root);int id=GetDlgCtrlID(button);auto label=textOf(button);
+    const auto parentType=classOf(GetParent(button));
+    if(parentType==L"YoungDrawForm"||parentType==L"YoungDrawEmbeddedForm"){
+        if(label==L"+")return L"옆 입력값을 한 단계 늘립니다. 입력란에서 ↑ 키나 마우스 휠로도 조절할 수 있습니다.";
+        if(label==L"−")return L"옆 입력값을 한 단계 줄입니다. 입력란에서 ↓ 키나 마우스 휠로도 조절할 수 있습니다.";
+        if(label==L"𝑰")return L"옆 입력란의 선택한 글자를 기울임꼴로 바꿉니다. Ctrl+I로도 전환할 수 있습니다.";
+        if(label==L"x²")return labelHelp(label)+L" 입력란에서 F10 또는 Ctrl+Shift+=로도 전환할 수 있습니다.";
+        if(label==L"x₂")return labelHelp(label)+L" 입력란에서 F9 또는 Ctrl+=로도 전환할 수 있습니다.";
+    }
     if(type==L"YoungDrawMechanismPicker"&&id>=100&&id<104){
         const wchar_t* paths[]={L"단계를 왼쪽에서 오른쪽으로 차례로 연결합니다.",L"가로 경로가 아래로 꺾여 촉매 순환에 연결됩니다.",
             L"가로 경로가 좌우로 분기된 뒤 마지막 단계에서 합류합니다.",L"마지막 단계에서 첫 단계로 돌아오는 닫힌 경로를 만듭니다."};
         return paths[id-100];
     }
-    if(classOf(GetParent(button))==L"YoungDrawGraphPicker"){
+    if(parentType==L"YoungDrawGraphPicker"){
         if(id>=100&&id<105){const wchar_t* detail[]={L"봉우리와 중간체를 부드러운 곡선으로 연결합니다.",L"상태 사이를 직선으로 연결합니다.",L"평평한 에너지 준위를 점선으로 연결합니다.",L"평평한 에너지 준위를 실선으로 연결합니다.",L"상태들을 연결선 없이 독립 에너지 준위로 비교합니다."};return std::wstring(detail[id-100])+L" 카드를 누르면 선택한 형태를 미리 볼 수 있습니다.";}
         if(id==200)return L"그래프를 전자 에너지 차이 ΔE 표기로 만듭니다.";if(id==201)return L"그래프를 자유 에너지 차이 ΔG 표기로 만듭니다.";
     }

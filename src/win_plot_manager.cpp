@@ -352,6 +352,44 @@ struct Manager{
         InvalidateRect(window,nullptr,FALSE);
     }
 
+    void editPreview(Vec cursor){
+        if(busy||subpane||panelVisible()||!graph()||!preview.Contains(float(cursor.x),float(cursor.y)))return;
+        const auto& scene=currentScene();const auto view=fitPreview(scene);
+        const auto point=(cursor-view.origin)*(1/view.scale);const double pad=5/view.scale;
+        int action=0,row=-1,column=1;
+        for(auto it=scene.items.rbegin();it!=scene.items.rend();++it){
+            const auto& item=*it;
+            if(item.owner!=owner||item.type!=Primitive::Text||!item.textRole||item.points.empty()||item.rotation!=0)continue;
+            const auto at=item.points.front();const double width=measure(item.text,item.fontSize,item.font,item.face);
+            if(point.x<at.x-pad||point.x>at.x+width+pad||point.y<at.y-pad||point.y>at.y+item.fontSize*1.3+pad)continue;
+            if(item.textRole==4)action=137;
+            else if(item.textRole==7)action=plotLegendCommand;
+            else if(item.textRole==6||item.textRole==8){action=131;row=item.textIndex;column=item.textRole==6?1:2;}
+            else if(item.textRole==12){action=139;row=item.textIndex;}
+            if(action)break;
+        }
+        if(!action){
+            auto found=scene.plotSnapPoints.find(owner);double best=12;
+            if(found!=scene.plotSnapPoints.end())for(const auto& snap:found->second){
+                const double distance=(snap.p*view.scale+view.origin-cursor).length();
+                if(distance<best){best=distance;action=131;row=snap.state;column=snap.path+2;}
+            }
+        }
+        if(!action)return;
+        selectPage(action==139?2:action==131?0:1);
+        SendMessageW(window,WM_COMMAND,action,0);
+        if(!grid||row<0)return;
+        auto list=GetDlgItem(grid,10);if(!list||row>=ListView_GetItemCount(list))return;
+        column=std::clamp(column,1,std::max(1,Header_GetItemCount(ListView_GetHeader(list))-1));
+        ListView_EnsureVisible(list,row,FALSE);RECT cell{},client{};
+        ListView_GetSubItemRect(list,row,column,LVIR_BOUNDS,&cell);GetClientRect(list,&client);
+        if(cell.left<45)ListView_Scroll(list,cell.left-45,0);
+        else if(cell.right>client.right)ListView_Scroll(list,cell.right-client.right,0);
+        ListView_GetSubItemRect(list,row,column,LVIR_BOUNDS,&cell);
+        // Reuse the grid's existing cell-selection and script-editing path.
+        SendMessageW(list,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(std::clamp(cell.left+5,46L,std::max(46L,client.right-5)),cell.top+5));
+    }
+
     void layout(){
         RECT client{};GetClientRect(window,&client);const int width=client.right,height=client.bottom;
         const bool expanded=panelVisible()||subpane;
@@ -384,9 +422,10 @@ struct Manager{
         place(GetDlgItem(window,IDCANCEL),width-124,height-46,104,30,!subpane);
         EndDeferWindowPos(batch);InvalidateRect(window,nullptr,FALSE);
     }
-    void selectPage(int selected){
-        if(subpane||!flushGrid())return;
+    bool selectPage(int selected){
+        if(subpane||!flushGrid())return false;
         page=selected;cachedScene.reset();targets();layout();for(int i=0;i<5;i++)InvalidateRect(GetDlgItem(window,tabFirst+i),nullptr,FALSE);
+        return true;
     }
     void initializeCards(){
         for(const auto& category:pages)for(const auto& card:category)cards.push_back(button(card.action,card.label));
@@ -447,7 +486,7 @@ struct Manager{
     void paint(HDC dc){
         Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);const auto& palette=appearance::palette();RECT client{};GetClientRect(window,&client);SolidBrush background(palette.panel);g.FillRectangle(&background,0,0,client.right,client.bottom);
         text(g,L"그래프 관리",20,16,21,palette.text,true);
-        text(g,panelVisible()&&panel==plotLegendCommand?L"미리보기 · 범례를 끌어 위치 이동":L"그래프 미리보기",preview.X,68,12,palette.muted,true);appearance::rounded(g,preview,8,Color(255,255,255,255));
+        text(g,panelVisible()&&panel==plotLegendCommand?L"미리보기 · 범례를 끌어 위치 이동":L"더블클릭: 이름·기본 경로 값·범례·경로의 상태 점 편집",preview.X,68,12,palette.muted,true);appearance::rounded(g,preview,8,Color(255,255,255,255));
         if(graph())try{
             const auto& sc=currentScene();
             const auto view=fitPreview(sc);
@@ -514,6 +553,7 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     case WM_DRAWITEM:self->draw(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
     case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:return self->colors.control(message,reinterpret_cast<HDC>(wp));
     case WM_LBUTTONDOWN:try{self->startLegendDrag({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});}catch(const std::exception&){}return 0;
+    case WM_LBUTTONDBLCLK:try{self->editPreview({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});}catch(const std::exception& error){self->notice=ui::wide(error.what());InvalidateRect(h,nullptr,FALSE);}return 0;
     case WM_MOUSEMOVE:if(self->legendDrag)self->moveLegend({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;
     case WM_LBUTTONUP:self->endLegendDrag();return 0;
     case WM_CAPTURECHANGED:self->endLegendDrag();return 0;
@@ -557,7 +597,7 @@ void managePlot(int id,bool visible){
         }
         return;
     }
-    WNDCLASSW wc{};wc.lpfnWndProc=managerProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawPlotManager";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
+    WNDCLASSW wc{};wc.lpfnWndProc=managerProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawPlotManager";wc.style=CS_DBLCLKS;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
     auto* state=new Manager;state->owner=id;auto rect=ui::ownedWindowRect(win,1120,780);
     auto h=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"그래프 관리",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,win,nullptr,wc.hInstance,state);
     if(!h){delete state;throw std::runtime_error("그래프 관리 창을 열 수 없습니다.");}plotManagerWindow=h;if(visible){ShowWindow(h,SW_SHOW);UpdateWindow(h);}
@@ -583,6 +623,13 @@ bool handlePlotManagerMessage(MSG& message){
     }
     if(message.message==WM_KEYDOWN){
         const auto k=message.wParam;
+        if(!manager->subpane&&!manager->busy&&(GetKeyState(VK_CONTROL)&0x8000)){
+            if(k==VK_TAB||(k>='1'&&k<='5')){
+                const int next=k==VK_TAB?(manager->page+((GetKeyState(VK_SHIFT)&0x8000)?4:1))%5:int(k-'1');
+                if(manager->selectPage(next))SetFocus(GetDlgItem(window,tabFirst+manager->page));return true;
+            }
+            if(k==VK_RETURN&&!inGrid&&!inForm){manager->selectPage(0);SendMessageW(window,WM_COMMAND,131,0);return true;}
+        }
         if(!manager->subpane&&manager->page==4&&(k==VK_ADD||k==VK_OEM_PLUS||k==VK_SUBTRACT||k==VK_OEM_MINUS)){
             manager->stepWeight(k==VK_ADD||k==VK_OEM_PLUS);return true;
         }

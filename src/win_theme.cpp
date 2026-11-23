@@ -19,12 +19,12 @@ using namespace Gdiplus;
 namespace {
 Color c(unsigned rgb,BYTE a=255){return Color(a,BYTE(rgb>>16),BYTE(rgb>>8),BYTE(rgb));}
 const Palette themes[]={
- {c(0x101a2b),c(0x162237),c(0x1e2d45),c(0x2a3e58),c(0x30415a),c(0xe9eff8),c(0x98abc3),c(0xdcc28b),c(0x172238),c(0xf9fafc),c(0x202c3e),L"아틀리에",L"네이비 · 샴페인 골드 / 정밀한 작업을 위한 스튜디오",false,0},
- {c(0x0d1420),c(0x121d2c),c(0x1a293c),c(0x253c50),c(0x2b4053),c(0xe0edf3),c(0x8ca7b9),c(0x74d9d0),c(0x102029),c(0x142131),c(0xe1edf5),L"미드나이트",L"딥 블루 · 아이스 민트 / 밤의 몰입",true,0},
- {c(0xe9e2d6),c(0xf3ede2),c(0xfffbf4),c(0xe0d4c1),c(0xd0c5b3),c(0x3c3b38),c(0x7c7467),c(0x846640),c(0xfffbf4),c(0xfffcf3),c(0x39352c),L"아카이브",L"아이보리 · 잉크 / 오래 간직할 연구 노트",false,0},
- {c(0x34301d),c(0x433d25),c(0x514b2c),c(0x665d35),c(0x756841),c(0xf4edca),c(0xbdb183),c(0xe7ce70),c(0x302b18),c(0xe9dfb4),c(0x322c18),L"백룸",L"LEVEL 0 / 형광등의 잔향, 끝없이 반복되는 노란 방",false,201},
- {c(0x2a253c),c(0x382f49),c(0x493c58),c(0x5c496a),c(0x705871),c(0xf8e7dd),c(0xc9aeb8),c(0xf2ba9a),c(0x3a2b3b),c(0xf5e7dc),c(0x473343),L"노스텔지아",L"AFTER THE RAIN / CRT, 여름비, 돌아갈 수 없는 저녁",false,202},
- {c(0x110f17),c(0x1c1620),c(0x2b202b),c(0x412a38),c(0x51323e),c(0xeee5e6),c(0xb799a5),c(0xe79a9f),c(0x29151e),c(0x171d24),c(0xe9e7dd),L"공포",L"THE LAST EXPERIMENT / 붉은 경고등 아래, 비어 있는 실험실",true,203},
+ {c(0x101a2b),c(0x162237),c(0x1e2d45),c(0x2a3e58),c(0x30415a),c(0xe9eff8),c(0x98abc3),c(0xdcc28b),c(0x172238),c(0xf9fafc),c(0x202c3e),L"아틀리에",L"네이비·골드 도구 영역 · 밝은 캔버스",false,0},
+ {c(0x0d1420),c(0x121d2c),c(0x1a293c),c(0x253c50),c(0x2b4053),c(0xe0edf3),c(0x8ca7b9),c(0x74d9d0),c(0x102029),c(0x142131),c(0xe1edf5),L"미드나이트",L"블루·민트 도구 영역 · 어두운 캔버스",true,0},
+ {c(0xe9e2d6),c(0xf3ede2),c(0xfffbf4),c(0xe0d4c1),c(0xd0c5b3),c(0x3c3b38),c(0x7c7467),c(0x846640),c(0xfffbf4),c(0xfffcf3),c(0x39352c),L"아카이브",L"아이보리 도구 영역 · 밝은 노트 배경",false,0},
+ {c(0x34301d),c(0x433d25),c(0x514b2c),c(0x665d35),c(0x756841),c(0xf4edca),c(0xbdb183),c(0xe7ce70),c(0x302b18),c(0xe9dfb4),c(0x322c18),L"백룸",L"노란 방 사진 · 밝은 캔버스",false,201},
+ {c(0x2a253c),c(0x382f49),c(0x493c58),c(0x5c496a),c(0x705871),c(0xf8e7dd),c(0xc9aeb8),c(0xf2ba9a),c(0x3a2b3b),c(0xf5e7dc),c(0x473343),L"노스텔지아",L"비 오는 풍경 사진 · 밝은 캔버스",false,202},
+ {c(0x110f17),c(0x1c1620),c(0x2b202b),c(0x412a38),c(0x51323e),c(0xeee5e6),c(0xb799a5),c(0xe79a9f),c(0x29151e),c(0x171d24),c(0xe9e7dd),L"공포",L"실험실 사진 · 어두운 캔버스",true,203},
  {c(0xe5ebf1),c(0xedf1f5),c(0xfbfcfe),c(0xced9e3),c(0xc7d1dc),c(0x34404b),c(0x667687),c(0x4c6278),c(0xffffff),c(0xedf1f5),c(0x283a4a),L"교수님이 보고있어",L"반투명 사진 · 2.4초마다 번쩍이는 눈빛",false,205}
 };
 Settings current;
@@ -33,7 +33,7 @@ std::array<IStream*,4> streams{};
 std::unique_ptr<Bitmap> cached;
 int cacheW=0,cacheH=0,cacheKey=-1;
 const wchar_t* patternNames[]={L"없음",L"도트",L"격자",L"줄노트",L"등각 격자",L"육각 결합"};
-const wchar_t* intensityNames[]={L"은은하게",L"균형 있게",L"몰입감 있게"};
+const wchar_t* intensityNames[]={L"약하게",L"보통",L"강하게"};
 void resetCache(){cached.reset();cacheKey=-1;}
 Bitmap* image(int id){
  if((id<201||id>203)&&id!=205)return nullptr;size_t i=id==205?3:size_t(id-201);
@@ -143,7 +143,7 @@ void pickerCard(Graphics& g,const Picker& state,int theme,RectF box){
      box.X+1.f,box.Y+88.f,box.Width-2.f,box.Height-89.f);
  g.Restore(saved);
  label(g,look.name,{box.X+10.f,box.Y+94.f,box.Width-20.f,27.f},18,look.text,true,true);
- label(g,theme>=3?L"시네마틱 배경":L"워크스페이스",
+ label(g,theme>=3?L"사진 배경":L"기본 배경",
      {box.X+10.f,box.Y+123.f,box.Width-20.f,19.f},13,look.muted,false,true);
  // One crisp outline after painting the contents avoids doubled 1px borders.
  outline(g,{box.X+1.f,box.Y+1.f,box.Width-2.f,box.Height-2.f},11,
@@ -181,20 +181,20 @@ void drawPicker(Graphics& g,const Picker& state){
  g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
  g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
  g.SetCompositingQuality(CompositingQualityHighQuality);
- label(g,L"작업실의 분위기를 고르세요",{24,20,870,35},23,pal.text,true);
- label(g,L"테마와 문양은 화면에만 적용됩니다. 문서·SVG·Office 출력은 원래 색상을 유지합니다.",
+ label(g,L"테마 선택",{24,20,870,35},23,pal.text,true);
+ label(g,L"누르면 미리보기 · 적용으로 저장 · 취소로 복원. 문서·SVG·Office 출력 색상은 유지됩니다.",
        {24,62,870,25},14,pal.muted);
  const auto items=targets();
  for(int i=0;i<7;i++)pickerCard(g,state,i,items[size_t(i)].box);
- label(g,L"바탕 문양",{24,424,870,28},15,pal.text,true);
+ label(g,L"배경 무늬",{24,424,870,28},15,pal.text,true);
  for(int i=0;i<6;i++)pickerButton(g,state,200+i,items[size_t(7+i)].box,
      patternNames[i],current.pattern==i);
- label(g,L"배경의 존재감",{24,526,870,28},15,pal.text,true);
+ label(g,L"사진 배경 강도",{24,526,870,28},15,pal.text,true);
  for(int i=0;i<3;i++)pickerButton(g,state,300+i,items[size_t(13+i)].box,
      intensityNames[i],current.intensity==i);
  label(g,pal.description,{24,613,600,24},13,pal.muted);
  pickerButton(g,state,IDCANCEL,items[17].box,L"취소");
- pickerButton(g,state,IDOK,items[16].box,L"이 분위기로 작업하기",true);
+ pickerButton(g,state,IDOK,items[16].box,L"적용",true);
 }
 int hitTest(float x,float y){
  const auto items=targets();
@@ -252,7 +252,22 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
      paint.Flush(FlushIntentionSync);
      Graphics output(dc);ui::presentPixels(output,buffer);
      EndPaint(hwnd,&ps);
-     std::vector<ui::HelpRegion> help;for(const auto& target:targets()){auto b=target.box;std::wstring text=target.id>=100&&target.id<107?L"이 테마를 미리 봅니다. 적용을 누르면 화면 색상과 배경 설정이 저장됩니다.":target.id>=200&&target.id<206?L"캔버스 배경 무늬를 선택합니다. 내보낸 투명 PNG에는 무늬가 포함되지 않습니다.":target.id>=300&&target.id<303?L"배경 무늬의 표시 강도를 선택합니다.":ui::labelHelp(target.id==IDOK?L"적용":L"취소");help.push_back({UINT_PTR(target.id),{LONG(b.X*w/pickerWidth),LONG(b.Y*h/pickerHeight),LONG(b.GetRight()*w/pickerWidth),LONG(b.GetBottom()*h/pickerHeight)},text});}ui::setRegionHelp(hwnd,help);return 0;
+     std::vector<ui::HelpRegion> help;
+     for(const auto& target:targets()){
+         const int id=target.id;std::wstring text;
+         if(id>=100&&id<107){
+             const auto& look=themes[id-100];
+             text=std::wstring(look.name)+L" · "+look.description+L". 클릭하여 미리 보고 적용으로 저장합니다.";
+         }else if(id>=200&&id<206){
+             text=std::wstring(patternNames[id-200])+L" 배경 무늬를 미리 봅니다. 문서 데이터와 SVG·Office 출력은 바뀌지 않습니다.";
+         }else if(id>=300&&id<303){
+             text=std::wstring(intensityNames[id-300])+L": 사진 배경의 선명도를 미리 봅니다. 기본 배경과 무늬의 강도는 바뀌지 않습니다.";
+         }else if(id==IDOK)text=L"미리 본 테마·배경 무늬·사진 강도를 저장하고 닫습니다. 문서 내용은 바뀌지 않습니다.";
+         else text=L"이 창을 열기 전의 테마·배경 무늬·사진 강도로 돌아갑니다. Esc로도 취소할 수 있습니다.";
+         const auto b=target.box;
+         help.push_back({UINT_PTR(id),{LONG(b.X*w/pickerWidth),LONG(b.Y*h/pickerHeight),LONG(b.GetRight()*w/pickerWidth),LONG(b.GetBottom()*h/pickerHeight)},text});
+     }
+     ui::setRegionHelp(hwnd,help);return 0;
  }
  case WM_MOUSEMOVE:{
      if(!state->tracking){

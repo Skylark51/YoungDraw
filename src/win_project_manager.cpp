@@ -161,7 +161,8 @@ struct Manager {
         int side=std::clamp(rightWidth,180,std::max(180,w/2));
         int x=left+22,px=std::max(x+180,w-side-10);side=w-px-10;
         auto place=[&](int id,int xx,int yy,int ww,int hh){MoveWindow(GetDlgItem(window,id),xx,yy,std::max(1,ww),std::max(1,hh),TRUE);};
-        constexpr int tileHeight=46,rowPitch=48;
+        const bool compact=h<600;
+        const int tileHeight=46,rowPitch=compact?46:48;
         const int leftTile=left/3;
         place(1,10,10,left-44,24);place(16,left-30,4,40,tileHeight);
         for(int i=0;i<6;++i)place(10+i,10+(i%3)*leftTile,52+(i/3)*rowPitch,leftTile,tileHeight);
@@ -173,9 +174,11 @@ struct Manager {
         const int cols=std::max(1,centerWidth/55),rows=(13+cols-1)/cols;
         const int tileWidth=std::clamp(centerWidth/cols,55,72);
         for(int i=0;i<13;++i)place(actionIds[i],x+(i%cols)*tileWidth,38+(i/cols)*rowPitch,tileWidth,tileHeight);
-        const int sy=40+rows*rowPitch;place(46,x,sy,px-x-10,22);MoveWindow(search,x,sy+24,std::max(1,px-x-10),28,TRUE);
-        MoveWindow(breadcrumb,x,sy+58,std::max(1,px-x-10),24,TRUE);
-        int top=sy+86;MoveWindow(items,x,top,std::max(1,px-x-10),std::max(1,h-top-34),TRUE);
+        const int sy=40+rows*rowPitch;place(46,x,sy,px-x-10,22);
+        const int searchTop=sy+(compact?0:24);
+        MoveWindow(search,x,searchTop,std::max(1,px-x-10),28,TRUE);
+        MoveWindow(breadcrumb,x,searchTop+34,std::max(1,px-x-10),24,TRUE);
+        int top=searchTop+62;MoveWindow(items,x,top,std::max(1,px-x-10),std::max(1,h-top-34),TRUE);
         ListView_SetColumnWidth(items,0,std::max(90,px-x-115));ListView_SetColumnWidth(items,1,90);
         leftGrip={left+10,projectsTop,x,h-34};rightGrip={px-9,52,px,h-34};
         constexpr int previewTile=44;
@@ -185,6 +188,7 @@ struct Manager {
         place(28,px,h-78,56,tileHeight);place(36,px+62,h-66,side-62,24);
         MoveWindow(hint,10,h-26,std::max(1,w-20),22,TRUE);
         for(int id:{1,3,16,40,41,42,43,2,28,36,44,45,46})ShowWindow(GetDlgItem(window,id),expanded?SW_HIDE:SW_SHOW);
+        ShowWindow(GetDlgItem(window,46),expanded||compact?SW_HIDE:SW_SHOW);
         for(int id=10;id<=31;++id)if(GetDlgItem(window,id))ShowWindow(GetDlgItem(window,id),expanded?SW_HIDE:SW_SHOW);
         if(expanded){preview={10,54,w-10,h-10};for(int i=32;i<=35;++i)place(i,10+(i-32)*previewTile,4,previewTile,tileHeight);}
         InvalidateRect(window,nullptr,TRUE);
@@ -215,7 +219,7 @@ struct Manager {
         EnableWindow(GetDlgItem(window,14),p!=nullptr);
         item=-1;noteDirty=false;refreshing=false;int row=rowIndex(index);selectItem(row>=0?index:-1);
         if(row>=0){ListView_SetItemState(items,row,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);ListView_EnsureVisible(items,row,FALSE);}
-        SetWindowTextW(hint,(std::to_wstring(visible.size())+L"개 항목  ·  Ctrl+F 검색  ·  Ctrl/Shift 다중 선택  ·  끌어놓기로 추가·이동").c_str());
+        SetWindowTextW(hint,(std::to_wstring(visible.size())+L"개 항목  ·  Ctrl+F 검색  ·  Ctrl+F2 빠른 이름 변경  ·  끌어놓기로 추가·이동").c_str());
     }
     void refreshProjects(int index){
         refreshing=true;SendMessageW(projects,LB_RESETCONTENT,0,0);for(auto& p:all)SendMessageW(projects,LB_ADDSTRING,0,(LPARAM)p.name.c_str());
@@ -235,6 +239,11 @@ struct Manager {
         return ui::form(window,title,{{L"이름 (최대 200자)",ui::utf8(name)},{L"노트",ui::utf8(text),true,{},false,7}});
     }
     void open(){auto p=project();if(!p||item<0)return;saveNote();if(p->items[item].isFolder){currentFolder=p->items[item].file;SetWindowTextW(search,L"");refreshItems();return;}callbacks.open((p->folder/p->items[item].file).wstring());DestroyWindow(window);}
+    void renameItem(){
+        if(!project()||item<0)return;
+        saveNote();const int row=rowIndex(item);if(row<0)return;
+        SetFocus(items);ListView_EnsureVisible(items,row,FALSE);ListView_EditLabel(items,row);
+    }
     void addFiles(const std::vector<fs::path>& files){
         auto p=project();if(!p)return;saveNote();int last=item;std::wstring errors;
         for(auto& path:files){try{last=int(p->add(path,currentFolder));}catch(const std::exception& e){errors+=path.filename().wstring()+L": "+ui::wide(e.what())+L"\n";}}
@@ -266,6 +275,7 @@ struct Manager {
     }
     void action(int id){
         saveNote();auto p=project();
+        if(id==38){renameItem();return;}
         if(id==32){expanded=!expanded;zoom=1;layout();return;}
         if(id==33||id==34||id==35){zoom=id==35?1.0:std::clamp(zoom*(id==33?1.25:0.8),0.25,4.0);InvalidateRect(window,&preview,TRUE);return;}
         if(id==30){if(p&&!currentFolder.empty()){auto it=std::find_if(p->items.begin(),p->items.end(),[&](const auto& e){return e.file==currentFolder;});currentFolder=it==p->items.end()?L"":it->parent;}SetWindowTextW(search,L"");refreshItems();return;}
@@ -343,7 +353,7 @@ struct Manager {
         HMENU menu=CreatePopupMenu();
         auto add=[&](int id,const wchar_t* label){AppendMenuW(menu,MF_STRING,id,label);};
         if(source==projects){add(10,L"새 프로젝트");add(11,L"프로젝트 정보");add(13,L"불러오기");add(14,L"ZIP 내보내기");add(15,L"프로젝트 폴더 열기");add(12,L"프로젝트 삭제");}
-        else{add(23,L"열기 / 편집\tEnter");add(24,L"이름·노트\tF2");add(17,L"선택 항목 복제");add(31,L"선택 항목 이동…");add(18,L"선택 항목 ZIP 내보내기…");add(37,L"원본 위치 열기");add(25,L"선택 항목 제외\tDelete");AppendMenuW(menu,MF_SEPARATOR,0,nullptr);add(29,L"새 폴더");add(20,L"새 구조");add(21,L"파일 추가…");add(22,L"현재 문서 추가");}
+        else{add(23,L"열기 / 편집\tEnter");add(24,L"이름·노트\tF2");add(38,L"빠른 이름 변경\tCtrl+F2");add(17,L"선택 항목 복제");add(31,L"선택 항목 이동…");add(18,L"선택 항목 ZIP 내보내기…");add(37,L"원본 위치 열기");add(25,L"선택 항목 제외\tDelete");AppendMenuW(menu,MF_SEPARATOR,0,nullptr);add(29,L"새 폴더");add(20,L"새 구조");add(21,L"파일 추가…");add(22,L"현재 문서 추가");}
         int command=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,window,nullptr);DestroyMenu(menu);if(command)action(command);
     }
     void paint(){
@@ -429,7 +439,7 @@ struct Manager {
                 self->breadcrumb=self->control(L"STATIC",L"",45,SS_ENDELLIPSIS);
                 self->projects=self->control(L"LISTBOX",L"",40,WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|WS_TABSTOP);
                 SendMessageW(self->projects,LB_SETITEMHEIGHT,0,24);
-                self->items=self->control(WC_LISTVIEWW,L"",41,LVS_REPORT|LVS_SHOWSELALWAYS|WS_TABSTOP);
+                self->items=self->control(WC_LISTVIEWW,L"",41,LVS_REPORT|LVS_SHOWSELALWAYS|LVS_EDITLABELS|WS_TABSTOP);
                 self->images=ImageList_Create(20,20,ILC_COLOR32|ILC_MASK,2,0);
                 for(auto stock:{SIID_FOLDER,SIID_DOCNOASSOC}){SHSTOCKICONINFO icon{sizeof(icon)};if(SUCCEEDED(SHGetStockIconInfo(stock,SHGSI_ICON|SHGSI_SMALLICON,&icon))){ImageList_AddIcon(self->images,icon.hIcon);DestroyIcon(icon.hIcon);}}
                 ListView_SetImageList(self->items,self->images,LVSIL_SMALL);
@@ -459,13 +469,26 @@ struct Manager {
             case WM_GETMINMAXINFO:{MONITORINFO monitor{sizeof(monitor)};GetMonitorInfoW(MonitorFromWindow(h,MONITOR_DEFAULTTONEAREST),&monitor);reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={std::min(640L,monitor.rcWork.right-monitor.rcWork.left),std::min(480L,monitor.rcWork.bottom-monitor.rcWork.top)};return 0;}
             case WM_SIZE:self->layout();return 0;
             case WM_COMMAND:
-                if(LOWORD(wp)==IDCANCEL){SendMessageW(h,WM_CLOSE,0,0);return 0;}
-                if(LOWORD(wp)==IDOK){self->open();return 0;}
+                if(LOWORD(wp)==IDCANCEL&&HIWORD(wp)==BN_CLICKED){SendMessageW(h,WM_CLOSE,0,0);return 0;}
+                if(LOWORD(wp)==IDOK&&HIWORD(wp)==BN_CLICKED){self->open();return 0;}
                 if(LOWORD(wp)==40&&HIWORD(wp)==LBN_SELCHANGE&&!self->refreshing){self->saveNote();self->selected=int(SendMessageW(self->projects,LB_GETCURSEL,0,0));self->currentFolder.clear();SetWindowTextW(self->search,L"");self->refreshItems();return 0;}
                 if(LOWORD(wp)==42&&HIWORD(wp)==EN_CHANGE&&!self->refreshing){self->noteDirty=true;SetWindowTextW(GetDlgItem(h,36),L"저장 중…");SetTimer(h,2,650,nullptr);return 0;}
-                if(LOWORD(wp)==44&&HIWORD(wp)==EN_CHANGE&&!self->refreshing){self->saveNote();self->refreshItems();return 0;}
+                if(LOWORD(wp)==44&&HIWORD(wp)==EN_CHANGE&&!self->refreshing){self->saveNote();auto files=self->selectedFiles();self->refreshItems();self->restoreSelection(files);return 0;}
                 if(HIWORD(wp)==BN_CLICKED){self->action(LOWORD(wp));return 0;}break;
             case WM_NOTIFY:{auto hdr=reinterpret_cast<NMHDR*>(lp);if(hdr->hwndFrom!=self->items)break;
+                if(hdr->code==LVN_BEGINLABELEDITW){
+                    auto edit=reinterpret_cast<NMLVDISPINFOW*>(lp);if(!self->project()||self->modelIndex(edit->item.iItem)<0)return TRUE;
+                    self->saveNote();SendMessageW(ListView_GetEditControl(self->items),EM_SETLIMITTEXT,200,0);return FALSE;
+                }
+                if(hdr->code==LVN_ENDLABELEDITW){
+                    auto edit=reinterpret_cast<NMLVDISPINFOW*>(lp);const int index=self->modelIndex(edit->item.iItem);auto p=self->project();
+                    if(!p||index<0||!edit->item.pszText)return FALSE;
+                    const std::wstring name=edit->item.pszText;
+                    if(name.empty()||name.size()>200||name.find_first_not_of(L" \t\r\n")==std::wstring::npos){SetWindowTextW(self->hint,L"이름을 1~200자로 입력하세요. Ctrl+F2로 다시 변경할 수 있습니다.");return FALSE;}
+                    const auto before=p->items[index].name;if(name==before)return FALSE;p->items[index].name=name;
+                    try{p->save();}catch(const std::exception& error){p->items[index].name=before;SetWindowTextW(self->hint,ui::wide(error.what()).c_str());return FALSE;}
+                    PostMessageW(h,WM_APP+70,index,0);return TRUE;
+                }
                 if(hdr->code==NM_CUSTOMDRAW){
                     auto* draw=reinterpret_cast<NMLVCUSTOMDRAW*>(lp);
                     if(draw->nmcd.dwDrawStage==CDDS_PREPAINT)return CDRF_NOTIFYITEMDRAW;
@@ -483,8 +506,9 @@ struct Manager {
                 if(hdr->code==NM_DBLCLK){auto n=reinterpret_cast<NMITEMACTIVATE*>(lp);if(n->iItem>=0){self->selectItem(self->modelIndex(n->iItem));self->open();}}
                 if(hdr->code==LVN_GETINFOTIPW){auto tip=reinterpret_cast<NMLVGETINFOTIPW*>(lp);int index=self->modelIndex(tip->iItem);if(index>=0){auto& entry=self->project()->items[index];auto text=entry.name+L"\r\n"+self->folderPath(entry.parent)+L"\r\n"+entry.note;lstrcpynW(tip->pszText,text.c_str(),tip->cchTextMax);}}
                 if(hdr->code==LVN_BEGINDRAG){self->saveNote();self->dragging=reinterpret_cast<NMLISTVIEW*>(lp)->iItem;SetCapture(h);SetTimer(h,1,90,nullptr);self->dragPosition();}
-                if(hdr->code==LVN_KEYDOWN){auto key=reinterpret_cast<NMLVKEYDOWN*>(lp)->wVKey;if(key==VK_RETURN)self->open();else if(key==VK_F2)self->action(24);else if(key==VK_DELETE)self->action(25);else if(key==VK_BACK)self->action(30);else if(key=='A'&&(GetKeyState(VK_CONTROL)&0x8000))ListView_SetItemState(self->items,-1,LVIS_SELECTED,LVIS_SELECTED);}
+                if(hdr->code==LVN_KEYDOWN){auto key=reinterpret_cast<NMLVKEYDOWN*>(lp)->wVKey;if(key==VK_RETURN)self->open();else if(key==VK_F2)self->action((GetKeyState(VK_CONTROL)&0x8000)?38:24);else if(key==VK_DELETE)self->action(25);else if(key==VK_BACK)self->action(30);else if(key=='A'&&(GetKeyState(VK_CONTROL)&0x8000))ListView_SetItemState(self->items,-1,LVIS_SELECTED,LVIS_SELECTED);}
                 return 0;}
+            case WM_APP+70:{auto files=self->selectedFiles();self->refreshItems();self->restoreSelection(files);return 0;}
             case WM_CONTEXTMENU:{self->contextMenu((HWND)wp,{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)});return 0;}
             case WM_LBUTTONDBLCLK:{POINT pt{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};if(PtInRect(&self->preview,pt))self->action(32);return 0;}
             case WM_MOUSEWHEEL:{POINT pt{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(h,&pt);if(PtInRect(&self->preview,pt))self->action(GET_WHEEL_DELTA_WPARAM(wp)>0?33:34);return 0;}
@@ -516,7 +540,35 @@ void manage(HWND owner,const Callbacks& callbacks,const fs::path& initial){
     if(!window)throw std::runtime_error("프로젝트 창을 열 수 없습니다.");
     appearance::titlebar(window);
     EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);MSG msg{};
-    while(IsWindow(window)){BOOL result=GetMessageW(&msg,nullptr,0,0);if(result<=0){if(result==0)PostQuitMessage(int(msg.wParam));break;}if(msg.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&msg.wParam=='F'){SetFocus(manager.search);SendMessageW(manager.search,EM_SETSEL,0,-1);continue;}if(!IsDialogMessageW(window,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
+    while(IsWindow(window)){
+        BOOL result=GetMessageW(&msg,nullptr,0,0);if(result<=0){if(result==0)PostQuitMessage(int(msg.wParam));break;}
+        // Finish before translating Enter/Escape: a trailing WM_CHAR can outlive the
+        // label editor and be interpreted as the manager's Open/Close command.
+        auto labelEdit=ListView_GetEditControl(manager.items);
+        if(labelEdit&&(msg.hwnd==labelEdit||IsChild(labelEdit,msg.hwnd))){
+            if(msg.message==WM_KEYDOWN&&(msg.wParam==VK_RETURN||msg.wParam==VK_ESCAPE)){
+                DispatchMessageW(&msg);continue;
+            }
+            TranslateMessage(&msg);DispatchMessageW(&msg);continue;
+        }
+        if(msg.message==WM_KEYDOWN){
+            if((GetKeyState(VK_CONTROL)&0x8000)&&msg.wParam=='F'){
+                if(manager.expanded)manager.action(32);SetFocus(manager.search);SendMessageW(manager.search,EM_SETSEL,0,-1);continue;
+            }
+            if(msg.hwnd==manager.search){
+                if(msg.wParam==VK_ESCAPE&&GetWindowTextLengthW(manager.search)>0){SetWindowTextW(manager.search,L"");continue;}
+                if(msg.wParam==VK_DOWN||msg.wParam==VK_RETURN){
+                    if(!manager.visible.empty()){
+                        int row=ListView_GetNextItem(manager.items,-1,LVNI_SELECTED);if(row<0)row=0;
+                        ListView_SetItemState(manager.items,row,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);
+                        ListView_EnsureVisible(manager.items,row,FALSE);SetFocus(manager.items);
+                        if(msg.wParam==VK_RETURN)SendMessageW(window,WM_COMMAND,23,0);
+                    }continue;
+                }
+            }
+        }
+        if(!IsDialogMessageW(window,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}
+    }
     if(IsWindow(window))DestroyWindow(window);EnableWindow(owner,TRUE);SetActiveWindow(owner);
 }
 }

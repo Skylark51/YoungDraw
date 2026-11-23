@@ -165,6 +165,22 @@ void icon(Graphics& g,int id,RectF box,Color color){
         line(3,-19,3,-9);line(3,-9,13,-9);line(20,7,-7,7);line(-7,7,-1,1);line(-7,7,-1,13);break;
     case 123:g.DrawRectangle(&pen,-17.f,-16.f,30.f,35.f);g.DrawRectangle(&pen,-8.f,-21.f,14.f,8.f);line(-9,2,19,2);line(19,2,12,-4);line(19,2,12,8);break;
     case 134:pen.SetDashStyle(DashStyleDash);g.DrawRectangle(&pen,-20.f,-17.f,40.f,34.f);line(-6,0,6,0);line(0,-6,0,6);break;
+    case selectedBoldCommand:case selectedItalicCommand:case selectedUnderlineCommand:{
+        FontFamily ff(L"Arial");
+        const int face=id==selectedBoldCommand?FontStyleBold:id==selectedItalicCommand?FontStyleItalic:FontStyleUnderline;
+        Font font(&ff,36,face,UnitPixel);
+        g.DrawString(id==selectedBoldCommand?L"B":id==selectedItalicCommand?L"I":L"U",-1,&font,PointF(-16,-24),&brush);break;
+    }
+    case selectedFontSmallerCommand:case selectedFontLargerCommand:{
+        FontFamily ff(L"Arial");Font font(&ff,31,FontStyleRegular,UnitPixel);
+        g.DrawString(L"A",-1,&font,PointF(-23,-20),&brush);
+        line(6,-12,22,-12);if(id==selectedFontLargerCommand)line(14,-20,14,-4);break;
+    }
+    case selectedStrokeThinnerCommand:case selectedStrokeThickerCommand:{
+        line(4,-15,22,-15);if(id==selectedStrokeThickerCommand)line(13,-24,13,-6);
+        pen.SetWidth(id==selectedStrokeThickerCommand?5.f:2.f);
+        line(-21,2,19,2);line(-21,17,19,17);break;
+    }
     case 150:{FontFamily ff(L"Arial");Font f(&ff,29,FontStyleBold,UnitPixel);g.DrawString(L"B",-1,&f,PointF(-19,-22),&brush);pen.SetWidth(4);line(-17,18,20,18);break;}
     case 156:{line(-12,7,0,-20);line(0,-20,12,7);line(-8,-2,8,-2);
         const Color colors[]={Color(255,230,40,40),Color(255,35,90,225),Color(255,0,150,80)};
@@ -203,6 +219,13 @@ void button(Graphics& g,int id,std::wstring label,RectF r,bool active){
 
 HWND tooltip=nullptr;bool tipActive=false;RECT tipRect{};int tipCommand=0;std::wstring tipText;
 std::wstring helpText(int id){
+    if(id>=selectedBoldCommand&&id<=selectedStrokeThickerCommand){
+        static const wchar_t* labels[]={L"선택 글자 굵게",L"선택 글자 기울임",L"선택 글자 밑줄",L"선택 글자 작게",L"선택 글자 크게",L"선택 선 가늘게",L"선택 선 굵게"};
+        return std::wstring(labels[id-selectedBoldCommand])+L"\n"+
+            (id<=selectedUnderlineCommand?L"선택한 원자 라벨·텍스트에 바로 적용합니다. 혼합된 서식은 모두 켜고, 다시 누르면 끕니다. Ctrl+Z: 되돌리기.":
+             id<=selectedFontLargerCommand?L"선택한 원자 라벨·텍스트의 글자 크기를 1 pt씩 조절합니다. 첨자 비율·색·글꼴을 유지합니다. Ctrl+Z: 되돌리기.":
+             L"선택한 결합·선·화살표·윤곽 도형의 획을 15%씩 조절합니다. Shift와 + / - 키로도 조절할 수 있습니다. Ctrl+Z: 되돌리기.");
+    }
     if(id==mechanismManagerCommand)return L"메커니즘 관리\n선택한 메커니즘을 독립 편집 창에서 수정합니다. 구조·단계·연결·배치·설명을 미리 보고 적용하며 취소하면 원본이 유지됩니다.";
     if(id==includeMechanismCommand)return L"메커니즘에 편입하기\n선택한 분자·이미지들을 단계로 묶고 새 창에서 배치를 미리 봅니다. 화살표 없이도 순서대로 연결하며 선택하지 않은 구조는 유지합니다.";
     if(id==plotManagerCommand)return L"그래프 관리\n선택한 그래프를 별도 창에서 편집합니다. 데이터·축·글꼴·구조·반응 주석·물결을 아이콘 도구로 조절하고 미리보기를 확인합니다.";

@@ -47,7 +47,7 @@ void paint(HWND hwnd,Gallery& f,HDC dc){
     const wchar_t* captions[]={L"전체",L"★ 즐겨찾기",L"리간드",L"Axial 착물",L"Equatorial 착물",L"원본 착물",L"기질",L"산·시약",L"기본",L"사용자"};
     for(int i=0;i<10;i++)button(g,f,100+i,captions[i],{16+i*tabWidth,14,tabWidth-5,34},f.category==f.categories[size_t(i)]);
     int divider=w-332,gridWidth=divider-32;label(g,L"검색",{16,62,48,30},13,appearance::palette().muted,true);
-    label(g,std::to_wstring(f.filtered.size())+L"개 · 그림을 누르면 크게 볼 수 있습니다.",{16,96,float(gridWidth),24},12,appearance::palette().muted);
+    label(g,std::to_wstring(f.filtered.size())+L"개 · 더블클릭/Enter: 삽입",{16,96,float(gridWidth),24},12,appearance::palette().muted);
     int columns=gridWidth>=620?3:2,rows=h>=650?3:2;f.columns=columns;f.perPage=columns*rows;
     int pages=std::max(1,int((f.filtered.size()+f.perPage-1)/f.perPage));f.page=std::clamp(f.page,0,pages-1);
     float cardW=float(gridWidth-(columns-1)*10)/columns,cardH=float(h-198-(rows-1)*10)/rows;
@@ -61,7 +61,7 @@ void paint(HWND hwnd,Gallery& f,HDC dc){
         if(active){SolidBrush tint(appearance::palette().hover);g.FillRectangle(&tint,box.X+1,box.Y+box.Height-41,box.Width-2,40.f);}
         label(g,(favorite(f,selected)?L"★ ":L"")+card.name,{box.X+8,box.Y+box.Height-40,box.Width-16,35},12,active?appearance::palette().accent:appearance::palette().text,true,true);
     }
-    if(f.filtered.empty())label(g,L"일치하는 템플릿이 없습니다.",{16,180,float(gridWidth),120},16,appearance::palette().muted,false,true);
+    if(f.filtered.empty())label(g,L"일치하는 템플릿이 없습니다.\n검색어를 지우거나 ‘전체’ 분류를 선택하세요.",{16,180,float(gridWidth),120},16,appearance::palette().muted,false,true);
     button(g,f,201,L"‹ 이전",{16,float(h-54),88,34},false,f.page>0);
     label(g,std::to_wstring(f.page+1)+L" / "+std::to_wstring(pages),{112,float(h-54),92,34},13,appearance::palette().muted,false,true);
     button(g,f,202,L"다음 ›",{212,float(h-54),88,34},false,f.page+1<pages);
@@ -85,11 +85,32 @@ void paint(HWND hwnd,Gallery& f,HDC dc){
         label(g,L"금속",{preview.X,float(h-190),300,24},12,appearance::palette().muted,true);
         for(int i=0;i<7;i++)button(g,f,300+i,metals[i],{preview.X+i*43,float(h-164),38,28},metalAvailable&&f.metal==i,metalAvailable);
     }
-    label(g,L"선택한 구조만 삽입합니다.\n더블클릭 또는 Enter로도 삽입할 수 있습니다.",{preview.X,float(h-119),300,48},12,appearance::palette().muted);
+    label(g,L"더블클릭/Enter: 삽입 · Ctrl+F: 검색\n방향키: 선택 · PgUp/PgDn: 페이지",{preview.X,float(h-119),300,48},12,appearance::palette().muted);
     button(g,f,IDOK,L"선택한 템플릿 삽입",{preview.X,float(h-54),184,34},true,f.selected>=0);
     button(g,f,IDCANCEL,L"닫기",{preview.X+194,float(h-54),106,34});
     Graphics output(dc);ui::presentPixels(output,bitmap);
-    std::vector<ui::HelpRegion> help;for(const auto& hit:f.targets){int id=hit.command;std::wstring text;if(id>=1000)text=f.cards->at(size_t(id-1000)).name+L" 템플릿을 선택하여 크게 봅니다. 더블클릭하면 문서에 삽입합니다.";else if(id>=100&&id<110)text=std::wstring(captions[id-100])+L" 분류의 템플릿을 표시합니다.";else if(id>=300&&id<307)text=L"선택한 템플릿의 M 자리를 이 금속으로 바꿔 미리 봅니다.";else {const std::map<int,std::wstring> labels={{201,L"이전 페이지"},{202,L"다음 페이지"},{410,L"즐겨찾기"},{411,L"편집 탭으로 열기"},{412,L"이름 변경"},{413,L"분류 이동"},{414,L"삭제"},{IDOK,L"선택한 템플릿 삽입"},{IDCANCEL,L"닫기"}};auto it=labels.find(id);text=ui::labelHelp(it==labels.end()?L"템플릿":it->second);}auto b=hit.box;help.push_back({UINT_PTR(id),{LONG(b.X),LONG(b.Y),LONG(b.GetRight()),LONG(b.GetBottom())},text});}ui::setRegionHelp(hwnd,help);
+    std::vector<ui::HelpRegion> help;
+    for(const auto& hit:f.targets){
+        const int id=hit.command;std::wstring text;
+        if(id>=1000)text=f.cards->at(size_t(id-1000)).name+L". 클릭하여 미리 보고 더블클릭 또는 Enter로 문서에 삽입합니다.";
+        else if(id>=100&&id<110)text=std::wstring(captions[id-100])+L" 분류에서 현재 검색어와 일치하는 템플릿을 표시합니다.";
+        else if(id>=300&&id<307)text=id==300?L"M 자리를 바꾸지 않고 템플릿 원본의 금속 표기를 사용합니다.":L"선택한 템플릿의 M 자리를 이 금속으로 바꿔 미리 봅니다. 삽입하거나 편집 탭을 열 때 반영됩니다.";
+        else switch(id){
+        case 201:text=L"이전 페이지를 표시합니다. PgUp 또는 마우스 휠로도 이동할 수 있습니다.";break;
+        case 202:text=L"다음 페이지를 표시합니다. PgDn 또는 마우스 휠로도 이동할 수 있습니다.";break;
+        case 410:text=L"선택한 템플릿의 즐겨찾기를 추가하거나 해제합니다. 즉시 저장되며 갤러리는 열린 상태로 유지됩니다.";break;
+        case 411:text=L"선택한 템플릿을 새 편집 탭에서 엽니다. 사용자 템플릿은 Ctrl+S로 원본 파일을 덮어씁니다.";break;
+        case 412:text=L"사용자 템플릿의 이름을 바꾸는 창을 엽니다. 기본 템플릿의 이름은 바꿀 수 없습니다.";break;
+        case 413:text=L"사용자 템플릿을 다른 분류 폴더로 옮기는 창을 엽니다.";break;
+        case 414:text=L"선택한 사용자 템플릿 파일의 삭제 확인 창을 엽니다.";break;
+        case IDOK:text=L"선택한 템플릿과 금속 설정으로 문서에 삽입합니다. Enter 또는 그림 더블클릭으로도 삽입할 수 있습니다.";break;
+        case IDCANCEL:text=L"템플릿을 삽입하지 않고 닫습니다. 이미 저장한 즐겨찾기는 유지됩니다. Esc로도 닫을 수 있습니다.";break;
+        default:text=L"템플릿 작업을 선택합니다.";break;
+        }
+        const auto b=hit.box;
+        help.push_back({UINT_PTR(id),{LONG(b.X),LONG(b.Y),LONG(b.GetRight()),LONG(b.GetBottom())},text});
+    }
+    ui::setRegionHelp(hwnd,help);
 }
 void command(HWND hwnd,Gallery& f,int id){
     if(id>=100&&id<110){f.category=f.categories[size_t(id-100)];filter(f);}
@@ -124,7 +145,7 @@ LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         const auto tone=appearance::palette().raised;
         f->editBrush=CreateSolidBrush(RGB(tone.GetR(),tone.GetG(),tone.GetB()));
         f->edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL,70,62,400,30,hwnd,(HMENU)500,GetModuleHandleW(nullptr),nullptr);
-        SendMessageW(f->edit,WM_SETFONT,(WPARAM)f->font,TRUE);SendMessageW(f->edit,EM_SETCUEBANNER,TRUE,(LPARAM)L"이름 검색 · TBDAP, peroxo, HOTf…");SetWindowSubclass(f->edit,searchProc,1,0);return 0;
+        SendMessageW(f->edit,WM_SETFONT,(WPARAM)f->font,TRUE);SendMessageW(f->edit,EM_SETCUEBANNER,TRUE,(LPARAM)L"현재 분류의 이름·그룹 검색 · TBDAP, peroxo…");SetWindowSubclass(f->edit,searchProc,1,0);return 0;
     }
     if(!f)return DefWindowProcW(hwnd,msg,wp,lp);
     switch(msg){

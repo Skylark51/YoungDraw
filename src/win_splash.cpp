@@ -120,7 +120,7 @@ LRESULT CALLBACK splashProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         Font tagline(taglineFamily, 16, FontStyleItalic, UnitPixel);
         SolidBrush taglineInk(Color(255, 184, 206, 224));
         centered.SetFormatFlags(StringFormatFlagsNoWrap);
-        graphics.DrawString(L"For Making Structures, Mechanism, and Graphs", -1, &tagline,
+        graphics.DrawString(L"Structures · Mechanisms · Graphs", -1, &tagline,
             RectF(28, 282, width - 56, 26), &centered, &taglineInk);
         graphics.DrawString(L"시작하는 중…", -1, &subtitle, RectF(0, 326, width, 24), &centered, &muted);
         Graphics output(dc);

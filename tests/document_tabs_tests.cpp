@@ -579,7 +579,84 @@ static void CALLBACK drivePhotoForm(HWND owner,UINT,UINT_PTR timer,DWORD){
                   choice.find(L"0")!=std::wstring::npos&&choice.find(L"37.2")!=std::wstring::npos;
     PostMessageW(form,WM_COMMAND,IDOK,0);
 }
+static void graphPreviewAccessChecks(HWND hwnd){
+    doc=coordinateDemo();auto& graph=doc.plots.front();const int owner=graph.id;
+    graph.title="Preview access";graph.legendVisibility=1;graph.showValues=true;
+    auto alternate=graph.series.front();alternate.name="Alternate";alternate.color="#cc3344";
+    for(auto& value:alternate.values)value+=40;
+    graph.series.push_back(alternate);history.clear();selection={owner};
+    const auto before=toNative(doc);managePlot(owner,false);const auto manager=plotManagerWindow;
+    check(manager!=nullptr,"preview access fixture opens its graph manager");
+    RECT anchored{};GetWindowRect(GetDlgItem(manager,4000),&anchored);
+    auto position=[&](const Scene& scene,Vec point){
+        RECT tab{},client{};GetWindowRect(GetDlgItem(manager,4000),&tab);
+        POINT origin{tab.left,tab.top};ScreenToClient(manager,&origin);GetClientRect(manager,&client);
+        const double width=client.right-40,height=origin.y-110;const auto& bounds=scene.bounds;
+        const double scale=std::max(.01,std::min((width-32)/std::max(1.,bounds.w),(height-32)/std::max(1.,bounds.h)));
+        return (point-Vec{bounds.x,bounds.y})*scale+Vec{20+(width-bounds.w*scale)/2,88+(height-bounds.h*scale)/2};
+    };
+    auto doubleClick=[&](const Scene& scene,Vec point){
+        const auto at=position(scene,point);
+        SendMessageW(manager,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(int(at.x),int(at.y)));
+        RECT current{};GetWindowRect(GetDlgItem(manager,4000),&current);
+        check(EqualRect(&anchored,&current),"preview access keeps category tabs and preview anchored");
+    };
+    auto textPosition=[&](const Scene& scene,int role,int index){
+        auto item=std::find_if(scene.items.begin(),scene.items.end(),[&](const auto& item){
+            return item.owner==owner&&item.type==Primitive::Text&&item.textRole==role&&
+                (index<0||item.textIndex==index)&&!item.points.empty()&&!item.text.empty();
+        });
+        check(item!=scene.items.end(),"preview fixture renders the target caption");
+        return item->points.front()+Vec{measure(item->text,item->fontSize,item->font,item->face)/2,item->fontSize*.6};
+    };
+    auto activeCell=[&](int row,int column){
+        auto grid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
+        auto list=GetDlgItem(grid,10);auto edit=FindWindowExW(list,nullptr,L"EDIT",nullptr);
+        check(grid&&list&&edit,"preview double-click opens an active data cell directly");
+        RECT cell{},input{};ListView_GetSubItemRect(list,row,column,LVIR_BOUNDS,&cell);
+        GetWindowRect(edit,&input);MapWindowPoints(nullptr,list,reinterpret_cast<POINT*>(&input),2);
+        check(input.left>=cell.left&&input.left<cell.right&&input.top>=cell.top&&input.top<cell.bottom,
+              "preview access focuses the requested state row and pathway column");
+        check(toNative(doc)==before,"opening a preview data cell never mutates the model");
+        return std::pair{list,edit};
+    };
+    // A state name targets the label column, even when accessed from another category.
+    SendMessageW(manager,WM_COMMAND,4004,0);auto preview=makeScene(doc.subset({owner}),measure);
+    doubleClick(preview,textPosition(preview,6,2));auto [nameList,nameEdit]=activeCell(2,1);
+    SetWindowTextW(nameEdit,L"Preview intermediate");SendMessageW(nameList,WM_KEYDOWN,VK_RETURN,0);
+    check(doc.plots.front().states[2].label=="Preview intermediate"&&doc.plots.front().states[1].label=="TS1"&&
+          doc.plots.front().series[1].values==alternate.values,"preview name editing changes only the chosen state label");
+    SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"preview name edit undoes without stale model changes");
+
+    // Only base-path value captions have role 8; test their numeric cell separately from path points.
+    preview=makeScene(doc.subset({owner}),measure);doubleClick(preview,textPosition(preview,8,2));
+    auto [valueList,valueEdit]=activeCell(2,2);SetWindowTextW(valueEdit,L"-43.25");SendMessageW(valueList,WM_KEYDOWN,VK_RETURN,0);
+    check(doc.plots.front().series[0].values[2]==-43.25&&doc.plots.front().series[1].values==alternate.values,
+          "base value double-click edits its own energy and preserves the alternate path");
+    SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"preview value edit undoes in one operation");
+
+    // The second path has role-0 value labels; its actual state point carries the unambiguous path index.
+    preview=makeScene(doc.subset({owner}),measure);const auto& points=preview.plotSnapPoints.at(owner);
+    auto point=std::find_if(points.begin(),points.end(),[](const auto& point){return point.path==1&&point.state==2&&point.edge==0;});
+    check(point!=points.end(),"alternate path exposes an exact state snap point");doubleClick(preview,point->p);
+    auto [pathList,pathEdit]=activeCell(2,3);const auto baseValues=doc.plots.front().series[0].values;
+    SetWindowTextW(pathEdit,L"64.5");SendMessageW(pathList,WM_KEYDOWN,VK_RETURN,0);
+    check(doc.plots.front().series[1].values[2]==64.5&&doc.plots.front().series[0].values==baseValues&&
+          doc.plots.front().series[1].values[1]==alternate.values[1],"alternate state point edits the exact path and state without touching the base path");
+    SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"alternate path edit restores the complete original model on undo");
+
+    preview=makeScene(doc.subset({owner}),measure);doubleClick(preview,textPosition(preview,7,-1));
+    auto legend=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+    check(legend&&GetDlgItem(legend,104)&&toNative(doc)==before,"legend double-click opens the inline legend editor without committing data");
+    SetDlgItemTextW(legend,104,L"25");SendMessageW(legend,WM_COMMAND,IDCANCEL,0);
+    check(toNative(doc)==before,"cancelling the directly opened legend discards its preview");
+    formBefore=before;formAction=20;formDriven=false;SetTimer(hwnd,901,10,driveForm);
+    preview=makeScene(doc.subset({owner}),measure);doubleClick(preview,textPosition(preview,4,-1));KillTimer(hwnd,901);
+    check(formDriven&&toNative(doc)==before,"title double-click opens the existing settings route and cancellation restores the model");
+    closePlotManager();history.clear();
+}
 static void graphManagerChecks(HWND hwnd){
+    graphPreviewAccessChecks(hwnd);
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
     const auto before=toNative(doc);managePlot(owner,false);auto manager=plotManagerWindow;check(manager&&IsWindow(manager)&&toNative(doc)==before,"graph manager opens without modifying the selected graph");
     SendMessageW(manager,WM_COMMAND,4002,0);
