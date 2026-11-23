@@ -49,12 +49,40 @@ namespace YoungDraw {
 $taskDirectory = (Resolve-Path -LiteralPath $BuildDirectory).Path
 $taskPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 function Quote-TestLiteral([string]$Value) { return "'" + $Value.Replace("'", "''") + "'" }
+function Quote-TestArgument([string]$Value) {
+    # Windows CommandLineToArgvW escaping, including embedded quotes and trailing slashes.
+    $taskQuoted = New-Object Text.StringBuilder
+    [void]$taskQuoted.Append('"')
+    $taskSlashes = 0
+    foreach ($taskCharacter in $Value.ToCharArray()) {
+        if ($taskCharacter -eq '\') { $taskSlashes++; continue }
+        if ($taskCharacter -eq '"') { [void]$taskQuoted.Append(('\' * ($taskSlashes * 2 + 1))) }
+        else { [void]$taskQuoted.Append(('\' * $taskSlashes)) }
+        [void]$taskQuoted.Append($taskCharacter)
+        $taskSlashes = 0
+    }
+    [void]$taskQuoted.Append(('\' * ($taskSlashes * 2)))
+    [void]$taskQuoted.Append('"')
+    return $taskQuoted.ToString()
+}
 if ($Executable) {
     if ($Filter) { throw 'Filter is only valid for CTest.' }
     $taskExecutable = (Resolve-Path -LiteralPath $Executable).Path
     $taskLog = Join-Path $taskDirectory ('isolated-' + [IO.Path]::GetFileNameWithoutExtension($taskExecutable) + '.log')
-    $taskCommand = '& ' + (Quote-TestLiteral $taskExecutable)
-    foreach ($taskArgument in $Arguments) { $taskCommand += ' ' + (Quote-TestLiteral $taskArgument) }
+    $taskNativeArguments = ($Arguments | ForEach-Object { Quote-TestArgument $_ }) -join ' '
+    # PowerShell does not reliably wait for GUI executables invoked with &.
+    # This child shell is already on the isolated desktop. Wait only for its own
+    # program, drain both redirected pipes asynchronously, and preserve the exit code.
+    $taskCommand = '$taskInfo = New-Object System.Diagnostics.ProcessStartInfo; '
+    $taskCommand += '$taskInfo.FileName=' + (Quote-TestLiteral $taskExecutable) + '; '
+    $taskCommand += '$taskInfo.Arguments=' + (Quote-TestLiteral $taskNativeArguments) + '; '
+    $taskCommand += '$taskInfo.UseShellExecute=$false; $taskInfo.CreateNoWindow=$true; $taskInfo.RedirectStandardOutput=$true; $taskInfo.RedirectStandardError=$true; '
+    $taskCommand += '$taskProgram=New-Object System.Diagnostics.Process; $taskProgram.StartInfo=$taskInfo; '
+    $taskCommand += 'if (!$taskProgram.Start()) { throw "Cannot start isolated program" }; '
+    $taskCommand += '$taskOut=$taskProgram.StandardOutput.ReadToEndAsync(); $taskErr=$taskProgram.StandardError.ReadToEndAsync(); '
+    $taskCommand += '$taskProgram.WaitForExit(); $taskOutText=$taskOut.GetAwaiter().GetResult(); $taskErrText=$taskErr.GetAwaiter().GetResult(); '
+    $taskCommand += '[IO.File]::WriteAllText(' + (Quote-TestLiteral $taskLog) + ', $taskOutText+$taskErrText); '
+    $taskCommand += '$taskExitCode=$taskProgram.ExitCode; $taskProgram.Dispose(); exit $taskExitCode'
 } else {
     if ($Arguments.Count) { throw 'Arguments requires Executable.' }
     $taskLog = Join-Path $taskDirectory 'isolated-ctest.log'
@@ -62,14 +90,14 @@ if ($Executable) {
     $taskCommand = '& ' + (Quote-TestLiteral $taskCTest) + ' --test-dir ' + (Quote-TestLiteral $taskDirectory) + ' --output-on-failure --timeout 120'
     if ($Filter) { $taskCommand += ' -R ' + (Quote-TestLiteral $Filter) }
     if ($Configuration) { $taskCommand += ' -C ' + (Quote-TestLiteral $Configuration) }
+    $taskCommand += ' *> ' + (Quote-TestLiteral $taskLog) + '; exit $LASTEXITCODE'
 }
-$taskCommand += ' *> ' + (Quote-TestLiteral $taskLog) + '; exit $LASTEXITCODE'
 if ($ArtifactDirectory) {
     $taskArtifacts = [IO.Path]::GetFullPath($ArtifactDirectory)
     [IO.Directory]::CreateDirectory($taskArtifacts) | Out-Null
     $taskCommand = '$env:YOUNGDRAW_UI_ARTIFACT_DIR=' + (Quote-TestLiteral $taskArtifacts) + '; ' + $taskCommand
 }
-$taskCommand = '$env:YOUNGDRAW_UI_STAGE=' + (Quote-TestLiteral $Stage) + '; Set-Location -LiteralPath ' + (Quote-TestLiteral $taskDirectory) + '; ' + $taskCommand
+$taskCommand = '$ErrorActionPreference=''Stop''; $env:YOUNGDRAW_UI_STAGE=' + (Quote-TestLiteral $Stage) + '; Set-Location -LiteralPath ' + (Quote-TestLiteral $taskDirectory) + '; ' + $taskCommand
 $taskEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($taskCommand))
 if ($ArtifactDirectory) {
     $taskReceipt = [ordered]@{ stage=$Stage; utc=[DateTime]::UtcNow.ToString('o'); working_directory=$taskDirectory; executable=$Executable; arguments=$Arguments; configuration=$Configuration; script_sha256=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash; isolation='new Windows desktop, never switched' }
