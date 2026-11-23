@@ -641,9 +641,11 @@ static void annotationPreviewChecks(HWND){
         if(column==8&&amount>0){
             RECT window{};GetWindowRect(manager,&window);
             const int width=window.right-window.left,height=window.bottom-window.top;
-            SetWindowPos(manager,nullptr,0,0,width+160,height+120,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
-            const auto enlarged=axisPixels(L"reaction-annotation-resized.png");
-            check(enlarged.bottom-enlarged.top>moved.bottom-moved.top+15,
+            // Shrink within the supported range: CI monitors can already be at
+            // the maximum tracking size and reject requests to grow the window.
+            SetWindowPos(manager,nullptr,0,0,width,height-60,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+            const auto resized=axisPixels(L"reaction-annotation-resized.png");
+            check(resized.bottom-resized.top<moved.bottom-moved.top-15,
                   "explicit window resize still fits the retained annotation preview frame");
             SetWindowPos(manager,nullptr,0,0,width,height,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
             const auto restored=axisPixels(L"reaction-annotation-size-restored.png");
