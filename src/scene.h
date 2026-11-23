@@ -6,6 +6,8 @@ namespace yd {
 struct Rect { double x=0,y=0,w=0,h=0; };
 inline constexpr int mullikenSpinTextRole=14;
 inline constexpr int molecularAnnotationTextRole=15;
+inline constexpr int plotXAxisTitleTextRole=16,plotYAxisTitleTextRole=17;
+inline constexpr bool isPlotAxisTitle(int role){return role==plotXAxisTitleTextRole||role==plotYAxisTitleTextRole;}
 inline constexpr bool isMolecularAnnotation(int role){return role==mullikenSpinTextRole||role==molecularAnnotationTextRole;}
 struct Primitive {
     enum Type { Line, Polygon, Text, Bezier, Ellipse, Box, Image } type=Line;

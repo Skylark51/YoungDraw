@@ -615,7 +615,7 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 item.lParam=index<f->tabStyle.icons.size()?f->tabStyle.icons[index]:0;
                 TabCtrl_InsertItem(f->tab,TabCtrl_GetItemCount(f->tab),&item);
             }
-            TabCtrl_SetCurSel(f->tab,std::clamp(f->tabStyle.initial,0,int(f->tabs.size())-1));y=52;std::vector<ui::HelpRegion> help;for(size_t i=0;i<f->tabs.size();i++){RECT rect{};if(TabCtrl_GetItemRect(f->tab,int(i),&rect))help.push_back({UINT_PTR(i+1),rect,f->tabs[i].first+L" 설정 항목을 표시합니다. 다른 탭의 입력값은 유지됩니다."});}ui::setRegionHelp(f->tab,help);
+            TabCtrl_SetCurSel(f->tab,std::clamp(f->tabStyle.initial,0,int(f->tabs.size())-1));if(f->tabStyle.remember)*f->tabStyle.remember=TabCtrl_GetCurSel(f->tab);y=52;std::vector<ui::HelpRegion> help;for(size_t i=0;i<f->tabs.size();i++){RECT rect{};if(TabCtrl_GetItemRect(f->tab,int(i),&rect))help.push_back({UINT_PTR(i+1),rect,f->tabs[i].first+L" 설정 항목을 표시합니다. 다른 탭의 입력값은 유지됩니다."});}ui::setRegionHelp(f->tab,help);
         }
         for(size_t i=0;i<f->fields.size();i++){
             auto& field=f->fields[i];HWND label=CreateWindowW(L"STATIC",field.label.c_str(),WS_CHILD|WS_VISIBLE,16,y+4,210,labelHeight(field),hwnd,nullptr,nullptr,nullptr);SendMessageW(label,WM_SETFONT,(WPARAM)f->font,TRUE);
@@ -624,7 +624,7 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 edit=CreateWindowW(L"BUTTON",field.value=="1"?L"표시 중":L"숨김 상태",
                     WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,230,y,430,29,hwnd,(HMENU)INT_PTR(100+i),nullptr,nullptr);
             }else if(!field.choices.empty()){
-                edit=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|(field.editableChoices?CBS_DROPDOWN:CBS_DROPDOWNLIST)|WS_VSCROLL|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS,230,y,field.scripts?330:430,200,hwnd,(HMENU)(INT_PTR)(100+i),nullptr,nullptr);
+                edit=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|(field.editableChoices?CBS_DROPDOWN:CBS_DROPDOWNLIST)|WS_VSCROLL|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS,230,y,(field.scripts?330:430)-int(field.quickChoices.size())*48,200,hwnd,(HMENU)(INT_PTR)(100+i),nullptr,nullptr);
                 themeCombo(edit);
                 for(auto& c:field.choices)SendMessageW(edit,CB_ADDSTRING,0,(LPARAM)c.c_str());
                 if(field.editableChoices)SetWindowTextW(edit,wide(field.value).c_str());else SendMessageW(edit,CB_SETCURSEL,std::stoi(field.value),0);
@@ -645,6 +645,12 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                     565+k*48,y,44,29,hwnd,(HMENU)(INT_PTR)((k?1000:900)+i),nullptr,nullptr);
                 SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);
                 f->rows.back().push_back(b);
+            }
+            for(size_t choice=0;choice<field.quickChoices.size();++choice){
+                const int x=664-int(field.quickChoices.size()-choice)*48;
+                auto b=CreateWindowW(L"BUTTON",field.quickChoices[choice].second.c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
+                    x,y,44,29,hwnd,reinterpret_cast<HMENU>(INT_PTR(20000+i*32+choice)),nullptr,nullptr);
+                SendMessageW(b,WM_SETFONT,reinterpret_cast<WPARAM>(f->font),TRUE);f->rows.back().push_back(b);
             }
             if(f->tabs.empty())y+=f->embedded?34:rowHeight(field);
         }
@@ -685,13 +691,19 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         EndPaint(hwnd,&ps);return 0;
     }
     if(msg==WM_NOTIFY&&f->tab&&reinterpret_cast<NMHDR*>(lp)->hwndFrom==f->tab&&
-        reinterpret_cast<NMHDR*>(lp)->code==TCN_SELCHANGE){if(f->embedded)layoutEmbeddedForm(hwnd,*f);else layoutFormTabs(*f);return 0;}
+        reinterpret_cast<NMHDR*>(lp)->code==TCN_SELCHANGE){if(f->tabStyle.remember)*f->tabStyle.remember=TabCtrl_GetCurSel(f->tab);if(f->embedded)layoutEmbeddedForm(hwnd,*f);else layoutFormTabs(*f);return 0;}
     if(msg==DM_GETDEFID)return MAKELRESULT(IDOK,DC_HASDEFID);
     if(msg==WM_ERASEBKGND){RECT r;GetClientRect(hwnd,&r);FillRect((HDC)wp,&r,f->colors.panel);return 1;}
     if(msg==WM_CTLCOLORSTATIC||msg==WM_CTLCOLOREDIT||msg==WM_CTLCOLORLISTBOX)return f->colors.control(msg,(HDC)wp);
     if(msg==WM_MEASUREITEM){reinterpret_cast<MEASUREITEMSTRUCT*>(lp)->itemHeight=25;return TRUE;}
     if(msg==WM_DRAWITEM){
         const auto& item=*reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+        if(item.CtlID>=20000){
+            const size_t field=(item.CtlID-20000)/32,choice=(item.CtlID-20000)%32;
+            if(field<f->fields.size()&&choice<f->fields[field].quickChoices.size()){
+                f->colors.draw(item,SendMessageW(f->edits[field],CB_GETCURSEL,0,0)==f->fields[field].quickChoices[choice].first);return TRUE;
+            }
+        }
         const size_t index=item.CtlID>=100?item.CtlID-100:f->fields.size();
         if(index>=f->fields.size()||!f->fields[index].toggle){
             f->colors.draw(item,item.CtlID==IDOK);return TRUE;
@@ -719,6 +731,13 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         return TRUE;
     }
     if(msg==WM_COMMAND){int id=LOWORD(wp);
+        if(id>=20000&&HIWORD(wp)==BN_CLICKED){
+            const size_t field=size_t(id-20000)/32,choice=size_t(id-20000)%32;
+            if(field<f->fields.size()&&choice<f->fields[field].quickChoices.size()){
+                SendMessageW(f->edits[field],CB_SETCURSEL,f->fields[field].quickChoices[choice].first,0);
+                SendMessageW(hwnd,WM_COMMAND,MAKEWPARAM(100+field,CBN_SELCHANGE),reinterpret_cast<LPARAM>(f->edits[field]));return 0;
+            }
+        }
         if(id>=100&&size_t(id-100)<f->fields.size()&&f->fields[id-100].toggle&&HIWORD(wp)==BN_CLICKED){
             auto& field=f->fields[id-100];
             field.value=field.value=="1"?"0":"1";
@@ -765,6 +784,16 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                     f->synchronizing=false;
                 }
             }
+            if(HIWORD(wp)==EN_CHANGE&&id>=100&&size_t(id-100)<f->fields.size()){
+                const size_t target=size_t(id-100);const auto values=read(*f);
+                for(size_t source=0;source<f->fields.size();++source){
+                    const auto& binding=f->fields[source].choiceUpdate;if(!binding||binding->field!=target)continue;
+                    int choice=0;for(size_t i=0;i<binding->values.size();++i)if(binding->values[i]&&*binding->values[i]==values[target])choice=int(i);
+                    SendMessageW(f->edits[source],CB_SETCURSEL,choice,0);
+                }
+            }
+            for(size_t field=0;field<f->fields.size();++field)for(size_t choice=0;choice<f->fields[field].quickChoices.size();++choice)
+                if(auto button=GetDlgItem(hwnd,int(20000+field*32+choice)))InvalidateRect(button,nullptr,FALSE);
             preview(*f);
             if(f->illustration)InvalidateRect(hwnd,&f->picture,TRUE);
         }

@@ -111,7 +111,7 @@ int main(){try{
             Document d;auto p=sample();p.width=width;p.height=320;p.energyAtTop=true;p.thinLines=thin;
             p.yMin=-10;p.yMax=50;p.series[0].values[1]=50;d.plots={p};
             auto scene=makeScene(d,measure);std::vector<Rect> header;double baseline=0;
-            for(const auto& item:scene.items)if(item.type==Primitive::Text&&item.textRole==0&&
+            for(const auto& item:scene.items)if(item.type==Primitive::Text&&item.textRole==plotYAxisTitleTextRole&&
                 (item.text=="E"||item.text==" / (kcal mol"||item.text=="–1"||item.text==")")){
                 header.push_back(bounds(item));if(item.text=="E")baseline=item.points[0].y;
                 if(item.text=="(kcal mol"||item.text==")")check(std::abs(item.points[0].y-baseline)<1e-6,"E and unit share a single baseline");

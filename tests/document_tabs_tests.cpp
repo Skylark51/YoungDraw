@@ -749,6 +749,116 @@ static void graphPreviewAccessChecks(HWND hwnd){
 static int unifiedAxisMode=0,unifiedAxisWidth=0;
 static bool unifiedAxisDriven=false;
 static std::string unifiedAxisFailure;
+static void chooseAxisNotationByMouse(HWND combo,int index){
+    SendMessageW(combo,CB_SHOWDROPDOWN,TRUE,0);
+    COMBOBOXINFO info{sizeof(info)};
+    check(GetComboBoxInfo(combo,&info)!=FALSE&&IsWindowVisible(info.hwndList),"native energy notation dropdown is visible");
+    RECT row{},bounds{};GetClientRect(info.hwndList,&bounds);
+    check(SendMessageW(info.hwndList,LB_GETITEMRECT,index,reinterpret_cast<LPARAM>(&row))!=LB_ERR&&row.top>=0&&row.bottom<=bounds.bottom,"Delta energy choice is inside the native dropdown click area");
+    const auto at=MAKELPARAM((row.left+row.right)/2,(row.top+row.bottom)/2);
+    SendMessageW(info.hwndList,WM_LBUTTONDOWN,MK_LBUTTON,at);SendMessageW(info.hwndList,WM_LBUTTONUP,0,at);
+    check(SendMessageW(combo,CB_GETCURSEL,0,0)==index,"mouse click selects the requested Delta energy item");
+}
+static std::string projectAxisFailure;
+static int projectAxisNotation=1;
+static void saveProjectAxisCanvas(const wchar_t* name){
+    Bitmap image(ww,wh,PixelFormat32bppARGB);{Graphics graphics(&image);auto dc=graphics.GetHDC();paint(dc,true);graphics.ReleaseHDC(dc);}
+    CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
+    check(image.Save(name,&png)==Ok,"save actual editor canvas evidence");
+}
+static void CALLBACK driveProjectAxis(HWND parent,UINT,UINT_PTR timer,DWORD){
+    const auto dialog=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"축 관리");
+    if(!dialog)return;KillTimer(parent,timer);
+    try{
+        const auto tabs=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);RECT rect{};TabCtrl_GetItemRect(tabs,4,&rect);
+        auto at=MAKELPARAM((rect.left+rect.right)/2,(rect.top+rect.bottom)/2);
+        SendMessageW(tabs,WM_LBUTTONDOWN,MK_LBUTTON,at);SendMessageW(tabs,WM_LBUTTONUP,0,at);
+        chooseAxisNotationByMouse(GetDlgItem(dialog,119),projectAxisNotation);
+        const std::string symbol=projectAxisNotation==1?"ΔE":"ΔG";
+        if(doc.plots.front().yLabel!=symbol){
+            EnumChildWindows(dialog,[](HWND child,LPARAM)->BOOL{wchar_t type[32]{},value[1024]{};GetClassNameW(child,type,32);GetWindowTextW(child,value,1024);if(IsWindowVisible(child)&&!wcscmp(type,L"Static"))std::cerr<<"Axis label/error: "<<ui::utf8(value)<<'\n';return TRUE;},0);
+        }
+        check(doc.plots.front().yLabel==symbol,"project plot mouse selection replaces Energy with Delta on the canvas");
+        saveProjectAxisCanvas(projectAxisNotation==1?L"project-canvas-delta-e.png":L"project-canvas-delta-g.png");
+        PostMessageW(GetDlgItem(dialog,IDOK),BM_CLICK,0,0);
+    }catch(const std::exception& error){projectAxisFailure=error.what();PostMessageW(dialog,WM_COMMAND,IDCANCEL,0);}
+}
+static void projectAxisChecks(HWND hwnd,const std::wstring& path){
+    doc=fromCdxml(readFile(path));check(!doc.plots.empty(),"project file imports an editable energy graph");
+    std::cout<<"Project plots="<<doc.plots.size()<<" label="<<doc.plots.front().yLabel<<" symbol="<<doc.plots.front().energySymbol<<'\n';
+    const auto original=doc;selection={doc.plots.front().id};history.clear();changed();fit();dirty=false;
+    saveProjectAxisCanvas(L"project-canvas-before.png");
+    managePlot(selection.front(),true);SendMessageW(plotManagerWindow,WM_COMMAND,4001,0);
+    for(int notation:{1,2}){
+        doc=original;history.clear();changed();projectAxisNotation=notation;projectAxisFailure.clear();
+        SetTimer(hwnd,909,10,driveProjectAxis);SendMessageW(plotManagerWindow,WM_COMMAND,4406,0);KillTimer(hwnd,909);
+        check(projectAxisFailure.empty(),projectAxisFailure.c_str());
+        const auto& scene=sceneForPaint(true);const std::string symbol=notation==1?"ΔE":"ΔG";
+        check(std::any_of(scene.items.begin(),scene.items.end(),[&](const auto& item){return item.type==Primitive::Text&&item.owner==doc.plots.front().id&&item.rotation==-90&&item.text.find(symbol)!=std::string::npos;}),"project canvas cached vertical title contains the selected Delta");
+        check(history.undo(doc)&&toNative(doc)==toNative(original)&&!history.undo(doc),"project Delta edit is exactly one undo step");
+    }
+    closePlotManager();std::cout<<"PASS: actual project Delta mouse selection and cached canvas\n";
+}
+static int axisQuickCase=0;
+static std::string axisQuickFailure;
+static bool axisQuickDriven=false;
+static void captureAxesManager(const std::wstring& name);
+static void CALLBACK driveAxisQuick(HWND parent,UINT,UINT_PTR timer,DWORD){
+    auto dialog=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"축 관리");
+    if(!dialog)return;KillTimer(parent,timer);axisQuickDriven=true;
+    try{
+        auto tabs=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);
+        check(TabCtrl_GetCurSel(tabs)==(axisQuickCase==3?1:4),"axis title access opens its matching detail directly and remembers the last detail");
+        if(axisQuickCase==1){
+            for(int choice:{1,2}){
+                auto button=GetDlgItem(dialog,20000+19*32+choice-1);check(button&&IsWindowVisible(button),"one-click Delta buttons are visible beside energy notation");
+                RECT rect{};GetClientRect(button,&rect);const auto at=MAKELPARAM(rect.right/2,rect.bottom/2);
+                SendMessageW(button,WM_LBUTTONDOWN,MK_LBUTTON,at);SendMessageW(button,WM_LBUTTONUP,0,at);
+                check(doc.plots.front().yLabel==(choice==1?"ΔE":"ΔG")&&SendDlgItemMessageW(dialog,119,CB_GETCURSEL,0,0)==choice,"one Delta button click updates the axis and selected notation");
+            }
+            SetDlgItemTextW(dialog,114,L"Relative energy");
+            check(doc.plots.front().yLabel=="Relative energy"&&SendDlgItemMessageW(dialog,119,CB_GETCURSEL,0,0)==0,"typing a custom title leaves Delta preset mode and preserves the typed title");
+            SendDlgItemMessageW(dialog,20000+19*32+1,BM_CLICK,0,0);
+        }
+        if(axisQuickCase==2){check(SendDlgItemMessageW(dialog,119,CB_GETCURSEL,0,0)==2,"reopening shows the actual stored Delta notation instead of a keep-current placeholder");captureAxesManager(L"axis-quick-title.png");}
+        PostMessageW(GetDlgItem(dialog,axisQuickCase==1?IDOK:IDCANCEL),BM_CLICK,0,0);
+    }catch(const std::exception& error){axisQuickFailure=error.what();PostMessageW(dialog,WM_COMMAND,IDCANCEL,0);}
+}
+static Vec axisTitlePoint(const Scene& scene,bool xAxis){
+    for(const auto& item:scene.items)if(item.type==Primitive::Text&&item.textRole==(xAxis?plotXAxisTitleTextRole:plotYAxisTitleTextRole)&&!item.text.empty()){
+        const Vec local{measure(item.text,item.fontSize,item.font,item.face)/2,item.fontSize*.5};const double angle=item.rotation*pi/180;
+        return item.points.front()+Vec{local.x*std::cos(angle)-local.y*std::sin(angle),local.x*std::sin(angle)+local.y*std::cos(angle)};
+    }
+    throw std::runtime_error("missing rendered axis title");
+}
+static void axisQuickChecks(HWND hwnd){
+    doc=coordinateDemo();selection.clear();history.clear();tool=Select;changed();fit();dirty=false;
+    const auto original=doc;const auto before=toNative(doc);const auto owner=doc.plots.front().id;
+    auto drive=[&](int mode,const std::function<void()>& open){
+        axisQuickCase=mode;axisQuickFailure.clear();axisQuickDriven=false;SetTimer(hwnd,910,10,driveAxisQuick);open();KillTimer(hwnd,910);
+        check(axisQuickDriven,"axis quick access opens the requested native form");
+        check(axisQuickFailure.empty(),axisQuickFailure.c_str());
+    };
+    const auto y=screen(axisTitlePoint(scene(),false));
+    drive(0,[&]{SendMessageW(hwnd,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(int(y.x),int(y.y)));});
+    check(toNative(doc)==before&&!history.undo(doc),"direct Y title access and cancellation do not modify the document");
+    drive(1,[&]{SendMessageW(plotManagerWindow,WM_COMMAND,4406,0);});
+    auto expected=original;expected.plots.front().yLabel="ΔG";expected.plots.front().energySymbol="ΔG";
+    check(toNative(doc)==toNative(expected),"one-click energy notation preserves every other project property and data value");
+    drive(2,[&]{SendMessageW(plotManagerWindow,WM_COMMAND,4406,0);});
+    check(history.undo(doc)&&toNative(doc)==before&&!history.undo(doc),"quick notation apply is exactly one reversible edit");changed();
+    auto sc=makeScene(doc.subset({owner}),measure);RECT client{};GetClientRect(plotManagerWindow,&client);
+    const double panelTop=std::max(180L,client.bottom-460),height=panelTop-110,width=client.right-40;
+    const double scale=std::max(.01,std::min((width-32)/sc.bounds.w,(height-32)/sc.bounds.h));
+    const Vec offset{20+(width-sc.bounds.w*scale)/2-sc.bounds.x*scale,88+(height-sc.bounds.h*scale)/2-sc.bounds.y*scale};
+    const auto x=axisTitlePoint(sc,true)*scale+offset;
+    drive(3,[&]{SendMessageW(plotManagerWindow,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(int(x.x),int(x.y)));});
+    check(toNative(doc)==before,"preview X title access preserves data on cancel");closePlotManager();
+    doc.plots.front().energyAtTop=true;changed();fit();const auto upper=screen(axisTitlePoint(scene(),false));
+    drive(4,[&]{SendMessageW(hwnd,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(int(upper.x),int(upper.y)));});closePlotManager();
+    doc.graphsLocked=true;check(!plotAxisTitleAt(scene(),world(upper),4/zoom),"locked graph titles retain their edit protection");
+    doc=original;selection.clear();history.clear();changed();
+}
 static void captureAxesManager(const std::wstring& name){
     RECT bounds{};GetClientRect(plotManagerWindow,&bounds);
     Bitmap image(bounds.right,bounds.bottom,PixelFormat32bppARGB);
@@ -791,8 +901,7 @@ static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
     for(int top:{0,1})for(int notation:{1,2}){
         SendDlgItemMessageW(dialog,118,CB_SETCURSEL,top,0);
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(118,CBN_SELCHANGE),reinterpret_cast<LPARAM>(GetDlgItem(dialog,118)));
-        SendDlgItemMessageW(dialog,119,CB_SETCURSEL,notation,0);
-        SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(119,CBN_SELCHANGE),reinterpret_cast<LPARAM>(GetDlgItem(dialog,119)));
+        chooseAxisNotationByMouse(GetDlgItem(dialog,119),notation);
         const std::string symbol=notation==1?"ΔE":"ΔG";
         check(doc.plots.front().energySymbol==symbol&&doc.plots.front().yLabel==symbol,"energy notation choice updates both stored axis titles");
         wchar_t title[32]{};GetDlgItemTextW(dialog,114,title,32);
@@ -800,6 +909,8 @@ static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
         const auto scene=makeScene(doc,measure);
         check(std::any_of(scene.items.begin(),scene.items.end(),[&](const auto& item){return item.type==Primitive::Text&&item.owner==doc.plots.front().id&&item.text.find(symbol)!=std::string::npos&&item.rotation==(top?0:-90);}),"Delta E and Delta G appear on the actual top or vertical axis");
         check(toSvg(scene).find(symbol)!=std::string::npos,"selected energy notation reaches SVG export");
+        const auto& canvas=sceneForPaint(true);
+        check(std::any_of(canvas.items.begin(),canvas.items.end(),[&](const auto& item){return item.type==Primitive::Text&&item.owner==doc.plots.front().id&&item.text.find(symbol)!=std::string::npos&&item.rotation==(top?0:-90);}),"actual cached canvas scene reflects mouse-selected Delta energy");
     }
     for(int tab=0;tab<7;++tab){choose(tab);if(unifiedAxisMode==1)captureAxesManager(L"unified-axes-"+std::to_wstring(unifiedAxisWidth)+L"-"+std::to_wstring(tab)+L".png");}
     if(unifiedAxisMode==2){
@@ -807,7 +918,7 @@ static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
         check(!IsWindowEnabled(GetDlgItem(dialog,IDOK)),"invalid Y font prevents committing both axis edits");
         choose(0);check(doc.plots.front().xAxisWidth==3.5,"invalid Y entry does not discard the valid combined preview");
     }
-    PostMessageW(dialog,WM_COMMAND,unifiedAxisMode==1?IDOK:IDCANCEL,0);
+    PostMessageW(GetDlgItem(dialog,unifiedAxisMode==1?IDOK:IDCANCEL),BM_CLICK,0,0);
     }catch(const std::exception& error){unifiedAxisFailure=error.what();PostMessageW(dialog,WM_COMMAND,IDCANCEL,0);}
 }
 static void unifiedAxisChecks(HWND hwnd){
@@ -1243,6 +1354,12 @@ int main(int argc,char** argv){
         check(RegisterClassW(&wc)!=0,"register window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
+        if(argc==2&&std::string(argv[1])=="--axis-quick-access-only"){
+            axisQuickChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
+        if(argc==3&&std::string(argv[1])=="--project-axis-only"){
+            projectAxisChecks(hwnd,ui::wide(argv[2]));DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
         if(argc>1&&std::string(argv[1])=="--unified-axes-only"){
             unifiedAxisChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }

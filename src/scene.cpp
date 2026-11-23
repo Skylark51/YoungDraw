@@ -897,10 +897,10 @@ Scene makeScene(const Document& d,const Measure& measure){
             const auto& header=energyHeader;
             const double eWidth=scriptWidth(header,energyFont);
             const double unitWidth=unitCaption.empty()?0:scriptWidth(unitCaption,energyFont);
-            axisText(header,{x0,headerY},energyFont,plot.yColor,false);
-            if(unitWidth>0)axisText(unitCaption,{x0+eWidth/2+unitWidth/2,headerY},energyFont,plot.yColor,false);
+            axisText(header,{x0,headerY},energyFont,plot.yColor,false,plotYAxisTitleTextRole);
+            if(unitWidth>0)axisText(unitCaption,{x0+eWidth/2+unitWidth/2,headerY},energyFont,plot.yColor,false,plotYAxisTitleTextRole);
             external.push_back({x0-eWidth/2,headerY-energyFont*.4,eWidth+unitWidth,energyFont*1.7});
-        }else if(plot.showYAxis)axisText(yCaption,{yAxisX,y0-h/2},energyFont,plot.yColor,true);
+        }else if(plot.showYAxis)axisText(yCaption,{yAxisX,y0-h/2},energyFont,plot.yColor,true,plotYAxisTitleTextRole);
         // Label regular ticks only; range boundaries never create an extra irregular tick.
         double tickHeight=tickFont*1.3,lastLabel=y0+tickHeight+10;
         for(size_t tick=0;tick<ticks.size();tick++){
@@ -1380,7 +1380,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         }
         Rect xAxisBox{x0+w/2-widthOf(plot.xLabel,axisFont)/2,stateBottom+10,widthOf(plot.xLabel,axisFont),axisFont*1.3};
         for(size_t pass=0;pass<=external.size();pass++){bool moved=false;for(auto other:external)if(overlaps(xAxisBox,other)){xAxisBox.y=other.y+other.h+8;moved=true;}if(!moved)break;}
-        if(plot.showXAxis)axisText(plot.xLabel,{x0+w/2,xAxisBox.y},axisFont,plot.xColor,false);
+        if(plot.showXAxis)axisText(plot.xLabel,{x0+w/2,xAxisBox.y},axisFont,plot.xColor,false,plotXAxisTitleTextRole);
         // Own captions are also obstacles if dense values have to use the outer rail.
         for(auto& item:s.items)if(item.owner==owner&&item.type==Primitive::Text&&!item.text.empty()){
             Vec at=item.points[0];double tw=textWidth(measure,item.text,item.fontSize,item.font,item.face),th=item.fontSize*1.3;

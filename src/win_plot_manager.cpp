@@ -39,6 +39,7 @@ struct Manager{
     std::vector<HWND> panes;
     std::wstring notice;
     int panel=0;
+    int axisInitialTab=-1;
     std::optional<EnergyPlot> draft;
     std::optional<LegendDrag> legendDrag;
     std::optional<AnnotationFrame> annotationFrame;
@@ -369,6 +370,10 @@ struct Manager{
         if(busy||subpane||panelVisible()||!graph()||!preview.Contains(float(cursor.x),float(cursor.y)))return;
         const auto& scene=currentScene();const auto view=fitPreview(scene);
         const auto point=(cursor-view.origin)*(1/view.scale);const double pad=5/view.scale;
+        if(auto axis=plotAxisTitleAt(scene,point,pad)){
+            selectPage(1);axisInitialTab=axis->xAxis?1:4;
+            SendMessageW(window,WM_COMMAND,axesManager,0);return;
+        }
         int action=0,row=-1,column=1;
         for(auto it=scene.items.rbegin();it!=scene.items.rend();++it){
             const auto& item=*it;
@@ -501,7 +506,7 @@ struct Manager{
     void paint(HDC dc){
         Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);const auto& palette=appearance::palette();RECT client{};GetClientRect(window,&client);SolidBrush background(palette.panel);g.FillRectangle(&background,0,0,client.right,client.bottom);
         text(g,L"그래프 관리",20,16,21,palette.text,true);
-        text(g,panelVisible()&&panel==plotLegendCommand?L"미리보기 · 범례를 끌어 위치 이동":L"더블클릭: 이름·기본 경로 값·범례·경로의 상태 점 편집",preview.X,68,12,palette.muted,true);appearance::rounded(g,preview,8,Color(255,255,255,255));
+        text(g,panelVisible()&&panel==plotLegendCommand?L"미리보기 · 범례를 끌어 위치 이동":L"더블클릭: 축 제목·이름·값·범례·경로의 상태 점 편집",preview.X,68,12,palette.muted,true);appearance::rounded(g,preview,8,Color(255,255,255,255));
         if(graph())try{
             const auto& sc=currentScene();
             const auto view=fitPreview(sc);
@@ -535,7 +540,7 @@ struct Manager{
         if(!graph())throw std::runtime_error("편집할 그래프가 없습니다.");if(doc.isLocked(owner))throw std::runtime_error("그래프 잠금을 해제한 뒤 편집하세요.");
         selection={owner};
         if(action==137){plotSettings(owner,true);return;}
-        if(action==axesManager){editPlotAxes(owner);return;}
+        if(action==axesManager){const int tab=axisInitialTab;axisInitialTab=-1;editPlotAxes(owner,tab);return;}
         if(action==verticalBranch){openVerticalBranch();return;}
         if(action==photoExcitation){editPlotPhotoExcitation(owner);return;}
         if(action==139){openStages();return;}
@@ -626,6 +631,13 @@ void openPlotManagerTool(int id,int action){
     SendMessageW(plotManagerWindow,WM_COMMAND,action,0);
 }
 void closePlotManager(){if(plotManagerWindow)DestroyWindow(plotManagerWindow);}
+void openPlotAxesManager(int id,int detail){
+    managePlot(id);
+    auto* manager=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));
+    if(!manager||manager->owner!=id||!manager->selectPage(1))return;
+    manager->axisInitialTab=detail;
+    SendMessageW(plotManagerWindow,WM_COMMAND,axesManager,0);
+}
 void refreshPlotManager(){if(plotManagerWindow){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m)m->cachedScene.reset();InvalidateRect(plotManagerWindow,nullptr,FALSE);if(m)for(auto card:m->cards)InvalidateRect(card,nullptr,FALSE);}}
 bool handlePlotManagerMessage(MSG& message){
     const auto window=plotManagerWindow;
