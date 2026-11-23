@@ -1,4 +1,12 @@
-param([Parameter(Mandatory=$true)][string]$BuildDirectory, [string]$Filter = '')
+param(
+    [Parameter(Mandatory=$true)][string]$BuildDirectory,
+    [string]$Filter = '',
+    [string]$Configuration = '',
+    [string]$Executable = '',
+    [string[]]$Arguments = @(),
+    [string]$ArtifactDirectory = '',
+    [ValidateSet('baseline','after')][string]$Stage = 'after'
+)
 $ErrorActionPreference = 'Stop'
 # Never switch the user's desktop or fall back to showing test windows there.
 if (-not ('YoungDraw.IsolatedTests' -as [type])) {
@@ -39,15 +47,31 @@ namespace YoungDraw {
 "@
 }
 $taskDirectory = (Resolve-Path -LiteralPath $BuildDirectory).Path
-$taskLog = Join-Path $taskDirectory 'isolated-ctest.log'
-$taskCTest = (Get-Command ctest -ErrorAction Stop).Source
 $taskPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 function Quote-TestLiteral([string]$Value) { return "'" + $Value.Replace("'", "''") + "'" }
-$taskCommand = '& ' + (Quote-TestLiteral $taskCTest) + ' --test-dir ' + (Quote-TestLiteral $taskDirectory) + ' --output-on-failure'
-if ($Filter) { $taskCommand += ' -R ' + (Quote-TestLiteral $Filter) }
+if ($Executable) {
+    if ($Filter) { throw 'Filter is only valid for CTest.' }
+    $taskExecutable = (Resolve-Path -LiteralPath $Executable).Path
+    $taskLog = Join-Path $taskDirectory ('isolated-' + [IO.Path]::GetFileNameWithoutExtension($taskExecutable) + '.log')
+    $taskCommand = '& ' + (Quote-TestLiteral $taskExecutable)
+    foreach ($taskArgument in $Arguments) { $taskCommand += ' ' + (Quote-TestLiteral $taskArgument) }
+} else {
+    if ($Arguments.Count) { throw 'Arguments requires Executable.' }
+    $taskLog = Join-Path $taskDirectory 'isolated-ctest.log'
+    $taskCTest = (Get-Command ctest -ErrorAction Stop).Source
+    $taskCommand = '& ' + (Quote-TestLiteral $taskCTest) + ' --test-dir ' + (Quote-TestLiteral $taskDirectory) + ' --output-on-failure --timeout 120'
+    if ($Filter) { $taskCommand += ' -R ' + (Quote-TestLiteral $Filter) }
+    if ($Configuration) { $taskCommand += ' -C ' + (Quote-TestLiteral $Configuration) }
+}
 $taskCommand += ' *> ' + (Quote-TestLiteral $taskLog) + '; exit $LASTEXITCODE'
+if ($ArtifactDirectory) {
+    $taskArtifacts = [IO.Path]::GetFullPath($ArtifactDirectory)
+    [IO.Directory]::CreateDirectory($taskArtifacts) | Out-Null
+    $taskCommand = '$env:YOUNGDRAW_UI_ARTIFACT_DIR=' + (Quote-TestLiteral $taskArtifacts) + '; ' + $taskCommand
+}
+$taskCommand = '$env:YOUNGDRAW_UI_STAGE=' + (Quote-TestLiteral $Stage) + '; Set-Location -LiteralPath ' + (Quote-TestLiteral $taskDirectory) + '; ' + $taskCommand
 $taskEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($taskCommand))
-Write-Host 'Running CTest on an isolated desktop (user desktop stays unchanged).'
+Write-Host 'Running tests on an isolated desktop (user desktop stays unchanged).'
 $taskResult = [YoungDraw.IsolatedTests]::Run($taskPowerShell, '"' + $taskPowerShell + '" -NoProfile -NonInteractive -EncodedCommand ' + $taskEncoded)
 if (Test-Path -LiteralPath $taskLog) { Get-Content -LiteralPath $taskLog }
-if ($taskResult) { throw "Isolated CTest failed (exit $taskResult). Log: $taskLog" }
+if ($taskResult) { throw "Isolated test failed (exit $taskResult). Log: $taskLog" }
