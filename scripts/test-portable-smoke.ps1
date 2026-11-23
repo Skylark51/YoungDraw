@@ -28,6 +28,7 @@ foreach ($taskSuffix in $taskExpected) {
         if ($taskXml.DocumentElement.LocalName -ne $taskRootName) { throw "Wrong XML root: $taskSuffix" }
     }
 }
-$taskReceipt = [ordered]@{ executable=$taskExecutable; sha256=(Get-FileHash -LiteralPath $taskExecutable -Algorithm SHA256).Hash; exported_files=$taskExpected.Count; exit_code=0; mode='actual executable --export-demo on isolated desktop'; utc=[DateTime]::UtcNow.ToString('o') }
-$taskReceipt | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskArtifacts 'smoke.json') -Encoding UTF8
+$taskOutputHashes = foreach ($taskSuffix in $taskExpected) { $taskPath=$taskPrefix+$taskSuffix; [ordered]@{ file=[IO.Path]::GetFileName($taskPath); bytes=(Get-Item -LiteralPath $taskPath).Length; sha256=(Get-FileHash -LiteralPath $taskPath -Algorithm SHA256).Hash } }
+$taskReceipt = [ordered]@{ executable=$taskExecutable; sha256=(Get-FileHash -LiteralPath $taskExecutable -Algorithm SHA256).Hash; exported_files=$taskExpected.Count; outputs=@($taskOutputHashes); exit_code=0; mode='actual executable --export-demo on isolated desktop'; utc=[DateTime]::UtcNow.ToString('o') }
+$taskReceipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $taskArtifacts 'smoke.json') -Encoding UTF8
 Write-Host "PASS: actual executable exported and validated $($taskExpected.Count) files."

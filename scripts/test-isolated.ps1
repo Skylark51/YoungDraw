@@ -71,6 +71,11 @@ if ($ArtifactDirectory) {
 }
 $taskCommand = '$env:YOUNGDRAW_UI_STAGE=' + (Quote-TestLiteral $Stage) + '; Set-Location -LiteralPath ' + (Quote-TestLiteral $taskDirectory) + '; ' + $taskCommand
 $taskEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($taskCommand))
+if ($ArtifactDirectory) {
+    $taskReceipt = [ordered]@{ stage=$Stage; utc=[DateTime]::UtcNow.ToString('o'); working_directory=$taskDirectory; executable=$Executable; arguments=$Arguments; configuration=$Configuration; script_sha256=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash; isolation='new Windows desktop, never switched' }
+    if ($Executable) { $taskReceipt.executable_sha256 = (Get-FileHash -LiteralPath $taskExecutable -Algorithm SHA256).Hash }
+    $taskReceipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $taskArtifacts 'isolated-run.json') -Encoding UTF8
+}
 Write-Host 'Running tests on an isolated desktop (user desktop stays unchanged).'
 $taskResult = [YoungDraw.IsolatedTests]::Run($taskPowerShell, '"' + $taskPowerShell + '" -NoProfile -NonInteractive -EncodedCommand ' + $taskEncoded)
 if (Test-Path -LiteralPath $taskLog) { Get-Content -LiteralPath $taskLog }

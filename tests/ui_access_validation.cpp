@@ -32,6 +32,8 @@ fs::path output;
 std::ofstream manifest,menus,commands,hitsFile,controls;
 int viewportWidth=1440,viewportHeight=900,requestedDpi=96;
 bool after=true,capturing=false,modalSeen=false;
+bool saveProbe=false,explicitSaveFolder=false;
+fs::path expectedSaveFolder;
 std::string modalName,failure;
 std::wstring modalClass;
 int modalTicks=0;
@@ -100,10 +102,19 @@ void CALLBACK modalDriver(HWND owner,UINT,UINT_PTR timer,DWORD){
     while((dialog=FindWindowExW(nullptr,dialog,modalClass.c_str(),nullptr))){DWORD pid=0;GetWindowThreadProcessId(dialog,&pid);if(pid==GetCurrentProcessId()&&GetWindow(dialog,GW_OWNER)==owner&&IsWindowVisible(dialog))break;}
     if(!dialog){if(++modalTicks>300){failure="modal capture timed out: "+modalName;KillTimer(owner,timer);EnumThreadWindows(GetCurrentThreadId(),[](HWND h,LPARAM)->BOOL{if(GetWindow(h,GW_OWNER))PostMessageW(h,WM_CLOSE,0,0);return TRUE;},0);}return;}
     if(dialog!=pendingDialog){pendingDialog=dialog;readyTicks=0;}
-    if(++readyTicks<(modalName=="save-svg"?15:3))return;
+    if(++readyTicks<(modalName.find("save-")==0?15:3))return;
     KillTimer(owner,timer);modalSeen=true;
     try{
         resize(dialog);capture(dialog,modalName);
+        if(saveProbe&&modalName.find("save-")==0){
+            wchar_t path[32768]{},folder[32768]{};
+            auto pathCount=SendMessageW(dialog,CDM_GETFILEPATH,std::size(path),LPARAM(path));
+            auto folderCount=SendMessageW(dialog,CDM_GETFOLDERPATH,std::size(folder),LPARAM(folder));
+            std::ofstream probe(output/(modalName+"-native.csv"));probe<<"query,returned_characters,value\nfile_path,"<<pathCount<<','<<csv(ui::utf8(path))<<"\nfolder_path,"<<folderCount<<','<<csv(ui::utf8(folder))<<'\n';
+            check(pathCount>0&&folderCount>0,"native save dialog exposes current file and folder through CDM queries");
+            if(after){check(fs::path(path).filename()==L"validation-example.svg","saved document SVG export starts with its document stem and chosen extension");
+                check(_wcsicmp(fs::path(folder).lexically_normal().c_str(),expectedSaveFolder.lexically_normal().c_str())==0,"saved export uses document folder or explicitly requested folder");}
+        }
         if(modalName=="mechanism")for(int page:{70,71,72}){click(dialog,page);capture(dialog,"mechanism-page"+std::to_string(page));}
         if(modalName=="mechanism"&&after){
             auto edit=GetDlgItem(dialog,80);check(edit!=nullptr,"inline mechanism name inspector exists");
@@ -185,6 +196,7 @@ int main(int argc,char** argv){
         RegistrySandbox registry;
         const DWORD theme=0;RegSetKeyValueW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Appearance",L"Theme",REG_DWORD,&theme,sizeof(theme));
         capturing=argc>1&&std::string(argv[1])=="--capture";
+        saveProbe=argc>1&&std::string(argv[1])=="--save-probe";
         output=env(L"YOUNGDRAW_UI_ARTIFACT_DIR");if(output.empty())output=fs::current_path()/"ui-access-validation";
         fs::create_directories(output);output=fs::absolute(output);
         auto sandbox=output/"sandbox";fs::create_directories(sandbox);SetEnvironmentVariableW(L"LOCALAPPDATA",sandbox.c_str());SetEnvironmentVariableW(L"APPDATA",sandbox.c_str());
@@ -197,9 +209,15 @@ int main(int argc,char** argv){
         inventory(GetMenu(window),"",1);for(const auto& item:availableEditorCommands(window))commands<<item.id<<','<<csv(ui::utf8(item.title))<<','<<csv(ui::utf8(item.detail))<<'\n';
         menus.flush();commands.flush();
         auto project=projects::Project::create(projects::root(),L"Validation project");project.addDrawing(L"Example",toNative(mechanismDemo()));project.save();
-        if(capturing){for(auto size:std::vector<std::pair<int,int>>{{800,600},{1440,900},{2560,1440}})for(int dpi:{96,120,144,192}){viewportWidth=size.first;viewportHeight=size.second;requestedDpi=dpi;surfaces(window,project.folder);std::cout<<"Captured "<<viewportWidth<<'x'<<viewportHeight<<" requested DPI "<<dpi<<"; effective editor DPI "<<GetDpiForWindow(window)<<'\n';}}
+        if(saveProbe){
+            doc=mechanismDemo();filePath=(project.folder/L"validation-example.ydraw").wstring();writeFile(filePath,toNative(doc));expectedSaveFolder=project.folder;
+            modal(window,L"#32770","save-saved-svg",[&]{check(!fileDialog(true,1),"native save probe cancels without export");});
+            expectedSaveFolder=output/"explicit-export-folder";fs::create_directories(expectedSaveFolder);
+            modal(window,L"#32770","save-explicit-svg",[&]{check(!fileDialog(true,1,expectedSaveFolder.wstring()),"explicit folder probe cancels without export");});
+        }
+        else if(capturing){for(auto size:std::vector<std::pair<int,int>>{{800,600},{1440,900},{2560,1440}})for(int dpi:{96,120,144,192}){viewportWidth=size.first;viewportHeight=size.second;requestedDpi=dpi;surfaces(window,project.folder);std::cout<<"Captured "<<viewportWidth<<'x'<<viewportHeight<<" requested DPI "<<dpi<<"; effective editor DPI "<<GetDpiForWindow(window)<<'\n';}}
         else surfaces(window,project.folder);
-        quickAssertions(window);doc={};selection.clear();dirty=false;DestroyWindow(window);window=nullptr;win=nullptr;appearance::shutdown();OleUninitialize();GdiplusShutdown(token);
+        if(!saveProbe)quickAssertions(window);doc={};selection.clear();dirty=false;DestroyWindow(window);window=nullptr;win=nullptr;appearance::shutdown();OleUninitialize();GdiplusShutdown(token);
         std::cout<<"PASS: isolated UI validation ("<<(after?"after assertions":"explicit baseline")<<"). DPI probes are synthetic; see effective_dpi.\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';if(window)DestroyWindow(window);return 1;}
 }
