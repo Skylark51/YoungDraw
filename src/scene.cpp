@@ -1404,24 +1404,31 @@ Scene makeScene(const Document& d,const Measure& measure){
             for(auto pair:{std::pair{start.y,end.y},std::pair{end.y,start.y}}){double dy=pair.second>pair.first?head:-head;Primitive tip;tip.type=Primitive::Polygon;tip.owner=owner;tip.filled=true;tip.width=0;tip.points={{x,pair.first},{x-2.5,pair.first+dy},{x+2.5,pair.first+dy}};s.items.push_back(tip);}
             std::ostringstream value;value.imbue(std::locale::classic());value<<std::fixed<<std::setprecision(1)<<(path.values[i]-path.values[from]);
             std::string label=state.gapLabel.empty()?plotEnergySymbol(plot)+(state.transitionState?"^{‡} = ":" = ")+value.str():state.gapLabel;
-            double tw=widthOf(label,valueFont),tx=x-tw/2-8,ty=mid-valueFont*.65+state.gapOffset.y;
+            const auto& style=state.gapStyle;
+            const double gapFont=style.fontSize>0?style.fontSize:valueFont;
+            const auto family=style.fontFamily.empty()?graphFont(label):style.fontFamily;
+            const int face=style.face<0?faceFor(label):style.face;
+            double tw=textWidth(measure,label,gapFont,family,face),tx=x-tw/2-8,ty=mid-gapFont*.65+state.gapOffset.y;
+            const double textHeight=gapFont*(1.7+1.3*std::count(label.begin(),label.end(),'\n'));
             if(state.gapOffset.y==0){
                 // Keep automatic gap captions clear of curves and state names.
-                auto clear=[&](double y){Rect box{tx-tw/2,y-valueFont*.4,tw,valueFont*1.7};
+                auto clear=[&](double y){Rect box{tx-tw/2,y-gapFont*.4,tw,textHeight};
                     for(auto other:external)if(overlaps(box,other,3))return false;
                     for(auto other:stateBoxes)if(overlaps(box,other,3))return false;
                     for(auto pt:obstacles)if(pt.x>box.x-4&&pt.x<box.x+box.w+4&&pt.y>box.y-4&&pt.y<box.y+box.h+4)return false;
                     return true;
                 };
                 const double initial=ty;
-                for(int step=0;step<80;++step){double distance=step*valueFont*.3;
+                for(int step=0;step<80;++step){double distance=step*gapFont*.3;
                     if(clear(initial-distance)){ty=initial-distance;break;}
                     if(clear(initial+distance)){ty=initial+distance;break;}
                 }
             }
-            plotText(label,{tx,ty},valueFont,"#000000",true);
-            Rect gapBox{tx-tw/2,ty-valueFont*.4,tw,valueFont*1.7};
-            s.gapCaptions.push_back({owner,i,gapBox,{state.gapOffset.x,ty-(mid-valueFont*.65)}});
+            Primitive caption;caption.type=Primitive::Text;caption.owner=owner;caption.text=label;
+            caption.font=family;caption.face=face;caption.fontSize=gapFont;caption.color=style.color;
+            emitText(s.items,caption,{tx,ty},true,measure);
+            Rect gapBox{tx-tw/2,ty-gapFont*.4,tw,textHeight};
+            s.gapCaptions.push_back({owner,i,gapBox,{state.gapOffset.x,ty-(mid-gapFont*.65)}});
             external.push_back(gapBox);
         }
         Rect xAxisBox{x0+w/2-widthOf(plot.xLabel,axisFont)/2,stateBottom+10,widthOf(plot.xLabel,axisFont),axisFont*1.3};

@@ -411,25 +411,67 @@ void plotSettings(int id,bool generalOnly){auto* p=plot(id);if(!p)throw std::run
       std::vector<std::pair<std::wstring,std::vector<size_t>>>{{L"기본",{0,23,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{21,22,19,20}},{L"글자",{4,5,8,12,13,14,15,24}},{L"선 스타일",{7,16,17}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}
 }
 std::optional<PendingEnergyGap> pendingEnergyGap;
+namespace {
+std::vector<ui::Field> energyGapStyleFields(const EnergyGapStyle& style){
+    return {{L"글꼴 (빈칸: 자동)",style.fontFamily,false,ui::fontFamilies(win),false,4,false,true},
+        ui::numericField(L"크기 (pt, 0: 자동)",style.fontSize,0,72,1),
+        {L"스타일",std::to_string(style.face+1),false,{L"그래프 따름",L"보통",L"굵게",L"기울임",L"굵게 기울임"}},
+        {L"글자 색상",style.color,false,{},true}};
+}
+EnergyGapStyle readEnergyGapStyle(const std::vector<std::string>& values,size_t first){
+    EnergyGapStyle style;style.fontFamily=values.at(first);style.fontSize=numeric(values.at(first+1),0,72);
+    if(style.fontSize>0&&style.fontSize<4)throw std::runtime_error("글자 크기는 0(자동) 또는 4~72 pt로 입력하세요.");
+    style.face=std::stoi(values.at(first+2))-1;style.color=values.at(first+3);
+    if(!style.fontFamily.empty()){
+        const auto family=ui::wide(style.fontFamily);FontFamily installed(family.c_str());
+        if(installed.GetLastStatus()!=Ok)throw std::runtime_error("설치된 글꼴을 선택하거나 빈칸으로 두세요.");
+    }
+    return style;
+}
+}
+void editEnergyGapStyle(int id){
+    const auto* p=plot(id);if(!p||doc.isLocked(id))throw std::runtime_error("에너지 갭을 편집할 그래프를 선택하세요.");
+    std::vector<size_t> gaps;std::vector<ui::SearchItem> entries;
+    for(size_t i=0;i<p->states.size();++i)if(p->states[i].gapFrom>=0){
+        gaps.push_back(i);entries.push_back({ui::wide(p->states[size_t(p->states[i].gapFrom)].label+" → "+p->states[i].label),L"갭 글꼴·크기·굵게·기울임·색상"});
+    }
+    if(gaps.empty())throw std::runtime_error("먼저 ‘에너지 갭 추가’에서 갭을 배치하세요.");
+    size_t chosen=0;if(gaps.size()>1){const auto result=ui::search(win,L"서식을 바꿀 에너지 갭",entries,L"편집",true);if(!result)return;chosen=*result;}
+    const size_t index=gaps[chosen];const Document before=doc;const auto& original=plot(id)->states[index];
+    auto fields=energyGapStyleFields(original.gapStyle);
+    fields.push_back({L"갭 문구 (빈칸: 자동)",original.gapLabel,true,{},false,2,true});
+    auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
+        auto candidate=before;auto found=std::find_if(candidate.plots.begin(),candidate.plots.end(),[&](const auto& graph){return graph.id==id;});
+        found->states[index].gapStyle=readEnergyGapStyle(values,0);found->states[index].gapLabel=values[4];validateEnergyAnnotations(*found);
+        doc=std::move(candidate);redraw();UpdateWindow(win);return {};
+    }catch(const std::exception& error){return ui::wide(error.what());}};
+    const auto result=ui::form(win,L"에너지 갭 글꼴·색상 — "+entries[chosen].title,fields,update);
+    if(result){if(update(*result).empty()&&toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+    else{doc=before;redraw();}
+}
 void addEnergyGap(int id){
     const auto* p=plot(id);if(!p||doc.isLocked(id)||p->states.size()<2)throw std::runtime_error("에너지 갭을 넣을 그래프를 선택하세요.");
     std::vector<std::wstring> names,paths;for(size_t i=0;i<p->states.size();++i)names.push_back(std::to_wstring(i+1)+L". "+ui::wide(p->states[i].label));
     for(const auto& path:p->series)paths.push_back(ui::wide(path.name));if(paths.empty())paths.push_back(L"Path 1");
-    const std::vector<ui::Field> fields={
+    std::vector<ui::Field> fields={
         {L"출발 상태","0",false,names},{L"도착 상태","1",false,names},{L"경로","0",false,paths},
-        {L"갭 문구 (빈칸: "+ui::wide(plotEnergySymbol(*p))+L" 자동 계산)","",true,{},false,2,true},
-        {L"배치 방법","적용 후 캔버스에서 원하는 위치를 클릭하세요."}};
-    auto validate=[&](const std::vector<std::string>& v)->std::wstring{
+        {L"갭 문구 (빈칸: "+ui::wide(plotEnergySymbol(*p))+L" 자동 계산)","",true,{},false,2,true}};
+    const auto styleFields=energyGapStyleFields(p->states[1].gapStyle);fields.insert(fields.end(),styleFields.begin(),styleFields.end());
+    fields.push_back({L"배치 방법","적용 후 캔버스에서 원하는 위치를 클릭하세요."});
+    auto validate=[&](const std::vector<std::string>& v)->std::wstring{try{
         const size_t from=std::stoul(v[0]),to=std::stoul(v[1]),path=std::stoul(v[2]);if(from==to)return L"서로 다른 출발·도착 상태를 선택하세요.";
+        if(from>=p->states.size()||to>=p->states.size()||path>=std::max(size_t(1),p->series.size()))return L"출발·도착 상태와 경로를 선택하세요.";
+        auto candidate=*p;candidate.states[to].gapStyle=readEnergyGapStyle(v,4);validateEnergyAnnotations(candidate);
         if(!p->series.empty()&&(!p->series[path].hasValue(from)||!p->series[path].hasValue(to)))return L"두 상태에 모두 에너지 값이 있어야 합니다.";
         const double a=p->series.empty()?p->states[from].energy:p->series[path].values[from],b=p->series.empty()?p->states[to].energy:p->series[path].values[to];
         if(std::abs(a-b)<1e-10)return L"두 상태의 에너지가 같아 표시할 갭이 없습니다.";
         const auto sc=scene();const auto points=sc.plotSnapPoints.find(id);
         if(points==sc.plotSnapPoints.end()||std::none_of(points->second.begin(),points->second.end(),[&](const auto& point){return point.path==int(path)&&point.state==int(from);})||std::none_of(points->second.begin(),points->second.end(),[&](const auto& point){return point.path==int(path)&&point.state==int(to);}))return L"두 상태가 보이도록 y축 범위를 조정하세요.";
         return {};
+    }catch(const std::exception& error){return ui::wide(error.what());}
     };
-    auto result=ui::form(win,L"에너지 갭 추가",fields,validate);if(!result)return;
-    pendingEnergyGap=PendingEnergyGap{id,std::stoi((*result)[0]),std::stoi((*result)[1]),std::stoi((*result)[2]),(*result)[3]};
+    auto result=ui::form(win,L"에너지 갭 추가",fields,validate,{{L"갭·배치",{0,1,2,3,8}},{L"글꼴·색상",{4,5,6,7}}});if(!result)return;
+    pendingEnergyGap=PendingEnergyGap{id,std::stoi((*result)[0]),std::stoi((*result)[1]),std::stoi((*result)[2]),(*result)[3],readEnergyGapStyle(*result,4)};
     tool=Select;selection={id};status=L"갭을 넣을 위치를 클릭하세요. 가로: 화살표 위치 · 세로: 문구 위치 · Esc: 취소";redraw();
 }
 bool placeEnergyGap(Vec at){
@@ -441,7 +483,7 @@ bool placeEnergyGap(Vec at){
     if(!from||!to){pendingEnergyGap.reset();return true;}
     auto& state=p->states.at(size_t(pending.to));const auto where=world(at);const double dx=where.x-to->x,dy=where.y-(from->y+to->y)/2;
     if(std::abs(dx)>10000||std::abs(dy)>10000){status=L"그래프 가까이에 갭을 배치하세요. Esc: 취소";redraw();return true;}
-    history.checkpoint(doc);state.gapFrom=pending.from;state.gapPath=pending.path;state.gapLabel=pending.label;
+    history.checkpoint(doc);state.gapFrom=pending.from;state.gapPath=pending.path;state.gapLabel=pending.label;state.gapStyle=pending.style;
     state.gapOffset={dx,std::abs(dy)<1e-6?1e-6:dy};pendingEnergyGap.reset();changed();status=L"에너지 갭을 추가했습니다. 갭 문구를 드래그해 이동 · TS·위치에서 수정·제거 · Ctrl+Z: 되돌리기";return true;
 }
 std::optional<std::pair<int,size_t>> plotStateAt(Vec at){

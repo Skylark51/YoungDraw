@@ -13,6 +13,34 @@ static bool textContains(const Scene& s,const std::string& text){for(const auto&
 static size_t curves(const Scene& s){return std::count_if(s.items.begin(),s.items.end(),[](const auto& p){return p.type==Primitive::Bezier;});}
 static Vec caption(const Scene& s,int i){for(const auto& p:s.items)if(p.type==Primitive::Text&&p.textRole==6&&p.textIndex==i)return p.points.front();throw std::runtime_error("missing caption");}
 int main(){try{
+    {
+        Document styled;auto graph=newEnergyPlot(0,true);graph.id=styled.nextId++;graph.valueFontSize=11;
+        graph.states[1].gapFrom=0;graph.states[1].gapLabel="Custom gap\nsecond line";
+        graph.states[1].gapStyle={"Times New Roman","#C02080",24,3};styled.plots={graph};
+        for(int mode=0;mode<=4;++mode){styled.plots[0].mode=mode;const auto sc=makeScene(styled);
+            const auto caption=std::find_if(sc.items.begin(),sc.items.end(),[](const auto& item){return item.type==Primitive::Text&&item.text=="Custom gap";});
+            check(caption!=sc.items.end()&&caption->font=="Times New Roman"&&caption->fontSize==24&&caption->face==3&&caption->color=="#C02080","gap font, size, face and color render independently in every graph shape");
+            check(sc.gapCaptions.size()==1&&sc.gapCaptions[0].bounds.h>=24*3,"multiline styled gap keeps a full drag hit box");
+            const auto svg=toSvg(sc);check(svg.find("#C02080")!=std::string::npos&&svg.find("Times New Roman")!=std::string::npos,"gap styling reaches vector export");
+        }
+#ifdef TEST_CDXML
+        for(const auto& copy:{fromNative(toNative(styled)),fromCdxml(toCdxml(styled))})check(toNative(copy)==toNative(styled),"individual gap style survives native and CDXML saving");
+        auto legacy=toNative(styled);
+        for(const auto* key:{"gapFontFamily","gapFontSize","gapFontFace","gapColor"}){
+            const auto prefix=std::string(" ")+key+"=\"";check(legacy.find(prefix)!=std::string::npos,"gap style attribute stored");
+            for(auto start=legacy.find(prefix);start!=std::string::npos;start=legacy.find(prefix)){
+                const auto end=legacy.find('"',start+prefix.size());legacy.erase(start,end-start+1);
+            }
+        }
+        const auto old=fromNative(legacy).plots[0].states[1].gapStyle;
+        check(old.fontFamily.empty()&&old.fontSize==0&&old.face==-1&&old.color=="#000000","older documents retain inherited gap size and black text");
+#endif
+        for(int kind=0;kind<7;++kind){auto invalid=graph;auto& style=invalid.states[1].gapStyle;
+            if(kind==0)style.fontSize=3;else if(kind==1)style.fontSize=73;else if(kind==2)style.fontSize=std::numeric_limits<double>::quiet_NaN();
+            else if(kind==3)style.face=4;else if(kind==4)style.color="red";else if(kind==5)style.fontFamily="bad\nfont";else style.fontFamily=" ";
+            bool rejected=false;try{validateEnergyAnnotations(invalid);}catch(...){rejected=true;}check(rejected,"invalid gap styles are rejected");
+        }
+    }
     for(const std::string symbol:{"ΔE","ΔG"})for(bool top:{false,true}){
         Document legacy;auto graph=reactionProfilePlot();graph.id=legacy.nextId++;graph.yLabel=symbol;graph.energySymbol.clear();graph.energyAtTop=top;legacy.plots={graph};
         check(textContains(makeScene(legacy),symbol),"an existing Delta axis title is preserved when placed above the axis");

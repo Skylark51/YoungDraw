@@ -1373,6 +1373,88 @@ static void contextualUiChecks(HWND hwnd){
     mouseDown(click);cancel();check(sidebarPage==1,"clicking graph suggests graph tools");command(182);check(sidebarPage==0,"manual mechanism tab remains available after selecting graph");
     doc=saved;selection=chosen;origin=oldOrigin;zoom=oldZoom;targetContainer=0;
 }
+
+static int gapFormMode=0;
+static bool gapFormDriven=false,gapPreviewSeen=false;
+static std::string gapFormFailure;
+static void CALLBACK driveGapStyle(HWND parent,UINT,UINT_PTR timer,DWORD){
+    HWND dialog=plotManagerWindow?FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawSearch",nullptr):nullptr;
+    if(dialog){SendDlgItemMessageW(dialog,11,LB_SETCURSEL,1,0);PostMessageW(dialog,WM_COMMAND,IDOK,0);return;}
+    dialog=plotManagerWindow?FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",nullptr):nullptr;
+    if(!dialog)dialog=GetLastActivePopup(parent);
+    wchar_t type[64]{};GetClassNameW(dialog,type,64);if(std::wstring(type)!=L"YoungDrawForm")return;
+    wchar_t title[128]{};GetWindowTextW(dialog,title,128);
+    if(std::wstring(title)==L"서식을 바꿀 에너지 갭"){
+        SendDlgItemMessageW(dialog,100,CB_SETCURSEL,1,0);PostMessageW(dialog,WM_COMMAND,IDOK,0);return;
+    }
+    KillTimer(parent,timer);gapFormDriven=true;
+    try{
+        const bool adding=gapFormMode>=3;const int first=adding?104:100;
+        if(adding){
+            auto tabs=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);check(tabs&&TabCtrl_GetItemCount(tabs)==2,"gap addition includes a font and color tab");
+            TabCtrl_SetCurSel(tabs,1);NMHDR note{tabs,0,TCN_SELCHANGE};SendMessageW(dialog,WM_NOTIFY,0,LPARAM(&note));
+            check(GetWindowLongPtrW(GetDlgItem(dialog,104),GWL_STYLE)&WS_VISIBLE,"gap font fields are in the style tab");
+        }
+        SetDlgItemTextW(dialog,first,L"Times New Roman");
+        SetDlgItemTextW(dialog,first+1,L"24");
+        SendDlgItemMessageW(dialog,first+2,CB_SETCURSEL,4,0);
+        SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(first+2,CBN_SELCHANGE),LPARAM(GetDlgItem(dialog,first+2)));
+        SetDlgItemTextW(dialog,first+3,L"#C02080");
+        if(!adding){
+            const auto& style=doc.plots[0].states[2].gapStyle;
+            gapPreviewSeen=style.fontFamily=="Times New Roman"&&style.fontSize==24&&style.face==3&&style.color=="#C02080";
+            check(doc.plots[0].states[1].gapStyle.fontSize==0,"editing one gap leaves the other gap unchanged");
+            captureAxesManager(L"energy-gap-style-manager.png");
+        }else{
+            check(!pendingEnergyGap&&doc.plots[0].states[1].gapFrom==-1,"font selection does not create a gap before placement");
+            if(plotManagerWindow)captureAxesManager(L"energy-gap-add-style.png");
+        }
+        if(gapFormMode==2){
+            const auto valid=toNative(doc);SetDlgItemTextW(dialog,first+1,L"3");
+            check(!IsWindowEnabled(GetDlgItem(dialog,IDOK))&&toNative(doc)==valid,"invalid gap font size cannot change preview or apply");
+            SetDlgItemTextW(dialog,first+1,L"24");SetDlgItemTextW(dialog,first+3,L"red");
+            check(!IsWindowEnabled(GetDlgItem(dialog,IDOK)),"invalid gap color cannot be applied");
+        }else check(IsWindowEnabled(GetDlgItem(dialog,IDOK)),"chosen gap style can be applied");
+    }catch(const std::exception& error){gapFormFailure=error.what();}
+    PostMessageW(dialog,WM_COMMAND,gapFormFailure.empty()&&(gapFormMode==1||gapFormMode==4)?IDOK:IDCANCEL,0);
+}
+static void energyGapStyleChecks(HWND hwnd){
+    doc={};auto graph=newEnergyPlot(0,true);graph.id=doc.nextId++;graph.states[1].gapFrom=0;graph.states[2].gapFrom=1;doc.plots={graph};
+    selection={graph.id};history.clear();dirty=false;const auto before=toNative(doc);
+    managePlot(graph.id,false);auto manager=plotManagerWindow;SendMessageW(manager,WM_COMMAND,4002,0);
+    check(GetDlgItem(manager,energyGapStyleCommand)!=nullptr,"graph annotation management exposes a dedicated gap style tool");
+    auto menu=canvasContextMenu(graph.id);
+    check(GetMenuState(menu,addEnergyGapCommand,MF_BYCOMMAND)!=UINT(-1)&&GetMenuState(menu,energyGapStyleCommand,MF_BYCOMMAND)!=UINT(-1),"graph right-click menu provides gap addition and gap formatting");DestroyMenu(menu);
+    for(int mode:{0,1,2}){
+        gapFormMode=mode;gapFormDriven=gapPreviewSeen=false;gapFormFailure.clear();history.clear();dirty=false;
+        SetTimer(hwnd,909,10,driveGapStyle);SendMessageW(manager,WM_COMMAND,energyGapStyleCommand,0);KillTimer(hwnd,909);
+        check(gapFormFailure.empty(),gapFormFailure.c_str());check(gapFormDriven&&gapPreviewSeen,"existing gap style edits preview immediately");
+        if(mode==1){
+            check(dirty&&doc.plots[0].states[2].gapStyle.fontSize==24,"applying commits the selected gap style");
+            check(history.undo(doc)&&toNative(doc)==before&&!history.undo(doc),"gap style edit is one undo step");
+            check(history.redo(doc)&&doc.plots[0].states[2].gapStyle.face==3,"gap style supports redo");history.undo(doc);
+        }else check(toNative(doc)==before&&!dirty&&!history.undo(doc),"cancel restores the exact document without history");
+    }
+    closePlotManager();doc.plots[0].states[1].gapFrom=doc.plots[0].states[2].gapFrom=-1;redraw();const auto clean=toNative(doc);
+    for(int mode:{3,4}){
+        gapFormMode=mode;gapFormDriven=false;gapFormFailure.clear();history.clear();
+        if(mode==4){managePlot(graph.id,false);SendMessageW(plotManagerWindow,WM_COMMAND,4002,0);}
+        SetTimer(hwnd,909,10,driveGapStyle);
+        if(mode==4)SendMessageW(plotManagerWindow,WM_COMMAND,addEnergyGapCommand,0);else command(addEnergyGapCommand);
+        KillTimer(hwnd,909);check(gapFormDriven&&gapFormFailure.empty(),gapFormFailure.empty()?"gap add form opens with formatting controls":gapFormFailure.c_str());
+        check(toNative(doc)==clean,"gap add form leaves the document untouched before canvas placement");
+        if(mode==3)check(!pendingEnergyGap,"canceling gap add does not arm placement");
+        else{
+            check(!plotManagerWindow&&pendingEnergyGap&&pendingEnergyGap->style.fontSize==24&&pendingEnergyGap->style.face==3&&pendingEnergyGap->style.color=="#C02080","manager closes for placement with chosen formatting intact");
+            const auto pending=*pendingEnergyGap;cancel();check(toNative(doc)==clean&&!pendingEnergyGap,"escape cancels placement without changing styles");
+            pendingEnergyGap=pending;check(placeEnergyGap({700,500}),"styled gap can be placed on canvas");
+            check(doc.plots[0].states[1].gapStyle.fontSize==24&&doc.plots[0].states[1].gapStyle.fontFamily=="Times New Roman","placed gap receives the selected font");
+            writePreview(L"energy-gap-styled-preview.png",doc);
+            check(history.undo(doc)&&toNative(doc)==clean,"undo of new gap restores all prior formatting");
+        }
+    }
+}
+
 int main(int argc,char** argv){
     BYTE initialKeys[256]{};SetKeyboardState(initialKeys);
     OleInitialize(nullptr);GdiplusStartupInput startup;ULONG_PTR token;GdiplusStartup(&token,&startup,nullptr);
@@ -1434,6 +1516,9 @@ int main(int argc,char** argv){
         check(RegisterClassW(&wc)!=0,"register window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
+        if(argc==2&&std::string(argv[1])=="--energy-gap-style-only"){
+            energyGapStyleChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
         if(argc==2&&std::string(argv[1])=="--axis-quick-access-only"){
             axisQuickChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }

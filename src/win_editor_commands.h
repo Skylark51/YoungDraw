@@ -42,10 +42,11 @@ inline constexpr int selectedFontSmallerCommand = 266;
 inline constexpr int selectedFontLargerCommand = 267;
 inline constexpr int selectedStrokeThinnerCommand = 268;
 inline constexpr int selectedStrokeThickerCommand = 269;
+inline constexpr int energyGapStyleCommand = 270;
 inline constexpr int exportPngCommand = 247;
 inline constexpr int copyPngCommand = 248;
 
-inline constexpr bool isEditorCommand(int id){return (id>=100&&id<=selectedStrokeThickerCommand)||(id>=301&&id<=418);}
+inline constexpr bool isEditorCommand(int id){return (id>=100&&id<=energyGapStyleCommand)||(id>=301&&id<=418);}
 struct SelectionFormatting {
     bool properties=false,atoms=false,text=false,arrows=false,stroke=false;
     int commonFace=7;
