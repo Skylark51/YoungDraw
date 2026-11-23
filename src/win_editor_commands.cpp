@@ -193,6 +193,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
   if(id==mechanismManagerCommand){if(!reaction(primary()))throw std::runtime_error("관리할 메커니즘을 선택하세요.");editReaction(primary());return;}
   if(id==plotManagerCommand){managePlot(primary());return;}
   if(id==plotFontCommand){editPlotFont(primary());return;}
+  if(id==energyGapStyleCommand){editEnergyGapStyle(primary());return;}
   if(id==plotWaveWidthCommand||id==plotWaveGapCommand){editPlotAppearance(primary(),7);return;}
   if(id==plotLegendCommand){openPlotManagerTool(primary(),id);return;}
   if(id>=plotAppearanceFirstCommand&&id<=plotAppearanceLastCommand){editPlotAppearance(primary(),id-plotAppearanceFirstCommand);return;}

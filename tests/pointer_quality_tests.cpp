@@ -284,8 +284,9 @@ int main(int argc,char** argv){
         doc={};auto graph=newEnergyPlot(0,false);graph.id=doc.nextId++;graph.p={100,100};doc.plots={graph};history.clear();zoom=1;origin={200,150};tool=Select;selection={graph.id};
         auto cleanGraph=toNative(doc);pendingEnergyGap=PendingEnergyGap{graph.id,0,1,0,""};cancel();
         check(!pendingEnergyGap&&toNative(doc)==cleanGraph,"canceling gap placement leaves the graph unchanged");
-        pendingEnergyGap=PendingEnergyGap{graph.id,0,1,0,""};check(placeEnergyGap({700,500}),"click places pending gap");
+        pendingEnergyGap=PendingEnergyGap{graph.id,0,1,0,"",{"Times New Roman","#C02080",24,3}};check(placeEnergyGap({700,500}),"click places pending gap");
         check(!pendingEnergyGap&&doc.plots[0].states[1].gapFrom==0&&scene().gapCaptions.size()==1,"gap exists only after placement click");
+        check(doc.plots[0].states[1].gapStyle.fontSize==24&&doc.plots[0].states[1].gapStyle.color=="#C02080","click places the chosen gap style");
         auto placedOffset=doc.plots[0].states[1].gapOffset;auto caption=scene().gapCaptions.front();
         Vec captionCenter=screen({caption.bounds.x+caption.bounds.w/2,caption.bounds.y+caption.bounds.h/2});
         mouseDown(captionCenter);mouseUp(captionCenter+Vec{30,20});

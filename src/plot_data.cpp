@@ -163,6 +163,13 @@ void validateEnergyAnnotations(const EnergyPlot& p){
     const size_t paths=std::max(size_t(1),p.series.size());
     auto offset=[](Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::abs(v.x)<=10000&&std::abs(v.y)<=10000;};
     for(size_t i=0;i<p.states.size();++i){const auto& s=p.states[i];
+        const auto& gap=s.gapStyle;
+        if(gap.fontFamily.size()>128||gap.fontFamily.find_first_of("\r\n\t")!=std::string::npos||
+           (!gap.fontFamily.empty()&&gap.fontFamily.find_first_not_of(" ")==std::string::npos)||
+           !std::isfinite(gap.fontSize)||(gap.fontSize!=0&&(gap.fontSize<4||gap.fontSize>72))||gap.face< -1||gap.face>3||
+           gap.color.size()!=7||gap.color.front()!='#'||
+           !std::all_of(gap.color.begin()+1,gap.color.end(),[](unsigned char c){return std::isxdigit(c)!=0;}))
+            throw std::runtime_error("Invalid energy gap font or color");
         for(const auto* border:{&s.aboveBorder,&s.belowBorder}){
             if(!std::isfinite(border->padding)||border->padding<2||border->padding>100||
                !std::isfinite(border->width)||border->width<.1||border->width>10||

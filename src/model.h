@@ -100,6 +100,11 @@ struct StructureBorder {
     std::string color="#000000";
     double padding=8,width=1; // Clear space and stroke width in drawing points.
 };
+struct EnergyGapStyle {
+    std::string fontFamily,color="#000000"; // Empty font follows the graph.
+    double fontSize=0; // 0 follows the data value size; otherwise 4..72 pt.
+    int face=-1; // -1 follows the graph; 0..3 regular, bold, italic, bold italic.
+};
 struct EnergyState {
     std::string label; double energy=0; std::vector<int> above,below; int marker=-1; std::optional<double> position;
     int labelPlacement=0,labelPath=0; // 0 axis, 1 above curve, 2 below curve, 3 hidden, 4 below the data value.
@@ -115,6 +120,7 @@ struct EnergyState {
     std::string gapLabel; // Empty: automatically calculated signed delta G (double dagger for TS).
     int photoPath=-1; // Selected path for an hν arrow to the adjacent material level.
     StructureBorder aboveBorder,belowBorder;
+    EnergyGapStyle gapStyle;
 };
 inline constexpr double maxStageArrowWidth=100.;
 struct MechanismStage {
