@@ -692,10 +692,11 @@ Scene makeScene(const Document& d,const Measure& measure){
         double x0=plot.p.x+50,w=std::max(100.,plot.width-54);
         double y0=plot.p.y+plot.height-std::max(40.,tickFont*1.3+axisFont*1.4+16);
         double axisY=y0;s.plotBaselines[owner]=axisY;
-        struct StageLayout {std::string text;double font=0,height=0;int lane=0;};
+        struct StageLayout {std::string text;double font=0,height=0,shaft=0;int lane=0;};
         std::vector<StageLayout> stageLayouts(plot.stages.size());
         std::vector<std::vector<size_t>> lanes;
         std::vector<double> laneAbove,laneBelow,laneOffsets;
+        double automaticStageWidth=std::numeric_limits<double>::infinity();
         auto wrapStage=[&](const std::string& label,double font,double available){
             std::string wrapped,line;std::istringstream paragraphs(label);std::string paragraph;
             auto flush=[&](){if(!wrapped.empty())wrapped+='\n';wrapped+=line;line.clear();};
@@ -775,6 +776,10 @@ Scene makeScene(const Document& d,const Measure& measure){
             const double available=stage.captionBelow?span:std::max(1.,span-2*std::min(font*1.5,span*.16));
             auto text=wrapStage(stage.label,font,available);
             const double height=font*1.3*(1+std::count(text.begin(),text.end(),'\n'));
+            const double gap=stage.captionBelow?0:widthOf(text,font)/2+std::min(font*.35,span*.04);
+            const double shaft=span/2-gap;
+            if(stage.arrowWidth==0&&shaft>1e-6)
+                automaticStageWidth=std::min(automaticStageWidth,std::max(.6,std::min(font*.085,shaft*.08)));
             size_t lane=automatic?0:size_t(stage.row-1);
             if(automatic){
                 for(;lane<lanes.size();++lane){
@@ -796,7 +801,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             const double headRoom=std::max({6.,font*.4,stage.arrowWidth/2,stage.arrowHeadSize*.4});
             laneAbove[lane]=std::max(laneAbove[lane],stage.captionBelow?headRoom:height/2+headRoom);
             laneBelow[lane]=std::max(laneBelow[lane],stage.captionBelow?textGap+height+headRoom:height/2+headRoom);
-            stageLayouts[i]={std::move(text),font,height,int(lane)};
+            stageLayouts[i]={std::move(text),font,height,shaft,int(lane)};
         }
         double stageBand=0;
         for(size_t i=0;i<lanes.size();++i){
@@ -830,6 +835,18 @@ Scene makeScene(const Document& d,const Measure& measure){
         const double yAxisStroke=plot.yAxisWidth>0?plot.yAxisWidth/inkFactor:plot.series.empty()?2.4:plot.series.front().width;
         if(plot.showYAxis)arrow(axes.origin,axes.yEnd,"#000000",yAxisStroke,1,
             plot.yAxisHeadLength>0?plot.yAxisHeadLength/5:std::max(automaticHeadScale,yAxisStroke*inkFactor*.6),plot.yAxisHeadWidth);
+        auto stageWeight=[&](const MechanismStage& stage){
+            return stage.arrowWidth>0?stage.arrowWidth/inkFactor:automaticStageWidth;
+        };
+        // Every automatic tip uses the same size that fits all automatic stages in this graph.
+        double automaticStageHead=std::numeric_limits<double>::infinity();
+        for(size_t i=0;i<plot.stages.size();++i){
+            const auto& stage=plot.stages[i];
+            const double font=stageLayouts[i].font,shaft=stageLayouts[i].shaft;
+            if(stage.arrowHeadSize>0||shaft<=1e-6)continue;
+            const double preferred=std::min(font*.7,std::max({font*.20,shaft*.18,stageWeight(stage)*inkFactor*3}));
+            automaticStageHead=std::min({automaticStageHead,preferred,shaft*.625});
+        }
         for(size_t i=0;i<plot.stages.size();++i){
             const auto& stage=plot.stages[i];
             auto [a,b]=stageRange(stage);
@@ -839,12 +856,11 @@ Scene makeScene(const Document& d,const Measure& measure){
             const auto& layout=stageLayouts[i];
             const double font=layout.font;
             const double y=y0+8+laneOffsets[layout.lane]+stage.offset.y;
-            const double gap=stage.captionBelow?0:widthOf(layout.text,font)/2+std::min(font*.35,(b-a)*.04);
-            const double shaft=std::max(.01,(b-a)/2-gap);
-            const double weight=stage.arrowWidth>0?stage.arrowWidth/inkFactor:std::max(.6,std::min(font*.085,shaft*.08));
-            const double automaticHead=std::min(font*.7,std::max({font*.20,shaft*.18,weight*inkFactor*3}));
-            const double headLength=std::min(stage.arrowHeadSize>0?stage.arrowHeadSize:automaticHead,shaft*.625);
-            if(stage.captionBelow){
+            const double shaft=layout.shaft;
+            const bool hasShaft=shaft>1e-6;
+            const double weight=hasShaft?stageWeight(stage):0;
+            const double headLength=hasShaft?std::min(stage.arrowHeadSize>0?stage.arrowHeadSize:automaticStageHead,shaft*.625):0;
+            if(hasShaft&&stage.captionBelow){
                 Primitive line;
                 line.owner=owner;line.color=plot.xColor;line.width=weight;
                 line.points={{a+headLength*.96,y},{b-headLength*.96,y}};
@@ -855,9 +871,9 @@ Scene makeScene(const Document& d,const Measure& measure){
                 s.items.push_back(line);
                 line.points={{b,y},{b-headLength,y-side},{b-headLength,y+side}};
                 s.items.push_back(line);
-            }else{
-                arrow({center-gap,y},{a,y},plot.xColor,weight,1,headLength/5);
-                arrow({center+gap,y},{b,y},plot.xColor,weight,1,headLength/5);
+            }else if(hasShaft){
+                arrow({a+shaft,y},{a,y},plot.xColor,weight,1,headLength/5);
+                arrow({b-shaft,y},{b,y},plot.xColor,weight,1,headLength/5);
             }
             const double captionY=stage.captionBelow?y+std::max({4.,font*.25,headLength*.4+2,weight*inkFactor/2+2}):y-layout.height/2;
             plotText(layout.text,{center,captionY},font,plot.xColor,true,12,int(i));

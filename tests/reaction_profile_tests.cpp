@@ -228,6 +228,50 @@ int main(){try{
         std::ofstream("reaction-arrow-style-preview.svg")<<toSvg(makeScene(arrows));
     }
     {
+        Document arrows;auto graph=newEnergyPlot(0,true);graph.id=arrows.nextId++;graph.width=1100;
+        graph.xColor="#a12345";graph.thinLines=true;graph.inkScale=1.5;
+        graph.stages=mechanismStageData({
+            {"Relaxation","3","15","12","0","0"},
+            {"Rearrangement","17","43","20","0","0"},
+            {"C-H Activation","45","70","21","0","0"},
+            {"Product Formation","72","98","18","0","0","1"}});
+        arrows.plots={graph};
+        auto dimensions=[&](){
+            std::vector<double> widths,heads,tips;
+            for(const auto& item:makeScene(arrows).items){
+                if(item.owner!=graph.id||item.color!=graph.xColor)continue;
+                if(item.type==Primitive::Line)widths.push_back(item.width);
+                if(item.type==Primitive::Polygon&&item.points.size()==3){
+                    heads.push_back((item.points[0]-(item.points[1]+item.points[2])*.5).length());
+                    tips.push_back(item.points[0].x);
+                }
+            }
+            check(widths.size()==7&&heads.size()==8,"uneven reaction ranges draw both tips and the expected shafts");
+            for(size_t i=0;i<graph.stages.size();++i){
+                const auto& stage=graph.stages[i];
+                const double left=graph.p.x+50,span=graph.width-54;
+                check(std::abs(tips[i*2]-(left+span*stage.start/100))<1e-8&&
+                      std::abs(tips[i*2+1]-(left+span*stage.end/100))<1e-8,
+                      "uniform automatic styling preserves each reaction's endpoints");
+            }
+            return std::pair{widths,heads};
+        };
+        const auto equal=[](double a,double b){return std::abs(a-b)<1e-8;};
+        const auto [widths,heads]=dimensions();
+        check(widths.front()>0&&std::all_of(widths.begin(),widths.end(),[&](double width){return equal(width,widths.front());}),
+              "automatic reaction shaft widths match across different captions and ranges");
+        check(heads.front()>0&&std::all_of(heads.begin(),heads.end(),[&](double head){return equal(head,heads.front());}),
+              "automatic reaction arrowheads match across different captions and ranges");
+
+        arrows.plots[0].stages[2].arrowWidth=2.5;
+        arrows.plots[0].stages[3].arrowHeadSize=9;
+        const auto [mixedWidths,mixedHeads]=dimensions();
+        for(size_t i=0;i<mixedWidths.size();++i)
+            check(equal(mixedWidths[i],i==4||i==5?2.5:widths.front()),"manual width overrides only its own shafts");
+        for(size_t i=0;i<mixedHeads.size();++i)
+            check(equal(mixedHeads[i],i>=6?9:heads.front()),"manual tip length overrides only its own tips");
+    }
+    {
         Document light;EnergyPlot example;example.id=light.nextId++;example.mode=3;
         example.states={{"Ground",-36},{"Excited",0},{"TS",5.6}};
         example.series={{"Light path","#286688",{-36,0,5.6},0,2,0},
