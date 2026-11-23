@@ -116,7 +116,7 @@ static void updatePlotLevel(Vec delta){
     }
     const double next=std::round(proposed/step)*step;
     energy=std::clamp(next,low,high);
-    if(edit.path==0)graph.states[i].energy=energy;
+    setPlotEnergy(graph,size_t(edit.path),i,energy);
     status=L"에너지 "+ui::wide(number(energy)+" "+graph.unit)+L" · Esc: 취소";
     graph.yMin=edit.scale.low;
     graph.yMax=edit.scale.high;

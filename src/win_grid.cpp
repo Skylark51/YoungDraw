@@ -18,6 +18,7 @@ struct Grid {
     Table rows,original; std::vector<std::wstring> columns; TablePreview preview;std::wstring hint;
     TableCellError cellError;
     TableColumnEdit columnEdit;
+    TableReadback readback;
     std::vector<std::wstring> originalColumns;
     std::set<std::pair<int,int>> invalidCells;
     HWND win=nullptr,list=nullptr,edit=nullptr,error=nullptr,apply=nullptr; HFONT font=nullptr,italicFont=nullptr,interfaceFont=nullptr;
@@ -38,6 +39,7 @@ Table populatedRows(const Grid& g){
     while(!rows.empty()&&std::all_of(rows.back().begin(),rows.back().end(),[](const std::string& cell){return cell.find_first_not_of(" \t\r\n")==std::string::npos;}))rows.pop_back();
     return rows;
 }
+void refresh(Grid& g);
 bool validate(Grid& g){
     std::wstring error;
     g.invalidCells.clear();
@@ -52,6 +54,7 @@ bool validate(Grid& g){
         InvalidateRect(g.list,nullptr,FALSE);
     }
     if(error.empty())try{if(g.preview)error=g.preview(g.stages||g.reactionStages?populatedRows(g):g.rows);}catch(const std::exception& e){error=wide(e.what());}
+    if(error.empty()&&g.readback){auto rows=g.readback();if(rows!=g.rows){g.rows=std::move(rows);refresh(g);}}
     if(error.empty()&&!g.hint.empty()){SetWindowTextW(g.error,(g.hint+L"\n드래그+Delete: 범위 지우기 · Ctrl+Z: 되돌리기 · Ctrl+= / Ctrl+Shift+=: 첨자 · Alt+Enter: 줄바꿈").c_str());return true;}
     SetWindowTextW(g.error,error.empty()?L"입력: 바로 타이핑 / F2 / 더블클릭 · Shift+방향키: 범위 선택 · Ctrl+C/V: 복사/붙여넣기\nAlt+Enter: 셀 안 줄바꿈 · Tab: 다음 셀 · Enter: 아래 셀 · Esc: 입력 취소 · Ctrl+D: 행 복제 · 드래그+Delete: 범위 지우기 · Ctrl+Z: 되돌리기 · Ctrl+= / Ctrl+Shift+=: 첨자":error.c_str());
     // Never disable Apply from stale validation: the active editor may fix the error.
@@ -454,8 +457,13 @@ static HWND createEmbeddedTable(HWND parent,const std::vector<std::wstring>& col
     if(!h){delete g;return nullptr;}selectCell(*g,0,0);return h;
 }
 HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,
-    const TableCellError& cellError,const TableColumnEdit& columnEdit){
-    return createEmbeddedTable(parent,columns,rows,preview,cellError,columnEdit,false);
+    const TableCellError& cellError,const TableColumnEdit& columnEdit,const TableReadback& readback){
+    auto window=createEmbeddedTable(parent,columns,rows,preview,cellError,columnEdit,false);
+    if(window)reinterpret_cast<Grid*>(GetWindowLongPtrW(window,GWLP_USERDATA))->readback=readback;
+    return window;
+}
+void selectEmbeddedTableCell(HWND grid,int row,int column){
+    if(auto* state=reinterpret_cast<Grid*>(GetWindowLongPtrW(grid,GWLP_USERDATA)))selectCell(*state,row,column);
 }
 HWND embeddedStageTable(HWND parent,const Table& rows,const TablePreview& preview){
     return createEmbeddedTable(parent,{L"반응 이름",L"시작 (%)",L"끝 (%)",L"글자 pt",L"굵기 pt",L"화살촉 pt",L"배치 0/1",L"X 이동",L"Y 이동",L"줄 번호",L"범위 기준"},rows,preview,{},{},true);

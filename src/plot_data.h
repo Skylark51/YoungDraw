@@ -20,7 +20,9 @@ EnergyPlot publicationPlot(const EnergyPlot& original);
 EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath=0,const std::string& leftName="Left branch");
 // Add a second path from one shared state, on the same reaction coordinate.
 EnergyPlot verticalBranchPlot(const EnergyPlot& original,size_t sourcePath,size_t fork,
-                              const std::string& name,double energyOffset);
+                              const std::string& name);
+// Update a material level and every path sharing that exact branch point.
+void setPlotEnergy(EnergyPlot& plot,size_t path,size_t state,double energy);
 std::vector<MechanismStage> defaultMechanismStages();
 std::vector<MechanismStage> mechanismStageData(const std::vector<std::vector<std::string>>& cells);
 double plotStateFraction(const EnergyPlot& plot,size_t index);
@@ -31,7 +33,7 @@ std::string energyTickLabel(double value,double step);
 // CSV columns: state, energy, marker (auto/none/circle/square/diamond/triangle).
 std::vector<EnergyRow> parseEnergyTable(const std::string& csv);
 std::string energyTable(const EnergyPlot& plot);
-void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool preserveMarkers=false);
+void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool preserveMarkers=false,std::vector<int>* stateMapping=nullptr);
 bool validEnergyGridValue(const std::string& text);
 std::string energyCellText(const EnergySeries& path,size_t index,const std::string& fallback);
 // Build a candidate before changing the document. Blank labels/energies and empty rows are valid; missing energies stay absent. Columns: state, one per path.

@@ -826,6 +826,62 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(item.type==Primitive::Text){r=l+textWidth(measure,item.text,item.fontSize,item.font,item.face);b=t+item.fontSize*1.3;}
             external.push_back({l,t,std::max(1.,r-l),std::max(1.,b-t)});
         }
+        // Derive decorations from visible structure ink on every render, so edits,
+        // replacement, movement and resizing cannot leave a detached frame behind.
+        for(const auto& state:plot.states)for(bool above:{true,false}){
+            const auto& members=above?state.above:state.below;
+            const auto& border=above?state.aboveBorder:state.belowBorder;
+            if(members.empty()||(!state.transitionState&&!border.enabled))continue;
+            double l=1e20,t=1e20,r=-1e20,b=-1e20;
+            for(const auto& item:s.items){
+                if(item.points.empty()||std::find(members.begin(),members.end(),item.owner)==members.end())continue;
+                double il=1e20,it=1e20,ir=-1e20,ib=-1e20;
+                Vec normal{},center{};
+                if(item.type==Primitive::Polygon)if(const auto* bond=d.bond(item.owner)){
+                    const auto direction=d.atom(bond->b)->p-d.atom(bond->a)->p;
+                    if(direction.length()>1e-9)normal={-direction.y/direction.length(),direction.x/direction.length()};
+                    for(auto point:item.points)center=center+point;
+                    center=center*(1./item.points.size());
+                }
+                for(auto point:item.points){
+                    const auto delta=point-center;
+                    point=point+normal*((delta.x*normal.x+delta.y*normal.y)*(plot.structureInkScale*plot.inkScale-1));
+                    il=std::min(il,point.x);it=std::min(it,point.y);ir=std::max(ir,point.x);ib=std::max(ib,point.y);
+                }
+                if(item.type==Primitive::Text){
+                    const auto at=item.points.front();
+                    const double tw=textWidth(measure,item.text,item.fontSize,item.font,item.face);
+                    const double th=item.fontSize*1.3*(1+std::count(item.text.begin(),item.text.end(),'\n'));
+                    if(item.rotation==-90){il=at.x;it=at.y-tw;ir=at.x+th;ib=at.y;}
+                    else{ir=at.x+tw;ib=at.y+th;}
+                }
+                const double pad=item.type==Primitive::Image?0:item.type==Primitive::Text
+                    ?item.fontSize*.025*std::max(0.,plot.inkScale-1)
+                    :item.width*plot.structureInkScale*plot.inkScale/2;
+                l=std::min(l,il-pad);t=std::min(t,it-pad);r=std::max(r,ir+pad);b=std::max(b,ib+pad);
+            }
+            if(l>r)continue;
+            if(state.transitionState){
+                l-=8;r+=8;t-=7;b+=7;
+                for(bool right:{false,true}){double x=right?r:l,dx=right?-7:7;Primitive bracket;bracket.owner=owner;bracket.width=1.2;bracket.points={{x+dx,t},{x,t},{x,b},{x+dx,b}};s.items.push_back(bracket);}
+                plotText("‡",{r+5,t-6},tickFont);
+                r+=std::max(tickFont+8,5+textWidth(measure,"‡",tickFont,graphFont("‡"),plotFace));
+                t-=6;b=std::max(b,t+tickFont*1.3);
+                const double stroke=.6*plot.inkScale*(plot.thinLines?.5:1.);
+                l-=stroke;t-=stroke;r+=stroke;b+=stroke;
+                external.push_back({l,t,r-l,b-t});
+            }
+            if(border.enabled){
+                // Keep the requested clear gap to the inner edge of the border.
+                const double half=border.width*plot.inkScale*(plot.thinLines?.5:1.)/2;
+                const double pad=border.padding+half;
+                Primitive frame;frame.type=Primitive::Box;frame.owner=owner;
+                frame.color=border.color;frame.width=border.width;
+                frame.points={{l-pad,t-pad},{r+pad,b+pad}};
+                s.items.push_back(std::move(frame));
+                external.push_back({l-pad-half,t-pad-half,r-l+2*(pad+half),b-t+2*(pad+half)});
+            }
+        }
         const PlotAxes axes{{x0,axisY},{x0+w+12*plot.axisScale,axisY},{x0,topY-14*plot.axisScale},axisFont,tickFont,valueFont,energyFont,h};
         s.plotAxes[owner]=axes;
         const double inkFactor=plot.inkScale*(plot.thinLines?.5:1.);
@@ -1024,6 +1080,12 @@ Scene makeScene(const Document& d,const Measure& measure){
         std::vector<std::optional<size_t>> sharedStarts(paths.size());
         for(size_t k=1;k<paths.size();++k){
             if(independent||!paths[k].sharedStart)continue;
+            if(paths[k].branchState>=0){
+                const auto state=size_t(paths[k].branchState),source=size_t(paths[k].branchSource);
+                if(source<k&&paths[k].hasValue(state)&&paths[source].hasValue(state)&&
+                   std::abs(paths[k].values[state]-paths[source].values[state])<1e-9)sharedStarts[k]=state;
+                continue;
+            }
             for(size_t i=0;i<plot.states.size();++i){
                 if(!paths[k].hasValue(i))continue;
                 const auto& branch=paths[k];
@@ -1251,22 +1313,6 @@ Scene makeScene(const Document& d,const Measure& measure){
             plotText(crossing->label,anchor,font,"#000000",true);
             if(plot.showValues)
                 plotText(value.str(),anchor+Vec{0,labelHeight},numberFont,"#333333",true);
-        }
-        // TS brackets follow the actual inserted structures, including labels and bonds.
-        for(size_t i=0;i<plot.states.size();++i)if(plot.states[i].transitionState){
-            for(const auto* members:{&plot.states[i].above,&plot.states[i].below}){
-                if(members->empty())continue;
-                double l=1e20,t=1e20,r=-1e20,b=-1e20;
-                for(const auto& item:s.items)if(std::find(members->begin(),members->end(),item.owner)!=members->end())for(auto pt:item.points){
-                    double right=pt.x,bottom=pt.y;
-                    if(item.type==Primitive::Text){right+=textWidth(measure,item.text,item.fontSize,item.font,item.face);bottom+=item.fontSize*1.3;}
-                    l=std::min(l,pt.x);t=std::min(t,pt.y);r=std::max(r,right);b=std::max(b,bottom);
-                }
-                if(l>r)continue;l-=8;r+=8;t-=7;b+=7;
-                for(bool right:{false,true}){double x=right?r:l,dx=right?-7:7;Primitive bracket;bracket.owner=owner;bracket.width=1.2;bracket.points={{x+dx,t},{x,t},{x,b},{x+dx,b}};s.items.push_back(bracket);}
-                plotText("‡",{r+5,t-6},tickFont);
-                external.push_back({l,t-6,r-l+tickFont+8,b-t+6});
-            }
         }
         struct StateNameLayout {std::string text;double x=0;bool raised=false;};
         std::vector<StateNameLayout> names(plot.states.size());
