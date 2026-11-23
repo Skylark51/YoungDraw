@@ -40,10 +40,12 @@ void distributeEmbeddedStages(HWND grid);
 HWND embeddedStageTable(HWND parent,const Table& rows,const TablePreview& preview);
 std::optional<COLORREF> chooseColor(HWND parent,COLORREF initial);
 using Preview = std::function<std::wstring(const std::vector<std::string>&)>;
+struct FormTabStyle {std::vector<int> icons;int initial=0;};
 HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fields,const Preview& preview,
     const Preview& apply,const std::function<void()>& dismiss,
     const std::function<std::optional<COLORREF>(COLORREF)>& pickColor={});
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& preview={},
     const std::vector<std::pair<std::wstring,std::vector<size_t>>>& tabs={},
-    const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration={},int illustrationHeight=124);
+    const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration={},int illustrationHeight=124,
+    const FormTabStyle& tabStyle={});
 }

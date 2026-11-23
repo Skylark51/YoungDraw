@@ -734,6 +734,75 @@ static void graphPreviewAccessChecks(HWND hwnd){
     check(formDriven&&toNative(doc)==before,"title double-click opens the existing settings route and cancellation restores the model");
     closePlotManager();history.clear();
 }
+static int unifiedAxisMode=0,unifiedAxisWidth=0;
+static bool unifiedAxisDriven=false;
+static void captureAxesManager(const std::wstring& name){
+    RECT bounds{};GetClientRect(plotManagerWindow,&bounds);
+    Bitmap image(bounds.right,bounds.bottom,PixelFormat32bppARGB);
+    {Graphics graphics(&image);auto dc=graphics.GetHDC();
+     check(PrintWindow(plotManagerWindow,dc,PW_CLIENTONLY)!=FALSE,"capture the real unified axis manager");graphics.ReleaseHDC(dc);}
+    CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
+    check(image.Save(name.c_str(),&png)==Ok,"save unified axis manager evidence");
+}
+static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
+    const auto dialog=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"축 관리");
+    if(!dialog)return;KillTimer(parent,timer);unifiedAxisDriven=true;
+    const auto tabs=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);
+    check(tabs&&TabCtrl_GetItemCount(tabs)==7,"one axis editor contains all seven X and Y detail tabs");
+    const int icons[]={242,213,240,243,246,131,241};
+    const int firstField[]={109,104,107,128,114,122,120};
+    auto choose=[&](int index){
+        RECT rect{},client{};TabCtrl_GetItemRect(tabs,index,&rect);GetClientRect(tabs,&client);
+        check(rect.left>=0&&rect.right<=client.right&&rect.bottom<=client.bottom,"every axis detail icon fits without horizontal scrolling");
+        TCITEMW item{};item.mask=TCIF_PARAM;TabCtrl_GetItem(tabs,index,&item);
+        check(item.lParam==icons[index],"axis detail tabs retain their assigned function icons");
+        const auto at=MAKELPARAM((rect.left+rect.right)/2,(rect.top+rect.bottom)/2);
+        SendMessageW(tabs,WM_LBUTTONDOWN,MK_LBUTTON,at);SendMessageW(tabs,WM_LBUTTONUP,0,at);
+        check(TabCtrl_GetCurSel(tabs)==index&&IsWindowVisible(GetDlgItem(dialog,firstField[index])),"one icon click directly displays its axis settings");
+        EnumChildWindows(dialog,[](HWND child,LPARAM form)->BOOL{
+            if(GetParent(child)!=reinterpret_cast<HWND>(form)||!IsWindowVisible(child))return TRUE;
+            RECT rect{},bounds{};GetWindowRect(child,&rect);GetClientRect(reinterpret_cast<HWND>(form),&bounds);
+            MapWindowPoints(nullptr,reinterpret_cast<HWND>(form),reinterpret_cast<POINT*>(&rect),2);
+            check(rect.left>=0&&rect.top>=0&&rect.right<=bounds.right&&rect.bottom<=bounds.bottom,"visible axis form controls fit their parent at the tested size");return TRUE;
+        },reinterpret_cast<LPARAM>(dialog));
+    };
+    choose(0);SetDlgItemTextW(dialog,100,L"3.5");SetDlgItemTextW(dialog,101,L"12");
+    choose(3);SetDlgItemTextW(dialog,110,L"4.5");SetDlgItemTextW(dialog,111,L"18");
+    check(doc.plots.front().xAxisWidth==3.5&&doc.plots.front().yAxisWidth==4.5,"both axes preview together without applying or closing between them");
+    choose(4);SetDlgItemTextW(dialog,117,L"44");
+    choose(5);SetDlgItemTextW(dialog,122,L"-50");SetDlgItemTextW(dialog,123,L"70");SetDlgItemTextW(dialog,124,L"20");
+    choose(0);wchar_t retained[32]{};GetDlgItemTextW(dialog,100,retained,32);
+    check(std::wstring(retained)==L"3.5","switching X and Y icons retains pending input");
+    for(int tab=0;tab<7;++tab){choose(tab);if(unifiedAxisMode==1)captureAxesManager(L"unified-axes-"+std::to_wstring(unifiedAxisWidth)+L"-"+std::to_wstring(tab)+L".png");}
+    if(unifiedAxisMode==2){
+        choose(4);SetDlgItemTextW(dialog,116,L"2");
+        check(!IsWindowEnabled(GetDlgItem(dialog,IDOK)),"invalid Y font prevents committing both axis edits");
+        choose(0);check(doc.plots.front().xAxisWidth==3.5,"invalid Y entry does not discard the valid combined preview");
+    }
+    PostMessageW(dialog,WM_COMMAND,unifiedAxisMode==1?IDOK:IDCANCEL,0);
+}
+static void unifiedAxisChecks(HWND hwnd){
+    doc=coordinateDemo();selection={doc.plots.front().id};history.clear();changed();dirty=false;
+    const auto original=toNative(doc);
+    managePlot(selection.front(),true);const auto manager=plotManagerWindow;
+    for(int width:{900,1280}){
+        SetWindowPos(manager,nullptr,0,0,width,width==900?640:900,SWP_NOZORDER|SWP_NOACTIVATE);
+        SendMessageW(manager,WM_COMMAND,4001,0);unifiedAxisWidth=width;
+        captureAxesManager(L"unified-axes-"+std::to_wstring(width)+L"-entry.png");
+        for(int mode:{0,1,2}){
+            history.clear();dirty=false;unifiedAxisMode=mode;unifiedAxisDriven=false;
+            SetTimer(hwnd,908,10,driveUnifiedAxes);SendMessageW(manager,WM_COMMAND,4406,0);KillTimer(hwnd,908);
+            check(unifiedAxisDriven,"unified axis card opens the single embedded editor");
+            if(mode==1){
+                const auto& graph=doc.plots.front();
+                check(graph.xAxisWidth==3.5&&graph.yAxisWidth==4.5&&graph.xAxisHeadLength==12&&graph.yAxisHeadLength==18&&graph.yTitleGap==44&&graph.yMin==-50&&graph.yMax==70&&graph.yTickStep==20,"one apply commits independent X and Y settings, range and ticks");
+                check(history.undo(doc)&&toNative(doc)==original&&!history.undo(doc),"combined X and Y edit is exactly one undo step");
+                check(history.redo(doc)&&doc.plots.front().yAxisWidth==4.5,"combined axis edit supports redo");history.undo(doc);
+            }else check(toNative(doc)==original&&!dirty&&!history.undo(doc),"cancel restores both axes and all data without an undo entry");
+        }
+    }
+    SendMessageW(manager,WM_COMMAND,IDCANCEL,0);check(!plotManagerWindow,"unified axis manager closes normally");
+}
 static void graphManagerChecks(HWND hwnd){
     graphPreviewAccessChecks(hwnd);
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
@@ -834,11 +903,11 @@ static void graphManagerChecks(HWND hwnd){
     formAction=20;formDriven=false;SetTimer(hwnd,901,10,driveForm);
     SendMessageW(manager,WM_COMMAND,137,0);KillTimer(hwnd,901);
     check(formDriven&&toNative(doc)==before,"axis settings open and cancel inside the manager");
-    RECT legendCard{},xAxisCard{},yAxisCard{};
+    RECT legendCard{},axesCard{},valueCard{};
     GetWindowRect(GetDlgItem(manager,plotLegendCommand),&legendCard);
-    GetWindowRect(GetDlgItem(manager,242),&xAxisCard);
-    GetWindowRect(GetDlgItem(manager,243),&yAxisCard);
-    check(xAxisCard.top==yAxisCard.top&&xAxisCard.left<yAxisCard.left&&yAxisCard.left<legendCard.left&&legendCard.top==yAxisCard.top,"X axis, Y axis and legend occupy the sixth, seventh and eighth slots");
+    GetWindowRect(GetDlgItem(manager,4406),&axesCard);
+    GetWindowRect(GetDlgItem(manager,241),&valueCard);
+    check(axesCard.top==valueCard.top&&valueCard.left<axesCard.left&&axesCard.left<legendCard.left&&legendCard.top==axesCard.top,"unified axes occupy the former X slot while data values and legend keep their slots");
     SendMessageW(manager,WM_COMMAND,plotLegendCommand,0);
     auto form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
     check(form&&GetParent(form)==manager,"legend opens in the graph manager");
@@ -1144,6 +1213,9 @@ int main(int argc,char** argv){
         check(RegisterClassW(&wc)!=0,"register window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
+        if(argc>1&&std::string(argv[1])=="--unified-axes-only"){
+            unifiedAxisChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
         if(argc>1&&std::string(argv[1])=="--annotation-preview-only"){
             annotationPreviewChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }

@@ -101,10 +101,13 @@ bool stepPlotAppearance(int id,int action,int steps){
 }
 static std::optional<double> kilojoulesPerUnit(const std::string& unit);
 
-static void editManagedAxis(int id,bool xAxis){
-    const auto* selected=plot(id);
-    const Document before=doc;
-    const auto original=*selected;
+struct ManagedAxisFields {
+    std::vector<ui::Field> fields;
+    std::vector<std::pair<std::wstring,std::vector<size_t>>> tabs;
+    std::function<std::wstring(Document&,const std::vector<std::string>&)> update;
+};
+static ManagedAxisFields managedAxisFields(const Document& before,int id,bool xAxis){
+    const auto original=*std::find_if(before.plots.begin(),before.plots.end(),[&](const auto& p){return p.id==id;});
     const auto axes=makeScene(before,measure).plotAxes.at(id);
     const auto initialLength=number(xAxis?(axes.xEnd-axes.origin).length():(axes.yEnd-axes.origin).length());
     const auto unit=original.unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):original.unit;
@@ -149,8 +152,7 @@ static void editManagedAxis(int id,bool xAxis){
     visibility.toggle=true;
     fields.push_back(std::move(visibility));
     tabs[0].second.insert(tabs[0].second.begin(),visibilityIndex);
-    auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
-        auto candidate=before;
+    auto update=[=](Document& candidate,const std::vector<std::string>& values)->std::wstring{try{
         auto& graph=*std::find_if(candidate.plots.begin(),candidate.plots.end(),[&](const auto& p){return p.id==id;});
         (xAxis?graph.xAxisWidth:graph.yAxisWidth)=numeric(values[0],0,100);
         (xAxis?graph.showXAxis:graph.showYAxis)=values[visibilityIndex]=="1";
@@ -216,10 +218,43 @@ static void editManagedAxis(int id,bool xAxis){
             candidate=resizedPlotAxes(candidate,id,xAxis?length:(current.xEnd-current.origin).length(),
                                       xAxis?(current.yEnd-current.origin).length():length,measure);
         }
-        doc=std::move(candidate);
-        redraw();UpdateWindow(win);return {};
+        return {};
     }catch(const std::exception& e){return ui::wide(e.what());}};
-    const auto result=ui::form(win,xAxis?L"X축 관리":L"Y축 관리",fields,update,tabs);
+    return {std::move(fields),std::move(tabs),std::move(update)};
+}
+
+static void editManagedAxis(int id,bool xAxis){
+    const Document before=doc;
+    const auto settings=managedAxisFields(before,id,xAxis);
+    auto update=[&](const std::vector<std::string>& values){
+        auto candidate=before;
+        const auto error=settings.update(candidate,values);
+        if(error.empty()){doc=std::move(candidate);redraw();UpdateWindow(win);}
+        return error;
+    };
+    const auto result=ui::form(win,xAxis?L"X축 관리":L"Y축 관리",settings.fields,update,settings.tabs);
+    if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
+    else{doc=before;redraw();}
+}
+
+void editPlotAxes(int id){
+    if(!plot(id)||doc.isLocked(id))throw std::runtime_error("축을 편집할 그래프를 선택하세요.");
+    const Document before=doc;
+    const auto x=managedAxisFields(before,id,true),y=managedAxisFields(before,id,false);
+    auto fields=x.fields;fields.insert(fields.end(),y.fields.begin(),y.fields.end());
+    auto tabs=x.tabs;
+    for(auto tab:y.tabs){for(auto& index:tab.second)index+=x.fields.size();tabs.push_back(std::move(tab));}
+    const wchar_t* names[]={L"X 축선",L"X 제목",L"X 이름",L"Y 축선",L"Y 제목",L"Y 눈금",L"Y 단위"};
+    for(size_t i=0;i<tabs.size();++i)tabs[i].first=names[i];
+    auto update=[&](const std::vector<std::string>& values)->std::wstring{
+        const auto middle=values.begin()+x.fields.size();
+        auto candidate=before;
+        auto error=x.update(candidate,{values.begin(),middle});
+        if(error.empty())error=y.update(candidate,{middle,values.end()});
+        if(error.empty()){doc=std::move(candidate);redraw();UpdateWindow(win);}
+        return error;
+    };
+    const auto result=ui::form(win,L"축 관리",fields,update,tabs,{},124,{{242,213,240,243,246,131,241},0});
     if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }
