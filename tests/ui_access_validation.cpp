@@ -135,6 +135,7 @@ void quickAssertions(HWND h){
     doc={};selection.clear();history.clear();int a=doc.addAtom({0,0},8),b=doc.addAtom({30,0},7);int bond=doc.addBond(a,b);selection={a,b,bond};
     auto before=toNative(doc);SendMessageW(h,WM_COMMAND,267,0);check(toNative(doc)!=before,"font-plus applies to real selected atoms");
     SendMessageW(h,WM_COMMAND,104,0);check(toNative(doc)==before,"one Undo restores selected atom font increment");
+    selection={a,b,bond};
     SendMessageW(h,WM_COMMAND,269,0);check(toNative(doc)!=before,"stroke-plus applies to selected bond");
     SendMessageW(h,WM_COMMAND,104,0);check(toNative(doc)==before,"one Undo restores selected bond thickness");
     selection.clear();SendMessageW(h,WM_COMMAND,267,0);check(toNative(doc)==before,"empty selection increment is a no-op");
@@ -194,6 +195,7 @@ int main(int argc,char** argv){
         WNDCLASSW wc{};wc.style=CS_DBLCLKS;wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawAccessValidation";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
         window=CreateWindowExW(0,wc.lpszClassName,L"YoungDraw UI validation",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,0,0,1440,900,nullptr,nullptr,wc.hInstance,nullptr);check(window!=nullptr,"editor created");ShowWindow(window,SW_SHOWNOACTIVATE);UpdateWindow(window);
         inventory(GetMenu(window),"",1);for(const auto& item:availableEditorCommands(window))commands<<item.id<<','<<csv(ui::utf8(item.title))<<','<<csv(ui::utf8(item.detail))<<'\n';
+        menus.flush();commands.flush();
         auto project=projects::Project::create(projects::root(),L"Validation project");project.addDrawing(L"Example",toNative(mechanismDemo()));project.save();
         if(capturing){for(auto size:std::vector<std::pair<int,int>>{{800,600},{1440,900},{2560,1440}})for(int dpi:{96,120,144,192}){viewportWidth=size.first;viewportHeight=size.second;requestedDpi=dpi;surfaces(window,project.folder);std::cout<<"Captured "<<viewportWidth<<'x'<<viewportHeight<<" requested DPI "<<dpi<<"; effective editor DPI "<<GetDpiForWindow(window)<<'\n';}}
         else surfaces(window,project.folder);
