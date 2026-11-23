@@ -542,9 +542,15 @@ void manage(HWND owner,const Callbacks& callbacks,const fs::path& initial){
     EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);MSG msg{};
     while(IsWindow(window)){
         BOOL result=GetMessageW(&msg,nullptr,0,0);if(result<=0){if(result==0)PostQuitMessage(int(msg.wParam));break;}
-        // The native label editor owns Enter/Escape; dialog navigation would open the document or close this window.
+        // Finish before translating Enter/Escape: a trailing WM_CHAR can outlive the
+        // label editor and be interpreted as the manager's Open/Close command.
         auto labelEdit=ListView_GetEditControl(manager.items);
-        if(labelEdit&&(msg.hwnd==labelEdit||IsChild(labelEdit,msg.hwnd))){TranslateMessage(&msg);DispatchMessageW(&msg);continue;}
+        if(labelEdit&&(msg.hwnd==labelEdit||IsChild(labelEdit,msg.hwnd))){
+            if(msg.message==WM_KEYDOWN&&(msg.wParam==VK_RETURN||msg.wParam==VK_ESCAPE)){
+                SendMessageW(manager.items,LVM_ENDEDITLABELNOW,msg.wParam==VK_ESCAPE,0);continue;
+            }
+            TranslateMessage(&msg);DispatchMessageW(&msg);continue;
+        }
         if(msg.message==WM_KEYDOWN){
             if((GetKeyState(VK_CONTROL)&0x8000)&&msg.wParam=='F'){
                 if(manager.expanded)manager.action(32);SetFocus(manager.search);SendMessageW(manager.search,EM_SETSEL,0,-1);continue;

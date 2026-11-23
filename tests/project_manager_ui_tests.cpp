@@ -29,7 +29,7 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
             check(saved.items[2].name==L"Nested renamed"&&saved.items[2].note==L"needle"&&saved.items[0].name==L"폴더"&&saved.items[1].name==L"Root","filtered inline rename persists the underlying nested item and preserves siblings and note");
             check(ListView_GetItemCount(list)==1&&ListView_GetSelectedCount(list)==1,"rename refresh preserves selection in filtered results");
             command(manager,38);auto edit=ListView_GetEditControl(list);check(edit!=nullptr,"quick rename reopens the native label editor");
-            SetWindowTextW(edit,L"Discarded rename");PostMessageW(edit,WM_KEYDOWN,VK_ESCAPE,0);
+            SetWindowTextW(edit,L"Discarded rename");check(PostMessageW(edit,WM_KEYDOWN,VK_ESCAPE,0)!=FALSE,"queue native label cancellation");
             phase=2;SetTimer(owner,1,20,drive);return;
         }
         if(phase==2){
@@ -51,7 +51,7 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
         SetWindowTextW(edit,L"Nested renamed");
         check(Project::load(projectFolder).items[2].name==nested.name,"typing a rename does not save before Enter");
         // Post through the production message loop: IsDialogMessage must not turn Enter into Open.
-        PostMessageW(edit,WM_KEYDOWN,VK_RETURN,0);phase=1;SetTimer(owner,1,20,drive);return;
+        check(PostMessageW(edit,WM_KEYDOWN,VK_RETURN,0)!=FALSE,"queue native label commit");phase=1;SetTimer(owner,1,20,drive);return;
         }
         SetWindowTextW(note,L"자동 저장 검증");SendMessageW(manager,WM_COMMAND,MAKEWPARAM(42,EN_CHANGE),(LPARAM)note);SendMessageW(manager,WM_TIMER,2,0);
         auto saved=Project::load(projectFolder);check(saved.items[2].note==L"자동 저장 검증","filtered note edits target underlying item");
@@ -77,7 +77,9 @@ int main(){
         HWND owner=CreateWindowExW(0,L"STATIC",L"Project manager regression",WS_OVERLAPPEDWINDOW,0,0,800,600,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
         Callbacks callbacks;callbacks.close=[](const auto&){return true;};callbacks.preview=[](HDC,const RECT&,const std::wstring&){};callbacks.open=[](const auto&){++openCalls;};
         SetTimer(owner,1,20,drive);manage(owner,callbacks,p.folder);DestroyWindow(owner);
-        check(failure.empty(),failure.c_str());check(phase==3,"all project manager interaction phases completed");std::cout<<"PASS: filtered inline rename Enter/Escape, original F2 route, compact layout, folders, search mapping, autosave, multi selection and preview\n";
+        check(failure.empty(),failure.c_str());
+        check(phase==3,("all project manager interaction phases completed (phase="+std::to_string(phase)+", openCalls="+std::to_string(openCalls)+")").c_str());
+        std::cout<<"PASS: filtered inline rename Enter/Escape, original F2 route, compact layout, folders, search mapping, autosave, multi selection and preview\n";
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';result=1;}
     HKEY key{};if(RegOpenKeyExW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\ProjectManager",0,KEY_WRITE,&key)==ERROR_SUCCESS){if(hadWidths)RegSetValueExW(key,L"PaneWidths",0,REG_BINARY,reinterpret_cast<BYTE*>(widths),sizeof(widths));else RegDeleteValueW(key,L"PaneWidths");RegCloseKey(key);}
     fs::remove_all(temp);appearance::shutdown();Gdiplus::GdiplusShutdown(token);OleUninitialize();return result;
