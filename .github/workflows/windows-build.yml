@@ -32,7 +32,7 @@ jobs:
 
       - name: Run regression suite
         shell: pwsh
-        run: ctest --test-dir build/ci -C Release --output-on-failure --timeout 120
+        run: ./scripts/test-isolated.ps1 -BuildDirectory build/ci -Configuration Release
 
       - name: Upload tested executable
         uses: actions/upload-artifact@v4
