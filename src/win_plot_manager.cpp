@@ -33,12 +33,14 @@ struct Manager{
     HWND window=nullptr;int owner=0,page=0;bool busy=false;
     struct View {double scale;Vec origin;};
     struct LegendDrag {Vec start,offset;View view;};
+    struct AnnotationFrame {yd::Rect bounds;Vec plotPosition;};
     HWND grid=nullptr,form=nullptr,subpane=nullptr;
     std::vector<HWND> panes;
     std::wstring notice;
     int panel=0;
     std::optional<EnergyPlot> draft;
     std::optional<LegendDrag> legendDrag;
+    std::optional<AnnotationFrame> annotationFrame;
     int weightAction=0,wheelAction=0,wheelDelta=0;std::optional<Scene> cachedScene;
     HFONT font=nullptr;ui::DialogColors colors;std::vector<HWND> cards;RectF preview;
     ~Manager(){if(font)DeleteObject(font);}
@@ -138,10 +140,11 @@ struct Manager{
         if(legendDrag){legendDrag.reset();if(GetCapture()==window)ReleaseCapture();}
         if(grid){DestroyWindow(grid);grid=nullptr;}
         if(form){DestroyWindow(form);form=nullptr;}
-        panel=0;draft.reset();cachedScene.reset();
+        panel=0;draft.reset();cachedScene.reset();annotationFrame.reset();
     }
     void openStages(){
         const auto* p=graph();
+        const AnnotationFrame frame{currentScene().bounds,p->p};
         ui::Table rows;
         const auto stages=p->stages.empty()?defaultMechanismStages():p->stages;
         for(const auto& stage:stages)rows.push_back({stage.label,number(stage.start),number(stage.end),
@@ -164,7 +167,7 @@ struct Manager{
             }catch(const std::exception& e){return ui::wide(e.what());}
         });
         if(!grid)throw std::runtime_error("반응 이름 편집을 열 수 없습니다.");
-        panel=139;layout();SetFocus(GetDlgItem(grid,10));ui::attachWindowHelp(window);
+        panel=139;annotationFrame=frame;layout();SetFocus(GetDlgItem(grid,10));ui::attachWindowHelp(window);
     }
 
     using PlotEdit=std::function<void(EnergyPlot&,const std::vector<std::string>&)>;
@@ -311,7 +314,16 @@ struct Manager{
 
     View fitPreview(const Scene& scene) const {
         if(legendDrag)return legendDrag->view;
-        const auto& b=scene.bounds;
+        auto b=scene.bounds;
+        if(panel==139&&panelVisible()&&annotationFrame){
+            // Moving a reaction caption must not pan or zoom the unchanged axes.
+            // Retain world bounds so explicit window resizes still fit correctly.
+            b=annotationFrame->bounds;
+            if(const auto* p=plot(owner)){
+                const auto delta=p->p-annotationFrame->plotPosition;
+                b.x+=delta.x;b.y+=delta.y;
+            }
+        }
         const double scale=std::max(.01,std::min((preview.Width-32)/std::max(1.,b.w),(preview.Height-32)/std::max(1.,b.h)));
         return {scale,{preview.X+(preview.Width-b.w*scale)/2-b.x*scale,
             preview.Y+(preview.Height-b.h*scale)/2-b.y*scale}};

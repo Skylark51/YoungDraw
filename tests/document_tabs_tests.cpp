@@ -579,6 +579,83 @@ static void CALLBACK drivePhotoForm(HWND owner,UINT,UINT_PTR timer,DWORD){
                   choice.find(L"0")!=std::wstring::npos&&choice.find(L"37.2")!=std::wstring::npos;
     PostMessageW(form,WM_COMMAND,IDOK,0);
 }
+static void annotationPreviewChecks(HWND){
+    doc=coordinateDemo();
+    auto& graph=doc.plots.front();const int owner=graph.id;
+    graph.stages=defaultMechanismStages();graph.yColor="#00a056";graph.yAxisWidth=8;
+    for(auto& state:graph.states){state.above.clear();state.below.clear();}
+    doc.atoms.clear();doc.bonds.clear();doc.objects.clear();doc.reactions.clear();doc.groups.clear();
+    history.clear();selection={owner};tool=Select;
+    const Document original=doc;const auto before=toNative(doc);
+    const auto originalAxes=makeScene(doc,measure).plotAxes.at(owner);
+    managePlot(owner);const auto manager=plotManagerWindow;
+    SendMessageW(manager,WM_COMMAND,4002,0);
+    auto axisPixels=[&](const wchar_t* filename){
+        RECT client{},tab{};GetClientRect(manager,&client);GetWindowRect(GetDlgItem(manager,4000),&tab);
+        MapWindowPoints(nullptr,manager,reinterpret_cast<POINT*>(&tab),2);
+        Bitmap image(client.right,client.bottom,PixelFormat32bppARGB);
+        {Graphics graphics(&image);auto dc=graphics.GetHDC();
+         check(PrintWindow(manager,dc,PW_CLIENTONLY)!=FALSE,"capture annotation preview window");graphics.ReleaseHDC(dc);}
+        const CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
+        check(image.Save(filename,&png)==Ok,"save annotation preview evidence");
+        // The longest black vertical run inside the white preview is the Y-axis shaft,
+        // independent of the preview's fitting implementation or model coordinates.
+        RECT best{};int longest=0;
+        for(int x=40;x<client.right-40;++x){int start=0,length=0;
+            for(int y=100;y<tab.top-30;++y){Color pixel;image.GetPixel(x,y,&pixel);
+                if(pixel.GetR()<45&&pixel.GetG()<45&&pixel.GetB()<45){
+                    if(!length)start=y;++length;
+                    if(length>longest){longest=length;best={x,start,x+1,y+1};}
+                }else length=0;
+            }
+        }
+        check(longest>20,"preview renders an identifiable Y-axis shaft");return best;
+    };
+    for(const auto [column,amount]:std::vector<std::pair<int,int>>{{8,100},{8,-100},{7,80}}){
+        SendMessageW(manager,WM_COMMAND,139,0);
+        const auto grid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
+        check(grid!=nullptr,"reaction annotation table opens");const auto list=GetDlgItem(grid,10);
+        const auto evidence=L"reaction-annotation-"+std::to_wstring(column)+L"-"+std::to_wstring(amount);
+        const auto initial=axisPixels((evidence+L"-before.png").c_str());
+        for(int i=0;i<column;++i)SendMessageW(list,WM_KEYDOWN,VK_RIGHT,0);
+        SendMessageW(list,WM_KEYDOWN,VK_F2,0);
+        const auto edit=FindWindowExW(list,nullptr,L"EDIT",nullptr);
+        check(edit!=nullptr,"annotation offset cell opens for editing");
+        SetWindowTextW(edit,std::to_wstring(amount).c_str());SendMessageW(list,WM_KEYDOWN,VK_RETURN,0);
+        auto expected=original;
+        expected.plots.front().stages[0].offset=column==8?Vec{0,double(amount)}:Vec{double(amount),0};
+        check(toNative(doc)==toNative(expected),"annotation movement changes only its offset, preserving axes and energy data");
+        const auto movedScene=makeScene(doc,measure);const auto movedAxes=movedScene.plotAxes.at(owner);
+        check((movedAxes.origin-originalAxes.origin).length()<1e-9&&
+              (movedAxes.yEnd-originalAxes.yEnd).length()<1e-9,"annotation movement preserves document axis geometry");
+        if(column==8&&amount>0){
+            const auto caption=std::find_if(movedScene.items.begin(),movedScene.items.end(),[](const auto& p){return p.textRole==12&&p.textIndex==0;});
+            check(caption!=movedScene.items.end()&&caption->points.front().y>movedAxes.origin.y,
+                  "positive annotation offset places the reaction name below the horizontal axis");
+        }
+        const auto moved=axisPixels((evidence+L"-moved.png").c_str());
+        std::cerr<<"Annotation offset column="<<column<<" value="<<amount<<"; Y-axis pixels "
+                 <<initial.left<<','<<initial.top<<','<<initial.bottom<<" -> "<<moved.left<<','<<moved.top<<','<<moved.bottom<<'\n';
+        check(std::abs(moved.left-initial.left)<=1&&std::abs(moved.top-initial.top)<=1&&
+              std::abs(moved.bottom-initial.bottom)<=1,"moving a reaction annotation must keep the preview Y-axis fixed");
+        if(column==8&&amount>0){
+            RECT window{};GetWindowRect(manager,&window);
+            const int width=window.right-window.left,height=window.bottom-window.top;
+            SetWindowPos(manager,nullptr,0,0,width+160,height+120,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+            const auto enlarged=axisPixels(L"reaction-annotation-resized.png");
+            check(enlarged.bottom-enlarged.top>moved.bottom-moved.top+15,
+                  "explicit window resize still fits the retained annotation preview frame");
+            SetWindowPos(manager,nullptr,0,0,width,height,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+            const auto restored=axisPixels(L"reaction-annotation-size-restored.png");
+            check(std::abs(restored.left-initial.left)<=1&&std::abs(restored.bottom-initial.bottom)<=1,
+                  "restoring the window size restores the same fixed axis preview");
+        }
+        SendMessageW(manager,WM_COMMAND,104,0);
+        check(toNative(doc)==before,"annotation offset edit is restored by one Undo");
+    }
+    closePlotManager();doc={};selection.clear();history.clear();dirty=false;
+    std::cout<<"Reaction annotation offsets preserve preview axes, document geometry, data and Undo\n";
+}
 static void graphPreviewAccessChecks(HWND hwnd){
     doc=coordinateDemo();auto& graph=doc.plots.front();const int owner=graph.id;
     graph.title="Preview access";graph.legendVisibility=1;graph.showValues=true;
@@ -1065,6 +1142,9 @@ int main(int argc,char** argv){
         check(RegisterClassW(&wc)!=0,"register window");
         auto hwnd=CreateWindowExW(0,wc.lpszClassName,L"Tabs",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
         check(hwnd&&documentTabs,"create native tab bar");
+        if(argc>1&&std::string(argv[1])=="--annotation-preview-only"){
+            annotationPreviewChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
+        }
         if(argc>1&&std::string(argv[1])=="--plot-manager-only"){
             documentStyleChecks(hwnd);graphManagerChecks(hwnd);DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }
