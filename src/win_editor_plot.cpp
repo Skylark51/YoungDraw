@@ -30,6 +30,18 @@ void relocatePlot(const EnergyPlot& before,const EnergyPlot& after){
 void editPlot(int id){
     if(!plot(id))return;managePlot(id);SendMessageW(plotManagerWindow,WM_COMMAND,4000,0);SendMessageW(plotManagerWindow,WM_COMMAND,131,0);
 }
+std::optional<AxisTitleHit> plotAxisTitleAt(const Scene& scene,Vec point,double tolerance){
+    for(auto i=scene.items.rbegin();i!=scene.items.rend();++i){
+        const auto& text=*i;
+        if(text.type!=Primitive::Text||text.points.empty()||!isPlotAxisTitle(text.textRole)||!plot(text.owner)||doc.isLocked(text.owner))continue;
+        const auto delta=point-text.points.front();const double angle=-text.rotation*pi/180;
+        const Vec local{std::cos(angle)*delta.x-std::sin(angle)*delta.y,std::sin(angle)*delta.x+std::cos(angle)*delta.y};
+        const double width=measure(text.text,text.fontSize,text.font,text.face),height=text.fontSize*1.3;
+        if(local.x>=-tolerance&&local.x<=width+tolerance&&local.y>=-tolerance&&local.y<=height+tolerance)
+            return AxisTitleHit{text.owner,text.textRole==plotXAxisTitleTextRole};
+    }
+    return {};
+}
 bool adjustSelectedPlotWeight(bool increase){
     std::vector<int> ids;for(int id:selection)if(plot(id)&&!doc.isLocked(id))ids.push_back(id);
     if(ids.empty())return false;Document before=doc;
@@ -100,6 +112,7 @@ bool stepPlotAppearance(int id,int action,int steps){
     return true;
 }
 static std::optional<double> kilojoulesPerUnit(const std::string& unit);
+static std::string energyTitleChoice(const EnergyPlot& plot){return plot.yLabel=="ΔE"?"1":plot.yLabel=="ΔG"?"2":"0";}
 
 struct ManagedAxisFields {
     std::vector<ui::Field> fields;
@@ -125,7 +138,7 @@ static ManagedAxisFields managedAxisFields(const Document& before,int id,bool xA
         const std::vector<ui::Field> yFields={
             ui::numericField(L"Y축 제목 간격 (pt, 0: 자동)",original.yTitleGap,0,300,1),
             {L"제목 배치",original.energyAtTop?"1":"0",false,{L"세로 축 제목",L"축 위에 표시"}},
-            {L"에너지 표기","0",false,{L"현재 표기 유지",L"ΔE · 에너지",L"ΔG · 자유 에너지"}},
+            {L"에너지 표기",energyTitleChoice(original),false,{L"직접 입력한 제목",L"ΔE · 에너지",L"ΔG · 자유 에너지"}},
             {L"에너지 단위",unit,false,{L"kcal/mol",L"kcal mol⁻¹",L"kJ/mol",L"eV"},false,4,true,true},
             {L"단위를 바꿀 때","0",false,{L"단위 표시만 변경",L"에너지와 축 수치도 변환"}},
             {L"최솟값 (빈칸: 자동)",original.yMin?number(*original.yMin):""},
@@ -138,6 +151,7 @@ static ManagedAxisFields managedAxisFields(const Document& before,int id,bool xA
         };
         fields.insert(fields.end(),yFields.begin(),yFields.end());
         fields[9].choiceUpdate=ui::ChoiceUpdate{4,{std::nullopt,"ΔE","ΔG"}};
+        fields[9].quickChoices={{1,L"ΔE"},{2,L"ΔG"}};
         tabs[1].second.insert(tabs[1].second.end(),{7,8,9});
         tabs.push_back({L"범위·눈금",{12,13,14,15,16}});
         tabs.push_back({L"단위",{10,11,17}});
@@ -239,7 +253,7 @@ static void editManagedAxis(int id,bool xAxis){
     else{doc=before;redraw();}
 }
 
-void editPlotAxes(int id){
+void editPlotAxes(int id,int initialTab){
     if(!plot(id)||doc.isLocked(id))throw std::runtime_error("축을 편집할 그래프를 선택하세요.");
     const Document before=doc;
     const auto x=managedAxisFields(before,id,true),y=managedAxisFields(before,id,false);
@@ -257,7 +271,8 @@ void editPlotAxes(int id){
         if(error.empty()){doc=std::move(candidate);redraw();UpdateWindow(win);}
         return error;
     };
-    const auto result=ui::form(win,L"축 관리",fields,update,tabs,{},124,{{242,213,240,243,246,131,241},0});
+    static int lastTab=0;
+    const auto result=ui::form(win,L"축 관리",fields,update,tabs,{},124,{{242,213,240,243,246,131,241},initialTab<0?lastTab:initialTab,&lastTab});
     if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }
@@ -388,8 +403,9 @@ void plotSettings(int id,bool generalOnly){auto* p=plot(id);if(!p)throw std::run
  {L"에너지 축 제목 배치",p->energyAtTop?"1":"0",false,{L"세로 축 제목",L"축 위에 E (세로 제목 숨김)"}},
   {L"X축 (pt, 0: 숨김, -1: 자동)",number(p->showXAxis?(p->xAxisWidth>0?p->xAxisWidth:-1):0)},
  {L"Y축 (pt, 0: 숨김, -1: 자동)",number(p->showYAxis?(p->yAxisWidth>0?p->yAxisWidth:-1):0)},
- {L"에너지 표기", "0",false,{L"현재 표기 유지",L"ΔE · 에너지",L"ΔG · 자유 에너지"}},{L"에너지 값과 곡선 간격 (pt)",number(p->valueGap)}};
+ {L"에너지 표기",energyTitleChoice(*p),false,{L"직접 입력한 제목",L"ΔE · 에너지",L"ΔG · 자유 에너지"}},{L"에너지 값과 곡선 간격 (pt)",number(p->valueGap)}};
     fields[23].choiceUpdate=ui::ChoiceUpdate{3,{std::nullopt,"ΔE","ΔG"}};
+    fields[23].quickChoices={{1,L"ΔE"},{2,L"ΔG"}};
     auto r=ui::form(win,generalOnly?L"그래프 설정":L"그래프·축 설정",fields,update,
  generalOnly?std::vector<std::pair<std::wstring,std::vector<size_t>>>{{L"기본",{0,6}},{L"데이터 값",{8,14,24}},{L"선 스타일",{16,17}}}:
       std::vector<std::pair<std::wstring,std::vector<size_t>>>{{L"기본",{0,23,1,18,6}},{L"축",{2,3,9,10,11}},{L"축 표시",{21,22,19,20}},{L"글자",{4,5,8,12,13,14,15,24}},{L"선 스타일",{7,16,17}}});if(r){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}else{doc=before;redraw();}

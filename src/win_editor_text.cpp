@@ -30,7 +30,7 @@ void setInlineValue(const InlineTarget& t,const std::string& value){
     if(auto* p=plot(t.owner)){if(t.role==12){if(value.empty())throw std::runtime_error("단계 이름을 입력하세요.");p->stages.at(size_t(t.index)).label=value;}if(t.role==4)p->title=value;if(t.role==5)p->unit=value;if(t.role==6)setEnergyStateLabel(p->states.at(size_t(t.index)),value);if(t.role==7)p->series.at(size_t(t.index)).name=value;if(t.role==8){double e=numeric(value);p->states.at(size_t(t.index)).energy=e;if(!p->series.empty()){auto& path=p->series[0];path.values.at(size_t(t.index))=e;if(!path.present.empty())path.present.at(size_t(t.index))=true;}}return;}
 }
 std::optional<InlineTarget> textAt(Vec p){
-    auto sc=scene();for(auto i=sc.items.rbegin();i!=sc.items.rend();++i){const auto& t=*i;if(t.type!=Primitive::Text||t.points.empty()||t.textRole==13||isMolecularAnnotation(t.textRole)||doc.isLocked(t.owner))continue;if(!t.textRole&&!textObject(t.owner)&&!doc.atom(t.owner))continue;
+    auto sc=scene();for(auto i=sc.items.rbegin();i!=sc.items.rend();++i){const auto& t=*i;if(t.type!=Primitive::Text||t.points.empty()||t.textRole==13||isMolecularAnnotation(t.textRole)||isPlotAxisTitle(t.textRole)||doc.isLocked(t.owner))continue;if(!t.textRole&&!textObject(t.owner)&&!doc.atom(t.owner))continue;
         if(t.textRole==7){const auto* graph=plot(t.owner);if(!graph||size_t(t.textIndex)>=graph->series.size())continue;}
         auto a=t.points[0];double w=measure(t.text,t.fontSize,t.font,t.face),h=t.fontSize*1.3*(1+std::count(t.text.begin(),t.text.end(),'\n'));
         if(p.x>=a.x-2&&p.x<=a.x+w+2&&p.y>=a.y-2&&p.y<=a.y+h+2)return InlineTarget{t.owner,t.textRole,t.textIndex,a,t.fontSize};
