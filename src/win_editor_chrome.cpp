@@ -67,6 +67,7 @@ void icon(Graphics& g,int id,RectF box,Color color){
     case 211:case 212:g.DrawBezier(&pen,PointF(-21,13),PointF(-16,-23),PointF(16,-23),PointF(21,9));line(21,9,11,4);if(id==211)line(21,9,23,-2);break;
     case 213:{FontFamily ff(L"Arial");Font f(&ff,35,FontStyleBold,UnitPixel);g.DrawString(L"A",-1,&f,PointF(-16,-24),&brush);line(16,-17,16,19);break;}
     case 214:g.DrawRectangle(&pen,-21.f,-17.f,42.f,34.f);g.DrawEllipse(&pen,7.f,-11.f,7.f,7.f);line(-18,12,-5,-5);line(-5,-5,5,8);line(5,8,12,2);line(12,2,20,12);break;
+    case 4305:g.DrawRectangle(&pen,-23.f,-22.f,46.f,44.f);ring(6,false);break;
     case dottedBondCommand:line(-23,0,-17,0);line(17,0,23,0);[[fallthrough]];
     case interactionToolCommand:for(int i=-2;i<=2;i++)g.FillEllipse(&brush,float(i*9-2),-2.f,4.f,4.f);break;
     case 215:line(-22,0,22,0);break;

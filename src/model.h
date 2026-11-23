@@ -95,6 +95,11 @@ struct Reaction {
     bool circularMerge=false; // Fit both directed branches to a shared circle.
     bool explicitConnections() const {return manualConnections||!links.empty();}
 };
+struct StructureBorder {
+    bool enabled=false;
+    std::string color="#000000";
+    double padding=8,width=1; // Clear space and stroke width in drawing points.
+};
 struct EnergyState {
     std::string label; double energy=0; std::vector<int> above,below; int marker=-1; std::optional<double> position;
     int labelPlacement=0,labelPath=0; // 0 axis, 1 above curve, 2 below curve, 3 hidden, 4 below the data value.
@@ -109,6 +114,7 @@ struct EnergyState {
     std::optional<double> breakLow,breakHigh; // Explicit compressed energy interval; both empty selects automatically.
     std::string gapLabel; // Empty: automatically calculated signed delta G (double dagger for TS).
     int photoPath=-1; // Selected path for an hν arrow to the adjacent material level.
+    StructureBorder aboveBorder,belowBorder;
 };
 inline constexpr double maxStageArrowWidth=100.;
 struct MechanismStage {
@@ -120,7 +126,9 @@ struct MechanismStage {
     bool levelRange=false; // Percentages span the outer material level centers.
 };
 // Empty color entries inherit the pathway color. Segment i joins states i and i+1.
-struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors,valueLabels; bool sharedStart=false; bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
+struct EnergySeries { std::string name="Path 1",color="#000000"; std::vector<double> values; int dash=1; double width=3.5; int marker=1; double markerSize=2.5; std::vector<bool> present; std::vector<std::string> levelColors,segmentColors,valueLabels; bool sharedStart=false;
+    int branchSource=-1,branchState=-1; // Explicit shared point; later energies are independent table cells.
+    bool hasValue(size_t i) const {return i<values.size()&&(present.empty()||(i<present.size()&&present[i]));} };
 // One shared point between two paths on the same segment. Position is the
 // fraction of the gap between the adjacent plateaus.
 struct EnergyCrossing {

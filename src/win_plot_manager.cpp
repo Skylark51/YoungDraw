@@ -19,15 +19,15 @@ namespace yd::editor {
 HWND plotManagerWindow=nullptr;
 namespace {
 constexpr int tabFirst=4000,slotControl=4200,sideControl=4201,panelBack=4400,pathControl=4401,verticalBranch=4402,distributeStages=4403,dataFont=4404,photoExcitation=4405;
-constexpr int editStructure=4300,pasteStructure=4301,fileStructure=4302,sizeStructure=4303,removeStructure=4304;
+constexpr int editStructure=4300,pasteStructure=4301,fileStructure=4302,sizeStructure=4303,removeStructure=4304,structureBorder=4305;
 constexpr int axesManager=4406;
 int tableFontPoints=12;
 struct Card{int action,icon;const wchar_t* label;const wchar_t* detail;int slot=-1;};
 const std::vector<std::vector<Card>> pages={
-    {{131,131,L"데이터 표",L"상태·에너지 입력"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상하 분기",L"공통 상태에서 갈라짐"}},
+    {{131,131,L"데이터 표",L"상태·에너지 입력"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상태에서 분기",L"분기점 선택·에너지 입력"}},
     {{137,137,L"그래프 설정",L"제목·크기·표시"},{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"},{241,241,L"데이터 값 크기",L"에너지 숫자",4},{axesManager,242,L"축 관리",L"X·Y축 선·제목·눈금·단위",5},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치",7}},
     {{139,139,L"반응 이름·화살표",L"이름 배치·줄·위치"},{136,136,L"화살표 자석 배치",L"캔버스에서 두 점 선택"},{plotAnnotationsCommand,236,L"TS·이름 위치",L"생략·갭·라벨 위치"},{addEnergyGapCommand,237,L"에너지 갭 추가",L"캔버스에 지시선 배치"},{151,151,L"스핀 교차점",L"교차 에너지·라벨"},{photoExcitation,4405,L"광여기 hν",L"빛에 의한 준위 전이"}},
-    {{editStructure,186,L"구조 그리기·편집",L"선택한 위·아래 영역"},{pasteStructure,123,L"구조 붙여넣기",L"클립보드에서 삽입"},{fileStructure,124,L"구조 파일 삽입",L"CDXML·이미지 파일"},{sizeStructure,165,L"구조 크기",L"선택 구조 확대·축소"},{removeStructure,144,L"구조 제거",L"선택 영역만 비우기"}},
+    {{editStructure,186,L"구조 그리기·편집",L"선택한 위·아래 영역"},{pasteStructure,123,L"구조 붙여넣기",L"클립보드에서 삽입"},{fileStructure,124,L"구조 파일 삽입",L"CDXML·이미지 파일"},{sizeStructure,165,L"구조 크기",L"선택 구조 확대·축소"},{removeStructure,144,L"구조 제거",L"선택 영역만 비우기"},{structureBorder,4305,L"사각형 테두리",L"표시·색상·여백·굵기"}},
     {{244,244,L"곡선 굵기",L"경로 선 굵기"},{245,245,L"그림 선 굵기",L"선택 후 + / - 조절"},{plotWaveWidthCommand,250,L"물결 관리",L"물결 굵기·곡선 간격"}}
 };
 struct Manager{
@@ -39,6 +39,7 @@ struct Manager{
     std::vector<HWND> panes;
     std::wstring notice;
     int panel=0;
+    int branchDataRow=-1;
     int axisInitialTab=-1;
     std::optional<EnergyPlot> draft;
     std::optional<LegendDrag> legendDrag;
@@ -71,25 +72,35 @@ struct Manager{
         ui::InlineDialogHost host(window,[this](HWND child){mount(child);});
         act(action);
     }
+    static ui::Table dataRows(const EnergyPlot& graph){
+        ui::Table rows;
+        for(size_t i=0;i<graph.states.size();++i){
+            std::vector<std::string> row={graph.states[i].label};
+            if(graph.series.empty())row.push_back(number(graph.states[i].energy));
+            for(const auto& path:graph.series)row.push_back(path.hasValue(i)?energyCellText(path,i,number(path.values[i])):"");
+            rows.push_back(std::move(row));
+        }
+        return rows;
+    }
     void openData(){
         if(panel==131&&grid){layout();SetFocus(GetDlgItem(grid,10));return;}
         clearPanel();
         auto* p=graph();if(!p)return;EnergyPlot original=*p;
         if(original.series.empty()){EnergySeries path;path.name="Path 1";for(auto& state:original.states)path.values.push_back(state.energy);original.series.push_back(path);}
         std::vector<std::wstring> columns={L"단계명"};for(auto& path:original.series)columns.push_back(ui::wide(path.name));
-        ui::Table rows;for(size_t i=0;i<original.states.size();i++){std::vector<std::string> row={original.states[i].label};for(auto& path:original.series)row.push_back(path.hasValue(i)?energyCellText(path,i,number(path.values[i])):"");rows.push_back(row);}
+        auto rows=dataRows(original);
         grid=ui::embeddedTable(window,columns,rows,[this,last=rows](const ui::Table& data) mutable ->std::wstring{
             if(data==last)return {};
             try{auto* current=graph();if(!current)return L"그래프가 없습니다.";if(doc.isLocked(owner))return L"그래프 잠금을 해제하세요.";
                 auto revised=energyGridData(*current,data);Document before=doc;auto old=*current;relocatePlot(old,revised);*graph()=std::move(revised);
-                if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}last=data;return {};
+                if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}last=dataRows(*graph());return {};
             }catch(const std::exception& e){return ui::wide(e.what());}
         },[](size_t column,const std::string& value)->std::wstring{return column==0||validEnergyGridValue(value)?L"":L"에너지를 숫자로 입력하세요. 빈칸은 생략됩니다.";},[this](HWND,size_t column)->std::optional<std::wstring>{
             if(!column||!graph())return {};auto* p=graph();if(column>p->series.size())return {};
             ui::InlineDialogHost host(window,[this](HWND child){mount(child);});
             auto result=ui::form(window,L"경로 이름 변경",{{L"경로 이름",p->series[column-1].name,false,{},false,4,true}});if(!result)return {};
             if(!graph()||doc.isLocked(owner))return {};Document before=doc;graph()->series[column-1].name=result->front();if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}return ui::wide(result->front());
-        });
+        },[this](){return graph()?dataRows(*graph()):ui::Table{};});
         if(!grid)throw std::runtime_error("데이터 표를 열 수 없습니다.");
         if(tableFontPoints!=12)ui::setEmbeddedTableFontSize(grid,tableFontPoints);
         panel=131;layout();SetFocus(GetDlgItem(grid,10));ui::attachWindowHelp(window);
@@ -133,6 +144,7 @@ struct Manager{
         }
     }
     int panelPage() const {
+        if(panel==structureBorder)return 3;
         if(panel==plotLegendCommand)return 1;
         if(panel==139)return 2;
         return 0;
@@ -174,7 +186,7 @@ struct Manager{
 
     using PlotEdit=std::function<void(EnergyPlot&,const std::vector<std::string>&)>;
     void openForm(int action,const wchar_t* title,const std::vector<ui::Field>& fields,const PlotEdit& edit){
-        auto update=[this,edit](const std::vector<std::string>& values,bool apply)->std::wstring{
+        auto update=[this,edit,action](const std::vector<std::string>& values,bool apply)->std::wstring{
             try{
                 auto* p=graph();
                 if(!p||doc.isLocked(owner))return L"편집할 그래프를 확인하세요.";
@@ -184,6 +196,7 @@ struct Manager{
                     Document before=doc;
                     *p=std::move(candidate);
                     if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}
+                    if(action==verticalBranch)branchDataRow=graph()->series.back().branchState+1;
                 }else{
                     draft=std::move(candidate);
                     cachedScene.reset();InvalidateRect(window,nullptr,FALSE);
@@ -194,13 +207,36 @@ struct Manager{
         form=ui::embeddedForm(window,title,fields,
             [update](const auto& values){return update(values,false);},
             [update](const auto& values){return update(values,true);},
-            [this](){SendMessageW(window,WM_COMMAND,panelBack,0);},
+            [this](){
+                const int row=branchDataRow;branchDataRow=-1;
+                SendMessageW(window,WM_COMMAND,panelBack,0);
+                if(row>=0){selectPage(0);openData();ui::selectEmbeddedTableCell(grid,row,int(graph()->series.size()));}
+            },
             [this](COLORREF color){
                 ui::InlineDialogHost host(window,[this](HWND child){mount(child);});
                 return ui::chooseColor(window,color);
             });
         if(!form)throw std::runtime_error("관리창 편집을 열 수 없습니다.");
         panel=action;layout();SetFocus(GetDlgItem(form,100));ui::attachWindowHelp(window);
+    }
+
+    void openStructureBorder(size_t index,bool above){
+        const auto& state=graph()->states.at(index);
+        const auto border=above?state.aboveBorder:state.belowBorder;
+        openForm(structureBorder,L"구조 · 사각형 테두리",{
+            {L"테두리 표시",border.enabled?"1":"0",false,{L"숨김",L"표시"}},
+            {L"테두리 색상",border.color,false,{},true},
+            ui::numericField(L"구조와의 여백 (pt)",border.padding,2,100,1),
+            ui::numericField(L"테두리 선 굵기 (pt)",border.width,.1,10,.1)
+        },[index,above](EnergyPlot& target,const auto& values){
+            auto& state=target.states.at(index);
+            auto& border=above?state.aboveBorder:state.belowBorder;
+            border.enabled=values[0]=="1";
+            border.color=colorValue(values[1]);
+            border.padding=numeric(values[2],2,100);
+            border.width=numeric(values[3],.1,10);
+            validateEnergyAnnotations(target);
+        });
     }
 
     void openLegend(){
@@ -245,19 +281,15 @@ struct Manager{
         std::vector<std::wstring> paths,states;
         for(const auto& path:source.series)paths.push_back(ui::wide(path.name));
         if(paths.empty())paths.push_back(L"Path 1");
-        for(size_t i=0;i+1<source.states.size();++i)
+        for(size_t i=0;i<source.states.size();++i)
             states.push_back(std::to_wstring(i+1)+L" · "+ui::wide(source.states[i].label));
-        const auto axis=energyAxis(source);
-        const auto initial=std::min(10000.,std::max(.1,axis.step));
-        openForm(verticalBranch,L"상하 분기 추가",{
-            {L"공통 구간의 원본 경로","0",false,paths},
-            {L"갈라지는 마지막 공통 상태","0",false,states},
-            {L"새 분기 경로 이름","Branch "+std::to_string(paths.size()+1)},
-            {L"새 경로 방향","0",false,{L"위쪽 (에너지 증가)",L"아래쪽 (에너지 감소)"}},
-            ui::numericField(L"분기 뒤 에너지 차이",initial,.000001,1000000,.5)
+        const size_t initial=targetContainer==owner?std::min(targetSlot,source.states.size()-1):0;
+        openForm(verticalBranch,L"상태에서 분기 · 적용 후 데이터 표에서 에너지 입력",{
+            {L"분기할 원본 경로","0",false,paths},
+            {L"분기점 상태",std::to_string(initial),false,states},
+            {L"새 분기 경로 이름","Branch "+std::to_string(paths.size()+1)}
         },[](EnergyPlot& target,const auto& values){
-            const double shift=numeric(values[4],.000001,1000000)*(values[3]=="0"?1:-1);
-            target=verticalBranchPlot(target,size_t(std::stoul(values[0])),size_t(std::stoul(values[1])),values[2],shift);
+            target=verticalBranchPlot(target,size_t(std::stoul(values[0])),size_t(std::stoul(values[1])),values[2]);
         });
         SendMessageW(form,WM_COMMAND,MAKEWPARAM(102,EN_CHANGE),0);
     }
@@ -423,7 +455,7 @@ struct Manager{
             place(tab,20+i*(tabWidth+6),panelTop,tabWidth,34);
             EnableWindow(tab,!subpane);
         }
-        place(GetDlgItem(window,slotControl),20,panelTop+46,width-192,28,page==3&&!subpane);place(GetDlgItem(window,sideControl),width-162,panelTop+46,142,28,page==3&&!subpane);
+        place(GetDlgItem(window,slotControl),20,panelTop+46,width-192,28,page==3&&!expanded);place(GetDlgItem(window,sideControl),width-162,panelTop+46,142,28,page==3&&!expanded);
         const int start=panelTop+(page==3?84:46),columns=4,cardWidth=(width-40-(columns-1)*gap)/columns;
         for(auto& category:pages)for(auto& card:category){auto h=GetDlgItem(window,card.action);auto found=std::find_if(pages[size_t(page)].begin(),pages[size_t(page)].end(),[&](const Card& c){return c.action==card.action;});bool show=found!=pages[size_t(page)].end()&&!expanded;int i=show?(card.slot>=0?card.slot:int(found-pages[size_t(page)].begin())):0;place(h,20+(i%columns)*(cardWidth+gap),start+(i/columns)*100,cardWidth,90,show);}
         place(GetDlgItem(window,distributeStages),width-188,panelTop+37,168,26,grid&&panel==139&&expanded&&!subpane);
@@ -546,9 +578,10 @@ struct Manager{
         if(action==139){openStages();return;}
         if(action==plotLegendCommand){openLegend();return;}
         if(action==132||action==133){openSeries(action==132);return;}
-        if(action>=editStructure&&action<=removeStructure){
+        if(action>=editStructure&&action<=structureBorder){
             const int index=int(SendDlgItemMessageW(window,slotControl,CB_GETCURSEL,0,0));if(index<0||size_t(index)>=graph()->states.size())throw std::runtime_error("구조를 넣을 상태를 먼저 선택하세요.");
             targetContainer=owner;targetSlot=size_t(index);targetAbove=SendDlgItemMessageW(window,sideControl,CB_GETCURSEL,0,0)==0;
+            if(action==structureBorder){openStructureBorder(targetSlot,targetAbove);return;}
             if(action==editStructure){editTargetStructure();}else if(action==pasteStructure)fillTarget(false);else if(action==fileStructure)fillTarget(true);else if(action==sizeStructure)resizeSelected();
             else{Document before=doc,candidate=doc;Document empty;replaceSlotStructure(candidate,empty,owner,targetSlot,targetAbove);if(toNative(candidate)!=toNative(before)){history.checkpoint(before);doc=std::move(candidate);changed();}}
         }else command(action);

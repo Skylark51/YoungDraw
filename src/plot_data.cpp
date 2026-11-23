@@ -155,9 +155,21 @@ void validateEnergyAnnotations(const EnergyPlot& p){
         if(!std::isfinite(size)||size<0||size>100)throw std::runtime_error("Invalid axis arrowhead dimension");
     if(!std::isfinite(p.inkScale)||p.inkScale<.25||p.inkScale>4)throw std::runtime_error("Invalid graph ink scale");
     if(!p.energySymbol.empty()&&p.energySymbol!="ΔE"&&p.energySymbol!="ΔG")throw std::runtime_error("Invalid energy symbol");
+    for(size_t k=0;k<p.series.size();++k){const auto& path=p.series[k];
+        if((path.branchSource==-1)!=(path.branchState==-1)||path.branchSource< -1||path.branchState< -1||
+           (path.branchSource>=0&&(size_t(path.branchSource)>=k||size_t(path.branchState)>=p.states.size())))
+            throw std::runtime_error("Invalid branch point");
+    }
     const size_t paths=std::max(size_t(1),p.series.size());
     auto offset=[](Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::abs(v.x)<=10000&&std::abs(v.y)<=10000;};
     for(size_t i=0;i<p.states.size();++i){const auto& s=p.states[i];
+        for(const auto* border:{&s.aboveBorder,&s.belowBorder}){
+            if(!std::isfinite(border->padding)||border->padding<2||border->padding>100||
+               !std::isfinite(border->width)||border->width<.1||border->width>10||
+               border->color.size()!=7||border->color.front()!='#'||
+               !std::all_of(border->color.begin()+1,border->color.end(),[](unsigned char c){return std::isxdigit(c)!=0;}))
+                throw std::runtime_error("Invalid structure border style");
+        }
         if(s.labelPlacement<0||s.labelPlacement>4||s.labelPath<0||size_t(s.labelPath)>=paths||!offset(s.labelOffset)||
            !std::isfinite(s.breakPosition)||s.breakPosition<.05||s.breakPosition>.95||
            !std::isfinite(s.breakOmit)||s.breakOmit<0||s.breakOmit>1e6||!std::isfinite(s.breakUpperScale)||s.breakUpperScale<1||s.breakUpperScale>10||
@@ -206,7 +218,8 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
         }
         path.values=std::move(values);path.present=std::move(present);
     }
-    auto source=left;left.name=leftName;
+    for(auto& path:result.series)if(path.branchState>=0)path.branchState+=int(n)-1;
+    auto source=left;left.name=leftName;left.branchSource=left.branchState=-1;
     for(const char* color:{"#b44758","#167d9a","#7a52a1","#27854a","#b87516"}){
         if(std::none_of(result.series.begin(),result.series.end(),[&](const EnergySeries& path){return path.color==color;})){left.color=color;break;}
     }
@@ -241,15 +254,13 @@ EnergyPlot bilateralPlot(const EnergyPlot& original,size_t sourcePath,const std:
 }
 std::vector<MechanismStage> defaultMechanismStages(){return {{"Reactant",0,32},{"Transition State",34,66},{"Product",68,100}};}
 EnergyPlot verticalBranchPlot(const EnergyPlot& original,size_t sourcePath,size_t fork,
-                              const std::string& name,double energyOffset){
+                              const std::string& name){
     if(original.mode==independentEnergyLevels)
         throw std::runtime_error("먼저 상태를 연결하는 그래프 형태를 선택하세요.");
-    if(original.states.size()<2||fork>=original.states.size()-1)
-        throw std::runtime_error("마지막 상태 이전의 분기점을 선택하세요.");
+    if(original.states.size()<2||fork>=original.states.size())
+        throw std::runtime_error("분기할 상태를 선택하세요.");
     if(name.find_first_not_of(" \t\r\n")==std::string::npos||name.size()>256)
         throw std::runtime_error("새 경로 이름을 1~256바이트로 입력하세요.");
-    if(!std::isfinite(energyOffset)||energyOffset==0)
-        throw std::runtime_error("분기 에너지 차이는 0이 아닌 숫자로 입력하세요.");
     EnergyPlot result=original;
     if(result.series.empty()){
         EnergySeries base;
@@ -258,27 +269,50 @@ EnergyPlot verticalBranchPlot(const EnergyPlot& original,size_t sourcePath,size_
     }
     if(sourcePath>=result.series.size()||result.series.size()>=100)
         throw std::runtime_error("원본 경로를 확인하세요. 경로는 최대 100개입니다.");
-    const auto& source=result.series[sourcePath];
-    if(!source.hasValue(fork)||!source.hasValue(fork+1))
-        throw std::runtime_error("원본 경로에서 에너지가 연속된 두 상태 사이를 선택하세요.");
-    auto branch=source;
-    branch.name=name;
-    branch.sharedStart=true;
-    branch.color=energyOffset>0?"#ad405b":"#286688";
-    if(branch.color==source.color)branch.color=energyOffset>0?"#8c5024":"#305c4b";
-    branch.levelColors.clear();
-    branch.segmentColors.clear();
-    branch.valueLabels.clear();
-    branch.present.resize(branch.values.size());
-    for(size_t i=0;i<branch.values.size();++i){
-        branch.present[i]=i>=fork&&source.hasValue(i);
-        if(i<=fork||!branch.present[i])continue;
-        branch.values[i]+=energyOffset;
-        if(!std::isfinite(branch.values[i])||std::abs(branch.values[i])>1e6)
-            throw std::runtime_error("분기 에너지는 ±1,000,000 이내여야 합니다.");
+    if(!result.series[sourcePath].hasValue(fork))
+        throw std::runtime_error("선택한 원본 경로의 분기점 에너지를 데이터 표에 먼저 입력하세요.");
+    if(fork+1==result.states.size()){
+        if(result.states.size()>=100)throw std::runtime_error("상태는 최대 100개입니다. 분기 뒤 상태를 추가할 공간이 없습니다.");
+        EnergyState state;state.label="State "+std::to_string(result.states.size()+1);
+        result.states.push_back(std::move(state));
+        for(auto& state:result.states)state.position.reset();
+        for(auto& path:result.series){
+            std::vector<bool> mask;for(size_t i=0;i<path.values.size();++i)mask.push_back(path.hasValue(i));
+            mask.resize(result.states.size(),false);path.present=std::move(mask);path.values.resize(result.states.size());
+        }
+        result.width=std::max(result.width,114.+(result.states.size()-1)*70);
     }
+    const auto& source=result.series[sourcePath];
+    auto branch=source;
+    branch.name=name;branch.sharedStart=true;
+    branch.branchSource=int(sourcePath);branch.branchState=int(fork);
+    branch.color="#ad405b";
+    for(const char* color:{"#ad405b","#286688","#8c5024","#305c4b","#7a52a1"})
+        if(std::none_of(result.series.begin(),result.series.end(),[&](const EnergySeries& path){return path.color==color;})){branch.color=color;break;}
+    branch.levelColors.clear();branch.segmentColors.clear();branch.valueLabels.clear();
+    branch.values.assign(result.states.size(),0);branch.present.assign(result.states.size(),false);
+    branch.values[fork]=source.values[fork];branch.present[fork]=true;
     result.series.push_back(std::move(branch));
     return result;
+}
+// At a given state, follow only links sharing that same material level.
+static size_t branchRoot(const EnergyPlot& plot,size_t path,size_t state){
+    while(plot.series[path].branchState==int(state)&&plot.series[path].branchSource>=0&&
+          size_t(plot.series[path].branchSource)<path)path=size_t(plot.series[path].branchSource);
+    return path;
+}
+void setPlotEnergy(EnergyPlot& plot,size_t path,size_t state,double energy){
+    if(state>=plot.states.size()||!std::isfinite(energy)||std::abs(energy)>1e6)
+        throw std::runtime_error("에너지는 ±1,000,000 이내의 숫자로 입력하세요.");
+    if(plot.series.empty()){plot.states[state].energy=energy;return;}
+    if(path>=plot.series.size())throw std::runtime_error("에너지를 입력할 경로를 확인하세요.");
+    const auto root=branchRoot(plot,path,state);
+    for(size_t k=0;k<plot.series.size();++k)if(branchRoot(plot,k,state)==root){
+        auto& series=plot.series[k];series.values.at(state)=energy;
+        if(!series.present.empty())series.present.at(state)=true;
+        if(state<series.valueLabels.size())series.valueLabels[state].clear();
+        if(k==0)plot.states[state].energy=energy;
+    }
 }
 
 std::vector<MechanismStage> mechanismStageData(const std::vector<std::vector<std::string>>& cells){
@@ -397,7 +431,7 @@ static std::string trim(std::string s){auto a=s.find_first_not_of(" \t\r");if(a=
 static std::vector<std::string> cells(const std::string& line){std::vector<std::string> out;std::string s;bool quoted=false;for(size_t i=0;i<line.size();++i){char c=line[i];if(c=='"'){if(quoted&&i+1<line.size()&&line[i+1]=='"'){s+='"';++i;}else quoted=!quoted;}else if((c==','||c=='\t')&&!quoted){out.push_back(trim(s));s.clear();}else s+=c;}if(quoted)throw std::runtime_error("Close the quote in the state name");out.push_back(trim(s));return out;}
 std::vector<EnergyRow> parseEnergyTable(const std::string& csv){std::vector<EnergyRow> rows;std::istringstream stream(csv);std::string line;size_t row=0;while(std::getline(stream,line)){++row;if(trim(line).empty())continue;auto v=cells(line);if(v.size()<2||v.size()>3)throw std::runtime_error("Row "+std::to_string(row)+": use State, Energy, Marker");if(rows.empty()&&v[0]=="State"&&v[1]=="Energy")continue;if(v[0].empty())throw std::runtime_error("Row "+std::to_string(row)+": state name is empty");double energy;try{size_t n=0;energy=std::stod(v[1],&n);if(n!=v[1].size()||!std::isfinite(energy)||std::abs(energy)>1e6)throw std::runtime_error("value");}catch(...){throw std::runtime_error("Row "+std::to_string(row)+": energy must be a finite number");}int marker=-1;if(v.size()==3&&!v[2].empty()){std::string name=v[2];for(char& c:name)c=char(std::tolower(static_cast<unsigned char>(c)));std::map<std::string,int> names={{"auto",-1},{"-1",-1},{"none",0},{"0",0},{"circle",1},{"1",1},{"square",2},{"2",2},{"diamond",3},{"3",3},{"triangle",4},{"4",4}};auto i=names.find(name);if(i==names.end())throw std::runtime_error("Row "+std::to_string(row)+": marker is auto/none/circle/square/diamond/triangle");marker=i->second;}rows.push_back({v[0],energy,marker});if(rows.size()>100)throw std::runtime_error("At most 100 states are supported");}if(rows.size()<2)throw std::runtime_error("Enter at least two complete state rows");return rows;}
 std::string energyTable(const EnergyPlot& p){std::ostringstream out;out.imbue(std::locale::classic());out<<std::setprecision(10);const char* names[]={"auto","none","circle","square","diamond","triangle"};for(auto& s:p.states){std::string label=s.label;if(label.find_first_of(",\t\"")!=std::string::npos){std::string escaped="\"";for(char c:label){escaped+=c;if(c=='"')escaped+='"';}label=escaped+'"';}out<<label<<", "<<s.energy<<", "<<names[std::clamp(s.marker,-1,4)+1]<<"\r\n";}return out.str();}
-void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool preserveMarkers){
+void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool preserveMarkers,std::vector<int>* stateMapping){
     if(rows.size()>100)throw std::runtime_error("Use at most 100 energy states");
     auto old=plot;std::vector<int> mapping(rows.size(),-1);std::set<size_t> used;
     // Reserve exact label matches before reusing indices for renamed/new states.
@@ -406,6 +440,7 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
         for(size_t j=0;j<old.states.size();j++)if(!used.count(j)&&old.states[j].label==r.label){mapping[i]=int(j);used.insert(j);break;}
     }
     for(size_t i=0;i<rows.size();i++)if(mapping[i]<0&&i<old.states.size()&&!used.count(i)){mapping[i]=int(i);used.insert(i);}
+    if(stateMapping)*stateMapping=mapping;
     std::vector<EnergyState> states;for(size_t i=0;i<rows.size();i++){EnergyState s;if(mapping[i]>=0)s=old.states[size_t(mapping[i])];setEnergyStateLabel(s,rows[i].label);s.energy=rows[i].energy;if(!preserveMarkers)s.marker=rows[i].marker;states.push_back(s);}
     auto series=old.series;if(series.empty())series.push_back({});
     for(size_t k=0;k<series.size();k++){std::vector<double> values;for(size_t i=0;i<rows.size();i++){int j=mapping[i];values.push_back(k==0?rows[i].energy:j>=0&&size_t(j)<old.series[k].values.size()?old.series[k].values[size_t(j)]:rows[i].energy);}std::vector<bool> present;for(size_t i=0;i<rows.size();i++){int j=mapping[i];present.push_back(k==0||j<0||old.series.empty()||old.series[k].hasValue(size_t(j)));}std::vector<std::string> levels(rows.size()),segments(rows.empty()?0:rows.size()-1),labels;
@@ -425,6 +460,11 @@ void setEnergyData(EnergyPlot& plot,const std::vector<EnergyRow>& rows,bool pres
     for(size_t i=0;i<states.size();++i){auto& state=states[i];
         if(state.gapFrom>=0){auto from=std::find(mapping.begin(),mapping.end(),state.gapFrom);state.gapFrom=from==mapping.end()?-1:int(from-mapping.begin());if(state.gapFrom==int(i))state.gapFrom=-1;}
         if(i+1>=states.size()||mapping[i]<0||mapping[i+1]!=mapping[i]+1){state.breakAfter=false;state.photoPath=-1;}
+    }
+    for(auto& path:series)if(path.branchState>=0){
+        const auto point=std::find(mapping.begin(),mapping.end(),path.branchState);
+        if(point==mapping.end()){path.branchState=path.branchSource=-1;path.sharedStart=false;}
+        else path.branchState=int(point-mapping.begin());
     }
     plot.states=std::move(states);plot.series=std::move(series);
     plot.crossings.clear();
@@ -482,8 +522,39 @@ EnergyPlot energyGridData(const EnergyPlot& original,const std::vector<std::vect
         }
         states.push_back({label,energies[0].back(),-1});
     }
-    EnergyPlot candidate=original;setEnergyData(candidate,states,true);
+    std::vector<int> mapping;
+    EnergyPlot candidate=original;setEnergyData(candidate,states,true,&mapping);
     for(size_t k=0;k<paths;k++){candidate.series[k].values=std::move(energies[k]);candidate.series[k].present=std::move(present[k]);candidate.series[k].valueLabels=std::move(valueLabels[k]);}
+    // A shared point has one physical energy. Editing either copy updates all
+    // linked cells, while contradictory values in one paste are rejected.
+    for(const auto& path:candidate.series)if(path.branchState>=0)
+        for(size_t row=0;row<size_t(path.branchState);++row)if(path.hasValue(row))
+            throw std::runtime_error(std::to_string(row+1)+"행: 분기점 이전의 에너지는 원본 경로에 입력하세요. 분기점은 상태에서 분기에서 선택합니다.");
+    for(size_t row=0;row<candidate.states.size();++row){
+        std::map<size_t,std::vector<size_t>> groups;
+        for(size_t k=0;k<paths;++k)groups[branchRoot(candidate,k,row)].push_back(k);
+        for(const auto& group:groups){
+            if(group.second.size()<2)continue;
+            size_t chosen=group.first;bool changed=false;
+            for(size_t k:group.second){
+                const auto& now=candidate.series[k];const int oldRow=mapping[row];
+                const bool wasPresent=oldRow>=0&&k<original.series.size()&&original.series[k].hasValue(size_t(oldRow));
+                if(now.hasValue(row)==wasPresent&&(!now.hasValue(row)||now.values[row]==original.series[k].values[size_t(oldRow)]))continue;
+                if(changed){const auto& other=candidate.series[chosen];
+                    if(now.hasValue(row)!=other.hasValue(row)||(now.hasValue(row)&&now.values[row]!=other.values[row]))
+                        throw std::runtime_error(std::to_string(row+1)+"행: 공통 분기점에는 같은 에너지를 입력하세요.");
+                }
+                chosen=k;changed=true;
+            }
+            const auto source=candidate.series[chosen];
+            for(size_t k:group.second){
+                auto& target=candidate.series[k];target.present[row]=source.hasValue(row);target.values[row]=source.values[row];
+                if(row<target.valueLabels.size())target.valueLabels[row].clear();
+                if(row<source.valueLabels.size()){target.valueLabels.resize(std::max(target.valueLabels.size(),row+1));target.valueLabels[row]=source.valueLabels[row];}
+            }
+        }
+        candidate.states[row].energy=candidate.series[0].values[row];
+    }
     candidate.width=std::max(candidate.width,114.+(std::max(size_t(1),data.size())-1)*70);
     return candidate;
 }

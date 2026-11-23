@@ -16,6 +16,61 @@ static bool overlaps(Rect a,Rect b){return a.x<b.x+b.w-0.01&&a.x+a.w>b.x+0.01&&a
 static EnergyPlot sample(){EnergyPlot p;p.id=1;p.p={30,90};p.width=760;p.height=400;p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#167d9a",{0,37.2,17.7,27.3,-9.9},0,2},{"Path 2","#b44758",{0,37.2,17.7,27.3,-9.9},1,2}};return p;}
 int main(){try{
     {
+        Document d;auto graph=sample();d.plots={graph};d.nextId=2;
+        Document fragment;fragment.ring({0,0},6);fragment.atoms[0].element=8;
+        replaceSlotStructure(d,fragment,graph.id,0,true);
+        replaceSlotStructure(d,fragment,graph.id,1,false);
+        auto frame=[](const Scene& scene,const std::string& color)->const Primitive*{
+            for(const auto& item:scene.items)if(item.type==Primitive::Box&&item.color==color)return &item;
+            return nullptr;
+        };
+        d.plots[0].states[0].aboveBorder={true,"#2874b8",8,1.5};
+        auto picture=makeScene(d,measure);auto box=frame(picture,"#2874b8");
+        check(box&&box->owner==graph.id&&!box->filled,"structure border is an unfilled graph decoration");
+        auto raw=makeScene(d.subset(d.plots[0].states[0].above),measure);
+        // Scene bounds include a six-point export margin beyond the ink.
+        check(std::abs(box->points[0].x-(raw.bounds.x+6-8-.75))<1e-6&&
+              std::abs(box->points[1].y-(raw.bounds.y+raw.bounds.h-6+8+.75))<1e-6,
+              "border keeps requested clear padding outside atom labels and bond strokes");
+        const auto originalBox=*box;const auto original=toSvg(picture);
+        d.plots[0].states[1].belowBorder={true,"#b82774",12,2};
+        d.plots[0].states[0].belowBorder.enabled=true; // Empty regions stay invisible.
+        picture=makeScene(d,measure);
+        check(frame(picture,"#b82774")&&std::count_if(picture.items.begin(),picture.items.end(),[](const Primitive& p){return p.type==Primitive::Box;})==2,
+              "above and below frames are independent and empty slots produce no frame");
+        d.plots[0].states[0].aboveBorder.padding=14;
+        picture=makeScene(d,measure);box=frame(picture,"#2874b8");
+        check(std::abs(box->points[0].x-originalBox.points[0].x+6)<1e-6&&
+              std::abs(box->points[1].x-originalBox.points[1].x-6)<1e-6,"changing padding expands both sides equally");
+        const auto movedBox=*box;d.translate({graph.id},{31,17});picture=makeScene(d,measure);box=frame(picture,"#2874b8");
+        check((box->points[0]-movedBox.points[0]-Vec{31,17}).length()<1e-6,"moving the graph moves its structure frame");
+        auto larger=fragment;for(auto& atom:larger.atoms)atom.p=atom.p*2;
+        replaceSlotStructure(d,larger,graph.id,0,true);picture=makeScene(d,measure);box=frame(picture,"#2874b8");
+        check(box->points[1].x-box->points[0].x>movedBox.points[1].x-movedBox.points[0].x,"structure replacement recomputes frame bounds");
+        d.plots[0].states[0].transitionState=true;picture=makeScene(d,measure);box=frame(picture,"#2874b8");
+        bool dagger=false;for(const auto& item:picture.items)if(item.type==Primitive::Text&&item.text=="‡"){
+            dagger=true;auto extent=bounds(item);
+            check(extent.x>box->points[0].x&&extent.x+extent.w<box->points[1].x&&extent.y>box->points[0].y,
+                  "TS brackets and dagger fit inside the rectangular frame");
+        }
+        check(dagger&&original.find("#2874b8")!=std::string::npos,"SVG exports the chosen frame color");
+#ifdef TEST_CDXML
+        const auto saved=toNative(d);
+        for(const auto& restored:{fromNative(saved),fromCdxml(toCdxml(d))}){
+            check(toNative(restored)==saved,"independent frame settings survive native and CDXML roundtrips");
+            check(frame(makeScene(restored,measure),"#2874b8"),"restored frame remains visible");
+        }
+        for(const std::string bad:{"padding=\"1\"","width=\"0\"","color=\"orange\""}){
+            auto damaged=saved;const auto at=damaged.find("<structureBorder");const auto end=damaged.find('>',at);
+            const auto key=bad.substr(0,bad.find('=')+1);const auto field=damaged.find(key,at);
+            check(field<end,"serialized border has a validated style field");const auto last=damaged.find('"',field+key.size()+1);
+            damaged.replace(field,last-field+1,bad);bool rejected=false;
+            try{fromNative(damaged);}catch(const std::exception&){rejected=true;}
+            check(rejected,"invalid border file data is rejected");
+        }
+#endif
+    }
+    {
         Document d;auto p=sample();
         p.xAxisHeadLength=18;p.xAxisHeadWidth=7;p.yAxisHeadLength=11;p.yAxisHeadWidth=13;
         p.thinLines=true;p.inkScale=2.5;d.plots={p};
@@ -419,23 +474,52 @@ int main(){try{
         check(renderLegend()==std::map<int,std::string>{{0,"S = 0"},{2,"S = 2"}},"partially populated paths reappear in the legend");
     }
     {
-        auto original=sample();
-        const auto raised=verticalBranchPlot(original,0,1,"Upper path",8);
-        const auto lowered=verticalBranchPlot(original,0,1,"Lower path",-6);
-        check(raised.states.size()==original.states.size()&&raised.series.size()==original.series.size()+1,
-            "vertical branching uses the same state coordinates");
-        check(raised.series[0].values==original.series[0].values&&!raised.series.back().hasValue(0)&&
-              raised.series.back().values[1]==original.series[0].values[1]&&
-              raised.series.back().values[2]==original.series[0].values[2]+8&&
-              lowered.series.back().values[2]==original.series[0].values[2]-6,"vertical paths share a common prefix and separate at the chosen state");
-        auto branchSource=original;branchSource.series.resize(1);Document branched;
-        branched.plots={verticalBranchPlot(branchSource,0,1,"Split path",-6)};
-        const auto scene=makeScene(branched,measure);
-        check(std::count_if(scene.items.begin(),scene.items.end(),[](const auto& item){
-            return item.type==Primitive::Text&&item.text=="37.2";
-        })==1,"the common branch state displays one energy label");
+        auto original=sample();original.series.resize(1);
+        auto graph=verticalBranchPlot(original,0,1,"User energies");
+        check(graph.states.size()==original.states.size()&&graph.series.size()==2&&
+              graph.series[0].values==original.series[0].values,"branch creation preserves original energies and state coordinates");
+        const auto& added=graph.series.back();
+        check(added.branchSource==0&&added.branchState==1&&added.sharedStart&&!added.hasValue(0)&&
+              added.hasValue(1)&&added.values[1]==original.series[0].values[1]&&!added.hasValue(2)&&!added.hasValue(4),
+              "new branch shares only the chosen state and leaves later energies for user input");
+        auto rows=[](const EnergyPlot& p){
+            std::vector<std::vector<std::string>> data;
+            for(size_t i=0;i<p.states.size();++i){std::vector<std::string> row={p.states[i].label};
+                for(const auto& path:p.series)row.push_back(path.hasValue(i)?std::to_string(path.values[i]):"");
+                data.push_back(std::move(row));}
+            return data;
+        };
+        auto data=rows(graph);data[2][2]="-15.25";data[3][2]="42";data[4][2]="0";
+        graph=energyGridData(graph,data);
+        check(graph.series[1].values[2]==-15.25&&graph.series[1].values[3]==42&&graph.series[1].values[4]==0&&
+              graph.series[0].values==original.series[0].values,"every branch energy is independently entered, including zero and nonparallel paths");
+        data=rows(graph);data[1][2]="33";graph=energyGridData(graph,data);
+        check(graph.series[0].values[1]==33&&graph.series[1].values[1]==33,"editing the branch point updates its common source energy");
+        auto nested=verticalBranchPlot(graph,1,2,"Nested branch");setPlotEnergy(nested,1,2,7.5);
+        check(nested.series[2].values[2]==7.5&&nested.series[0].values[2]==original.series[0].values[2],"nested forks share only their own selected material level");
+        data=rows(nested);data[3][3]="-9";data[4][3]="-21";nested=energyGridData(nested,data);
+        check(nested.series[2].values[4]==-21&&nested.series[1].values[4]==0,"nested branch energies remain independently editable in the data table");
+        data=rows(graph);data[1][1]="10";data[1][2]="12";bool conflict=false;
+        try{energyGridData(graph,data);}catch(const std::exception&){conflict=true;}
+        check(conflict,"contradictory pasted energies cannot split a shared branch point");
+        data=rows(graph);data[0][2]="12";bool early=false;
+        try{energyGridData(graph,data);}catch(const std::exception&){early=true;}
+        check(early,"data before the chosen fork cannot silently move the branch start");
+        data=rows(graph);data.insert(data.begin(),{"Earlier","-2",""});graph=energyGridData(graph,data);
+        check(graph.series[1].branchState==2,"inserting a table row preserves the chosen branch state identity");
+        data=rows(graph);data.erase(data.begin()+2);auto detached=energyGridData(graph,data);
+        check(detached.series[1].branchState==-1,"deleting the shared state safely detaches the remaining branch data");
+        auto last=verticalBranchPlot(original,0,original.states.size()-1,"Last state branch");
+        check(last.states.size()==original.states.size()+1&&!last.series[0].hasValue(last.states.size()-1)&&
+              last.series[1].branchState==int(original.states.size()-1),"the last state can branch into a new blank data row");
+        auto sparse=original;sparse.series[0].present={true,true,false,false,false};
+        check(verticalBranchPlot(sparse,0,1,"Sparse").series.size()==2,"a fork needs only its source energy, not preexisting later source data");
+        Document branched;branched.plots={nested};const auto scene=makeScene(branched,measure);
+        check(std::count_if(scene.items.begin(),scene.items.end(),[](const auto& item){return item.type==Primitive::Text&&(item.text=="33"||item.text=="33.0");})==1,
+              "the common branch state displays one energy label");
 #ifdef TEST_CDXML
-        check(fromCdxml(toCdxml(branched)).plots.front().series.back().sharedStart,"shared branch display survives saving");
+        for(const auto& restored:{fromNative(toNative(branched)),fromCdxml(toCdxml(branched))})
+            check(toNative(restored)==toNative(branched),"branch source, fork and all user energies survive both file formats");
 #endif
     }
     {

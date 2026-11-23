@@ -863,7 +863,23 @@ static void captureAxesManager(const std::wstring& name){
     RECT bounds{};GetClientRect(plotManagerWindow,&bounds);
     Bitmap image(bounds.right,bounds.bottom,PixelFormat32bppARGB);
     {Graphics graphics(&image);auto dc=graphics.GetHDC();
-     check(PrintWindow(plotManagerWindow,dc,PW_CLIENTONLY)!=FALSE,"capture the real unified axis manager");graphics.ReleaseHDC(dc);}
+     SendMessageW(plotManagerWindow,WM_PRINTCLIENT,(WPARAM)dc,PRF_CLIENT);
+     struct Context{HWND manager;HDC dc;};Context context{plotManagerWindow,dc};
+     EnumChildWindows(plotManagerWindow,[](HWND child,LPARAM data)->BOOL{
+        auto& context=*reinterpret_cast<Context*>(data);
+        for(auto ancestor=child;ancestor&&ancestor!=context.manager;ancestor=GetParent(ancestor))
+            if(!(GetWindowLongPtrW(ancestor,GWL_STYLE)&WS_VISIBLE))return TRUE;
+        RECT rect{};GetWindowRect(child,&rect);MapWindowPoints(HWND_DESKTOP,context.manager,reinterpret_cast<POINT*>(&rect),2);
+        const int saved=SaveDC(context.dc);SetViewportOrgEx(context.dc,rect.left,rect.top,nullptr);
+        wchar_t type[32]{};GetClassNameW(child,type,32);
+        if(!_wcsicmp(type,L"Button")){
+            DRAWITEMSTRUCT item{};item.CtlType=ODT_BUTTON;item.CtlID=GetDlgCtrlID(child);item.hwndItem=child;
+            item.hDC=context.dc;item.rcItem={0,0,rect.right-rect.left,rect.bottom-rect.top};
+            SendMessageW(GetParent(child),WM_DRAWITEM,item.CtlID,(LPARAM)&item);
+        }else if(!_wcsicmp(type,L"Edit"))SendMessageW(child,WM_PRINT,(WPARAM)context.dc,PRF_CLIENT|PRF_NONCLIENT|PRF_ERASEBKGND);
+        else SendMessageW(child,WM_PRINTCLIENT,(WPARAM)context.dc,PRF_CLIENT);
+        RestoreDC(context.dc,saved);return TRUE;
+     },(LPARAM)&context);graphics.ReleaseHDC(dc);}
     CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
     check(image.Save(name.c_str(),&png)==Ok,"save unified axis manager evidence");
 }
@@ -1017,18 +1033,37 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(manager,WM_COMMAND,4000,0);
     SendMessageW(manager,WM_COMMAND,4402,0);
     auto branchForm=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
-    check(branchForm&&toNative(doc)==before,"vertical branch opens as a reversible draft");
+    check(branchForm&&toNative(doc)==before&&!GetDlgItem(branchForm,103)&&!GetDlgItem(branchForm,104),
+          "branch creation asks for a source and state, without arbitrary direction or energy offsets");
+    captureAxesManager(L"graph-branch-creation.png");
     SendDlgItemMessageW(branchForm,101,CB_SETCURSEL,1,0);
-    SendDlgItemMessageW(branchForm,103,CB_SETCURSEL,1,0);
-    SetDlgItemTextW(branchForm,104,L"5");
     SendMessageW(branchForm,WM_COMMAND,IDOK,0);
-    const auto& branched=doc.plots.front();
-    const auto& added=branched.series.back();
-    check(added.name.find("Branch ")==0&&!added.hasValue(0)&&added.values[1]==branched.series[0].values[1]&&
-          added.values[2]==branched.series[0].values[2]-5,"the branch forks down after a common intermediate");
+    check(doc.plots.front().series.back().branchState==1&&!doc.plots.front().series.back().hasValue(2),
+          "the branch starts at the chosen intermediate and leaves future energies blank");
+    inlineGrid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);list=GetDlgItem(inlineGrid,10);
+    check(inlineGrid&&(GetWindowLongPtrW(inlineGrid,GWL_STYLE)&WS_VISIBLE),"applying a branch opens its editable energy table immediately");
+    auto enter=[&](int row,int column,const wchar_t* value){
+        ui::selectEmbeddedTableCell(inlineGrid,row,column);SendMessageW(list,WM_KEYDOWN,VK_F2,0);
+        auto input=FindWindowExW(list,nullptr,L"EDIT",nullptr);check(input!=nullptr,"branch data cell opens its real editor");
+        SetWindowTextW(input,value);SendMessageW(list,WM_KEYDOWN,VK_RETURN,0);
+    };
+    const int branchColumn=int(doc.plots.front().series.size());
+    enter(2,branchColumn,L"-19.5");
+    enter(1,branchColumn,L"12.25");
+    check(doc.plots.front().series.back().values[2]==-19.5&&doc.plots.front().series[0].values[1]==12.25&&
+          doc.plots.front().series.back().values[1]==12.25,"branch energies and the shared point are real editable table data");
+    wchar_t sharedCell[64]{};ListView_GetItemText(list,1,2,sharedCell,64);
+    check(std::wstring(sharedCell)==L"12.25","editing a shared point refreshes the matching source cell in the table");
+    enter(1,1,L"11.5");
+    check(doc.plots.front().series.back().values[1]==11.5,"editing the source cell also updates the shared branch point");
+    enter(2,branchColumn,L"8.75");check(doc.plots.front().series.back().values[2]==8.75,"branch energy can be changed again after initial entry");
     writePreview(L"graph-vertical-branch.png",doc);
-    SendMessageW(manager,WM_COMMAND,104,0);
-    check(toNative(doc)==before,"vertical branch undoes in one operation");
+    captureAxesManager(L"graph-branch-data.png");
+    SendMessageW(manager,WM_COMMAND,4400,0);SendMessageW(manager,WM_COMMAND,131,0);
+    inlineGrid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);list=GetDlgItem(inlineGrid,10);
+    enter(2,branchColumn,L"-4.5");check(doc.plots.front().series.back().values[2]==-4.5,"reopening the data table keeps every branch energy editable");
+    for(int i=0;i<6;++i)SendMessageW(manager,WM_COMMAND,104,0);
+    check(toNative(doc)==before,"branch creation and later data edits undo independently");
     auto styledGraph=doc;
     graphStyleMode=(doc.plots.front().mode+1)%5;
     styledGraph.plots.front().mode=graphStyleMode;
@@ -1168,6 +1203,51 @@ static void graphManagerChecks(HWND hwnd){
     check(structureInSlot(doc,owner,0,false).atoms.size()==1&&toNative(structureInSlot(doc,owner,0,true))==originalSlot,
         "new structure is saved in the chosen empty region");
     SendMessageW(manager,WM_COMMAND,104,0);
+    {
+        const auto borderBefore=toNative(doc);
+        SendDlgItemMessageW(manager,4200,CB_SETCURSEL,0,0);
+        SendDlgItemMessageW(manager,4201,CB_SETCURSEL,0,0);
+        SendMessageW(manager,WM_COMMAND,4305,0);
+        auto borderForm=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+        check(borderForm&&GetDlgItem(borderForm,501),"structure tab exposes border controls and a color picker");
+        check(!(GetWindowLongPtrW(GetDlgItem(manager,4200),GWL_STYLE)&WS_VISIBLE),"border form keeps its selected target fixed while previewing");
+        auto previewFrame=[&](){
+            RECT client{};GetClientRect(manager,&client);Bitmap image(client.right,client.bottom,PixelFormat32bppARGB);
+            Graphics graphics(&image);auto dc=graphics.GetHDC();SendMessageW(manager,WM_PRINTCLIENT,(WPARAM)dc,PRF_CLIENT);graphics.ReleaseHDC(dc);
+            bool found=false;for(int y=88;y<client.bottom-460&&!found;y++)for(int x=20;x<client.right-20;x++){
+                Color pixel;image.GetPixel(x,y,&pixel);
+                if(std::abs(int(pixel.GetR())-18)<6&&std::abs(int(pixel.GetG())-85)<6&&std::abs(int(pixel.GetB())-217)<6){found=true;break;}
+            }
+            return found;
+        };
+        auto setBorder=[&](){
+            SendDlgItemMessageW(borderForm,100,CB_SETCURSEL,1,0);
+            SetDlgItemTextW(borderForm,101,L"#1255d9");SetDlgItemTextW(borderForm,102,L"12");SetDlgItemTextW(borderForm,103,L"2");
+            SendMessageW(borderForm,WM_COMMAND,MAKEWPARAM(100,CBN_SELCHANGE),0);
+        };
+        setBorder();check(toNative(doc)==borderBefore&&previewFrame(),"border color and padding preview without changing the document");
+        captureAxesManager(L"graph-structure-border.png");
+        SendMessageW(borderForm,WM_COMMAND,IDCANCEL,0);
+        check(toNative(doc)==borderBefore&&!previewFrame(),"cancelling the border restores the original preview and document");
+        SendMessageW(manager,WM_COMMAND,4305,0);borderForm=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);setBorder();
+        SetDlgItemTextW(borderForm,102,L"1");SendMessageW(borderForm,WM_COMMAND,IDOK,0);
+        check(toNative(doc)==borderBefore&&IsWindow(borderForm),"insufficient border padding cannot be committed");
+        SetDlgItemTextW(borderForm,102,L"12");SendMessageW(borderForm,WM_COMMAND,IDOK,0);
+        const auto& border=doc.plots[0].states[0].aboveBorder;
+        check(border.enabled&&border.color=="#1255d9"&&border.padding==12&&border.width==2&&
+              !doc.plots[0].states[0].belowBorder.enabled&&!doc.plots[0].states[1].aboveBorder.enabled,
+              "border form applies only to the chosen upper structure");
+        check(toNative(structureInSlot(doc,owner,0,true))==originalSlot&&doc.plots[0].series[0].values==energies,
+              "border styling leaves structure and energy data intact");
+        SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==borderBefore,"border styling undoes in one step");
+        SendMessageW(manager,WM_COMMAND,105,0);check(doc.plots[0].states[0].aboveBorder.enabled,"border styling redoes in one step");
+        SendMessageW(manager,WM_COMMAND,4305,0);borderForm=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+        check(SendDlgItemMessageW(borderForm,100,CB_GETCURSEL,0,0)==1,"border setting survives reopening the panel");
+        SendDlgItemMessageW(borderForm,100,CB_SETCURSEL,0,0);SendMessageW(borderForm,WM_COMMAND,IDOK,0);
+        check(!doc.plots[0].states[0].aboveBorder.enabled&&doc.plots[0].states[0].aboveBorder.color=="#1255d9","hiding the border retains its chosen style");
+        SendMessageW(manager,WM_COMMAND,104,0);SendMessageW(manager,WM_COMMAND,104,0);
+        check(toNative(doc)==borderBefore,"border regression restores the original document");
+    }
     SendMessageW(manager,WM_COMMAND,4004,0);formBefore=toNative(doc);formAction=31;formDriven=false;SetTimer(hwnd,901,10,driveForm);SendMessageW(manager,WM_COMMAND,plotWaveWidthCommand,0);check(formDriven&&doc.plots[0].waveWidth==3.2&&doc.plots[0].waveGap==4,"the wave manager can edit thickness and clearance together");
     RECT waveCard{};GetWindowRect(GetDlgItem(manager,plotWaveWidthCommand),&waveCard);
     const LPARAM wheelPoint=MAKELPARAM((waveCard.left+waveCard.right)/2,(waveCard.top+waveCard.bottom)/2);
