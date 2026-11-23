@@ -5,6 +5,7 @@
 namespace yd::editor {
 
 void hotkey(char c);
+bool adjustSelectedStrokeWidths(bool increase);
 void alignSelection(int id);
 void key(WPARAM k);
 void firstUseGuide(int id);

@@ -164,9 +164,24 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  }else{
      button(g,184,L"배경 · 테마 ◇",{float(ww-168),63,152,22});
  }
- text(g,L"YOUNGDRAW  /  SCIENTIFIC ATELIER",16,70,9,muted,true);
+ ui::drawLabel(g,L"YoungDraw · 구조·메커니즘·그래프",{16,67,180,18},9.f,muted,false,false);
  if(isolatedStructureEditing)text(g,L"이 창에서는 선택한 단계의 구조만 편집합니다. 적용하면 원래 메커니즘에 반영됩니다.",left+12,96,12,ink,true);
- if(topLimit)text(g,L"↔ 휠로 도구 모음 스크롤",float(left+8),69,11,muted);
+ // Keep every existing tool in place; selection actions use the spare chrome row.
+ const auto formatting=selectionFormatting();
+ const auto quickCommands=selectionFormattingCommands(formatting);
+ const bool showFormatting=!quickCommands.empty()&&!inlineEdit&&!drawing&&!dragging&&!boxing&&!panning&&!snapPlot&&!stageCopyOwner;
+ if(showFormatting){
+    float x=float(left+32);
+    for(int id:quickCommands){
+        const RectF box{x,64,26,22};
+        const bool active=id>=selectedBoldCommand&&id<=selectedUnderlineCommand&&
+            (formatting.commonFace&(1<<(id-selectedBoldCommand)));
+        hits.push_back({id,box});
+        appearance::rounded(g,box,4,active?palette.accent:box.Contains(float(mouse.x),float(mouse.y))?palette.hover:palette.raised);
+        icon(g,id,{x+3,65,20,20},active?palette.onAccent:palette.text);
+        x+=30;
+    }
+ }else if(topLimit)text(g,L"↔ 휠로 도구 모음 스크롤",float(left+32),69,11,muted);
  const RectF leftClip(0,89,float(left),float(std::max(0,wh-bottom-89)));
  leftOffset=std::min(leftOffset,std::max(0,drawingPanelBottom-(wh-bottom)));
  const auto leftHits=hits.size();auto leftState=g.Save();g.SetClip(leftClip);g.TranslateTransform(0,float(-leftOffset));

@@ -35,10 +35,25 @@ inline constexpr int arrowColorCommand = 259;
 inline constexpr int ligandSpatialCommand = 260;
 inline constexpr int molecularAnnotationsCommand = 261;
 inline constexpr int showMolecularAnnotationsCommand = 262;
+inline constexpr int selectedBoldCommand = 263;
+inline constexpr int selectedItalicCommand = 264;
+inline constexpr int selectedUnderlineCommand = 265;
+inline constexpr int selectedFontSmallerCommand = 266;
+inline constexpr int selectedFontLargerCommand = 267;
+inline constexpr int selectedStrokeThinnerCommand = 268;
+inline constexpr int selectedStrokeThickerCommand = 269;
 inline constexpr int exportPngCommand = 247;
 inline constexpr int copyPngCommand = 248;
 
-inline constexpr bool isEditorCommand(int id){return (id>=100&&id<=showMolecularAnnotationsCommand)||(id>=301&&id<=418);}
+inline constexpr bool isEditorCommand(int id){return (id>=100&&id<=selectedStrokeThickerCommand)||(id>=301&&id<=418);}
+struct SelectionFormatting {
+    bool properties=false,atoms=false,text=false,arrows=false,stroke=false;
+    int commonFace=7;
+    bool labels() const {return atoms||text;}
+};
+SelectionFormatting selectionFormatting();
+std::vector<int> selectionFormattingCommands(const SelectionFormatting& formatting);
+void appendSelectionFormattingMenu(HMENU menu);
 void command(int id);
 
 } // namespace yd::editor

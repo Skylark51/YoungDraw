@@ -25,7 +25,98 @@
 #include "third_party_notices.h"
 
 namespace yd::editor {
+SelectionFormatting selectionFormatting(){
+    SelectionFormatting result;
+    if(selection.empty()){result.commonFace=0;return result;}
+    const auto ids=groupedSelection(selection);
+    auto face=[&](int value,const std::vector<TextRun>& runs){
+        result.commonFace&=value;
+        for(const auto& run:runs)result.commonFace&=run.face;
+    };
+    for(const auto& atom:doc.atoms)if(contains(ids,atom.id)&&!doc.isLocked(atom.id)){
+        result.atoms=true;
+        if(atom.id==primary())result.properties=true;
+        face(atom.labelFace.value_or(doc.style.labelFace),atom.labelRuns);
+    }
+    for(const auto& bond:doc.bonds)if(!doc.isLocked(bond.id)&&
+        (contains(ids,bond.id)||(contains(ids,bond.a)&&contains(ids,bond.b))))result.stroke=true;
+    for(const auto& object:doc.objects)if(contains(ids,object.id)&&!doc.isLocked(object.id)){
+        if(object.id==primary())result.properties=true;
+        if(object.kind==ObjectKind::Text){result.text=true;face(object.face,object.runs);}
+        if((object.kind==ObjectKind::Line||object.kind==ObjectKind::Curve)&&object.head)result.arrows=true;
+        if(!object.filled&&(object.kind==ObjectKind::Line||object.kind==ObjectKind::Curve||
+            object.kind==ObjectKind::Ellipse||object.kind==ObjectKind::Rectangle))result.stroke=true;
+    }
+    if(!result.labels())result.commonFace=0;
+    return result;
+}
+std::vector<int> selectionFormattingCommands(const SelectionFormatting& formatting){
+    std::vector<int> ids;
+    if(formatting.properties)ids.push_back(121);
+    if(formatting.labels())for(int id=selectedBoldCommand;id<=selectedFontLargerCommand;++id)ids.push_back(id);
+    if(formatting.atoms)ids.push_back(155);
+    if(formatting.text)ids.push_back(156);
+    if(formatting.arrows)ids.push_back(arrowColorCommand);
+    if(formatting.stroke){ids.push_back(selectedStrokeThinnerCommand);ids.push_back(selectedStrokeThickerCommand);}
+    return ids;
+}
+void appendSelectionFormattingMenu(HMENU menu){
+    const auto formatting=selectionFormatting();
+    const auto ids=selectionFormattingCommands(formatting);
+    bool separator=false;
+    for(int id:ids){
+        if(id==121)continue;
+        if(!separator){AppendMenuW(menu,MF_SEPARATOR,0,nullptr);separator=true;}
+        auto label=helpText(id);
+        if(const auto line=label.find(L'\n');line!=std::wstring::npos)label.resize(line);
+        UINT flags=MF_STRING;
+        if(id>=selectedBoldCommand&&id<=selectedUnderlineCommand&&
+            (formatting.commonFace&(1<<(id-selectedBoldCommand))))flags|=MF_CHECKED;
+        AppendMenuW(menu,flags,id,label.c_str());
+    }
+}
 namespace {
+void formatSelection(int id){
+    if(id==selectedStrokeThinnerCommand||id==selectedStrokeThickerCommand){
+        if(adjustSelectedStrokeWidths(id==selectedStrokeThickerCommand))
+            status=L"선택한 결합·도형의 선 굵기를 조절했습니다. Ctrl+Z: 되돌리기";
+        redraw();return;
+    }
+    const auto formatting=selectionFormatting();
+    if(!formatting.labels())return;
+    const auto ids=groupedSelection(selection);
+    const Document before=doc;
+    const bool toggle=id<=selectedUnderlineCommand;
+    const int mask=toggle?1<<(id-selectedBoldCommand):0;
+    const bool enable=!(formatting.commonFace&mask);
+    auto updateFace=[&](int face){return enable?face|mask:face&~mask;};
+    auto nextSize=[&](double size){
+        if(id==selectedFontLargerCommand)return size<144?std::clamp(size+1.,4.,144.):size;
+        return size>4?std::max(4.,size-1.):size;
+    };
+    for(auto& atom:doc.atoms)if(contains(ids,atom.id)&&!doc.isLocked(atom.id)){
+        if(toggle){
+            const int old=atom.labelFace.value_or(doc.style.labelFace),next=updateFace(old);
+            if(old!=next)atom.labelFace=next;
+            for(auto& run:atom.labelRuns)run.face=updateFace(run.face);
+        }else{
+            const double old=atom.labelSize.value_or(doc.style.fontSize),next=nextSize(old);
+            if(old!=next){atom.labelSize=next;for(auto& run:atom.labelRuns)run.size*=next/old;}
+        }
+    }
+    for(auto& object:doc.objects)if(object.kind==ObjectKind::Text&&contains(ids,object.id)&&!doc.isLocked(object.id)){
+        if(toggle){object.face=updateFace(object.face);for(auto& run:object.runs)run.face=updateFace(run.face);}
+        else{
+            const double old=object.fontSize,next=nextSize(old);
+            if(old!=next){object.fontSize=next;for(auto& run:object.runs)run.size*=next/old;}
+        }
+    }
+    if(toNative(doc)!=toNative(before)){
+        history.checkpoint(before);changed();
+        status=L"선택한 원자·텍스트의 서식을 변경했습니다. Ctrl+Z: 되돌리기";
+    }
+    redraw();
+}
 void editDocumentStyle(){
     const Document before=doc;
     const auto& old=before.style;
@@ -83,7 +174,7 @@ void editDocumentStyle(){
 
 void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)id=186;if(id==109)id=187;if((id>=143&&id<=149)||id==100||id==101||id==185||id==140||id==141||id==120||id==130||id==spinMultiplicityPlotCommand||id==reactionProfilePlotCommand||id==167||id==insertBranchArrowsCommand||id==externalMechanismCommand||id==bondAnimationCommand||id==recognizeMechanismCommand)return;}std::optional<InlineTarget> colorTarget;if(id==156&&inlineEdit)colorTarget=inlineTarget;if(!finishInline(true))return;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();
  if(id==thirdPartyNoticesCommand){appearance::messageBox(win,ui::wide(thirdPartyNotices).c_str(),L"오픈소스 라이선스",MB_OK|MB_ICONINFORMATION);return;}
- if(id==184){appearance::picker(win,[](){refreshAppearance();});status=std::wstring(L"작업실 · ")+appearance::palette().name+L" / 테마는 출력에 포함되지 않습니다.";redraw();return;}
+ if(id==184){appearance::picker(win,[](){refreshAppearance();});status=std::wstring(L"테마 · ")+appearance::palette().name+L" / 테마는 출력에 포함되지 않습니다.";redraw();return;}
  if(id==156){pruneLockedSelection();textColorPalette(colorTarget);return;}
  if(id==155){pruneLockedSelection();atomColorPalette();return;}
  if(id==arrowColorCommand){pruneLockedSelection();arrowColorPalette();return;}
@@ -113,6 +204,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
     if(images!=doc.imagesLocked||graphs!=doc.graphsLocked){history.checkpoint(doc);doc.imagesLocked=images;doc.graphsLocked=graphs;pruneLockedSelection();status=L"레이어 잠금 적용 · 잠긴 항목은 보이지만 선택·이동·삭제되지 않습니다.";changed();}redraw();return;
  }
  pruneLockedSelection();
+ if(id>=selectedBoldCommand&&id<=selectedStrokeThickerCommand){formatSelection(id);return;}
  if(id==dottedBondCommand){
     const auto ids=groupedSelection(selection);
     auto before=doc;bool edited=false;
@@ -181,7 +273,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
  case 112:saveCurrentTemplate();break;
  case 113:{auto p=fileDialog(false);if(p)insert(fromCdxml(readFile(*p)),center());break;}
  case 120:newReaction();break;
- case 121:if(reaction(primary()))editReaction(primary());else edit();break;case 122:case 128:{
+ case 121:if(reaction(primary()))editReaction(primary());else if(textObject(primary())&&tool!=Text)editObject(primary());else edit();break;case 122:case 128:{
      auto* r=reaction(primary());if(!r||doc.isLocked(r->id)||r->slots.empty()||r->slots.size()>=40||r->links.size()>=100)break;
      const int owner=r->id;const size_t source=targetContainer==owner?std::min(targetSlot,r->slots.size()-1):r->slots.size()-1;
      const bool branch=!r->cyclic&&source+1!=r->slots.size();

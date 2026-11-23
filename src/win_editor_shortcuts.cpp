@@ -17,7 +17,6 @@
 
 namespace yd::editor {
 
-namespace {
 bool adjustSelectedStrokeWidths(bool increase){
     if(selection.empty())return false;
     const auto ids=groupedSelection(selection);
@@ -28,6 +27,7 @@ bool adjustSelectedStrokeWidths(bool increase){
     };
     bool found=false,edited=false;
     for(auto& bond:doc.bonds){
+        if(doc.isLocked(bond.id))continue;
         if(!contains(ids,bond.id)&&!(contains(ids,bond.a)&&contains(ids,bond.b)))continue;
         found=true;
         const double line=bond.lineWidth.value_or(doc.style.lineWidth);
@@ -40,8 +40,8 @@ bool adjustSelectedStrokeWidths(bool increase){
         edited=true;
     }
     for(auto& object:doc.objects){
-        if((object.kind!=ObjectKind::Line&&object.kind!=ObjectKind::Ellipse&&object.kind!=ObjectKind::Curve)||
-           object.filled||!contains(ids,object.id))continue;
+        if((object.kind!=ObjectKind::Line&&object.kind!=ObjectKind::Ellipse&&object.kind!=ObjectKind::Curve&&object.kind!=ObjectKind::Rectangle)||
+           object.filled||doc.isLocked(object.id)||!contains(ids,object.id))continue;
         found=true;
         const double nextWidth=adjusted(object.width);
         if(nextWidth==object.width)continue;
@@ -51,7 +51,6 @@ bool adjustSelectedStrokeWidths(bool increase){
     }
     if(edited)changed();
     return found;
-}
 }
 
 void hotkey(char c){
@@ -191,6 +190,10 @@ std::vector<EditorCommandEntry> availableEditorCommands(HWND window){
     };scan(GetMenu(window),L"");
     for(int id=200;id<=218&&id-200<int(toolNames.size());++id)add(id,toolNames[id-200],L"그리기 도구");
     const int extra[]={150,131,132,133,170,171,172,173,174,175,177,178,179,180,181,182,183,155,156,spinMultiplicityPlotCommand,reactionProfilePlotCommand,plotLegendCommand,plotWaveWidthCommand,plotWaveGapCommand,240,241,242,243,244,245,246};
+    for(int id=selectedBoldCommand;id<=selectedStrokeThickerCommand;++id){
+        auto help=helpText(id);const auto line=help.find(L'\n');
+        add(id,help.substr(0,line),L"선택 서식 / "+(line==std::wstring::npos?help:help.substr(line+1)));
+    }
     if(!isolatedStructureEditing)for(int id:extra){auto help=id==150?std::wstring(L"문서 서식\n글꼴·글자 크기·선 굵기"):helpText(id);auto line=help.find(L'\n');add(id,help.substr(0,line),L"작업 도구 / "+(line==std::wstring::npos?help:help.substr(line+1)));}
     return result;
 }

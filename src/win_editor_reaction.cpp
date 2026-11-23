@@ -390,6 +390,7 @@ HMENU canvasContextMenu(int contextOwner,int copyOwner){
         const bool chemical=std::any_of(selection.begin(),selection.end(),[](int id){return doc.atom(id)||doc.bond(id);});
         if(chemical){add(110,L"구조 정리…");add(166,L"벤젠을 Ph로 축약");}
         if(!isolatedStructureEditing)add(includeMechanismCommand,L"메커니즘에 편입…");add(112,L"템플릿으로 보관…");add(copyPngCommand,L"그림으로 복사");
+        appendSelectionFormattingMenu(menu);
     }else{
         add(111,L"구조 템플릿 삽입…");add(113,L"구조 파일 삽입…");if(!isolatedStructureEditing){add(120,L"새 메커니즘…");add(130,L"새 그래프…");}AppendMenuW(menu,MF_SEPARATOR,0,nullptr);add(107,L"화면 맞춤");add(184,L"배경·테마…");
     }
