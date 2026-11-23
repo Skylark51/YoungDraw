@@ -75,6 +75,7 @@ if ($Executable) {
     # program, drain both redirected pipes asynchronously, and preserve the exit code.
     $taskCommand = '$taskInfo = New-Object System.Diagnostics.ProcessStartInfo; '
     $taskCommand += '$taskInfo.FileName=' + (Quote-TestLiteral $taskExecutable) + '; '
+    $taskCommand += '$taskInfo.WorkingDirectory=' + (Quote-TestLiteral $taskDirectory) + '; '
     $taskCommand += '$taskInfo.Arguments=' + (Quote-TestLiteral $taskNativeArguments) + '; '
     $taskCommand += '$taskInfo.UseShellExecute=$false; $taskInfo.CreateNoWindow=$true; $taskInfo.RedirectStandardOutput=$true; $taskInfo.RedirectStandardError=$true; '
     $taskCommand += '$taskProgram=New-Object System.Diagnostics.Process; $taskProgram.StartInfo=$taskInfo; '

@@ -34,6 +34,16 @@
       "sha256": "1558f3c98522f990a364ccb1c9b4ede967a38d6366533fd1dd39178e68e01eb6"
     },
     {
+      "file": "graph-after.png",
+      "bytes": 25524,
+      "sha256": "75bfcc4092c31e511e8e7b0470e5df9705bc9a86d6c8df3a4b69aff6a9c668e1"
+    },
+    {
+      "file": "graph-before.png",
+      "bytes": 24791,
+      "sha256": "593cef6d93551d521ed082aeb1ca6a675ff48838b114ef16e94ae0fe2c9927d8"
+    },
+    {
       "file": "mechanism-after.png",
       "bytes": 33179,
       "sha256": "434d8195aa1c0559ef14f6fb657bb4cdbdcea0cdc5a3565c90a69d63dbc4ee39"
@@ -54,9 +64,29 @@
       "sha256": "ea3590dd4b7811ef75c67948841a6b931df0c3fde155dd2ac12051f081117b73"
     },
     {
+      "file": "save-after.png",
+      "bytes": 34966,
+      "sha256": "770c1f01dff37406d1b60534be55a4629bd69004e0658a29a2a081150fdbeb24"
+    },
+    {
+      "file": "save-before.png",
+      "bytes": 51342,
+      "sha256": "e4e48944e304d07031ca6541d58327f5a14c272715669ebe835e037a37a64d6f"
+    },
+    {
       "file": "selection-formatting-after.png",
       "bytes": 70050,
       "sha256": "1de01d37cc5e1ee3b3bc3664b0a676caeae719d5fbf063e8578bed7adb2df033"
+    },
+    {
+      "file": "templates-after.png",
+      "bytes": 78579,
+      "sha256": "c4e6a456994e89c4c5ef67ca60ec371f158a2f60f1fd72dacd1de50b86f479ec"
+    },
+    {
+      "file": "templates-before.png",
+      "bytes": 78593,
+      "sha256": "a5c3117aa526fb8bec7b681bd19c9e771e94429c7fc7ea2dc9e13d8ee9e74dea"
     }
   ],
   "dpi_limit": "Requested WM_DPICHANGED values96/120/144/192; GetDpiForWindow96 throughout. No physical125/150/200percent scaling verification.",
