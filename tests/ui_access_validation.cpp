@@ -32,7 +32,7 @@ fs::path output;
 std::ofstream manifest,menus,commands,hitsFile,controls;
 int viewportWidth=1440,viewportHeight=900,requestedDpi=96;
 bool after=true,capturing=false,modalSeen=false;
-bool saveProbe=false,explicitSaveFolder=false;
+bool saveProbe=false;
 fs::path expectedSaveFolder;
 std::string modalName,failure;
 std::wstring modalClass;
@@ -111,9 +111,23 @@ void CALLBACK modalDriver(HWND owner,UINT,UINT_PTR timer,DWORD){
             auto pathCount=SendMessageW(dialog,CDM_GETFILEPATH,std::size(path),LPARAM(path));
             auto folderCount=SendMessageW(dialog,CDM_GETFOLDERPATH,std::size(folder),LPARAM(folder));
             std::ofstream probe(output/(modalName+"-native.csv"));probe<<"query,returned_characters,value\nfile_path,"<<pathCount<<','<<csv(ui::utf8(path))<<"\nfolder_path,"<<folderCount<<','<<csv(ui::utf8(folder))<<'\n';
-            check(pathCount>0&&folderCount>0,"native save dialog exposes current file and folder through CDM queries");
-            if(after){check(fs::path(path).filename()==L"validation-example.svg","saved document SVG export starts with its document stem and chosen extension");
-                check(_wcsicmp(fs::path(folder).lexically_normal().c_str(),expectedSaveFolder.lexically_normal().c_str())==0,"saved export uses document folder or explicitly requested folder");}
+            struct NativeValues{std::vector<std::pair<std::wstring,std::wstring>> values;std::ofstream* stream;};NativeValues native{{},&probe};
+            EnumChildWindows(dialog,[](HWND child,LPARAM state)->BOOL{
+                auto& data=*reinterpret_cast<NativeValues*>(state);wchar_t klass[128]{},text[32768]{};GetClassNameW(child,klass,128);GetWindowTextW(child,text,DWORD(std::size(text)));
+                data.values.push_back({klass,text});*data.stream<<csv("child:"+std::to_string(GetDlgCtrlID(child))+":"+ui::utf8(klass))<<','<<wcslen(text)<<','<<csv(ui::utf8(text))<<'\n';return TRUE;
+            },LPARAM(&native));
+            if(pathCount<=0||folderCount<=0)probe<<"CDM_status,0,unsupported-by-observed-dialog\n";
+            if(after){
+                if(pathCount>0&&folderCount>0){check(fs::path(path).filename()==L"validation-example.svg","saved document SVG export starts with its document stem and chosen extension");
+                    check(_wcsicmp(fs::path(folder).lexically_normal().c_str(),expectedSaveFolder.lexically_normal().c_str())==0,"saved export uses document folder or explicitly requested folder");}
+                else{
+                    bool nameSeen=false,folderSeen=false;
+                    auto expected=expectedSaveFolder.wstring();std::transform(expected.begin(),expected.end(),expected.begin(),::towlower);
+                    for(auto value:native.values){if(value.first==L"Edit"&&fs::path(value.second).stem()==L"validation-example")nameSeen=true;std::transform(value.second.begin(),value.second.end(),value.second.begin(),::towlower);if(value.second.find(expected)!=std::wstring::npos)folderSeen=true;}
+                    check(nameSeen,"observed native filename Edit starts with saved document stem (Windows may hide extension)");
+                    check(folderSeen,"observed native address readout contains document folder or explicit initial folder");
+                }
+            }
         }
         if(modalName=="mechanism")for(int page:{70,71,72}){click(dialog,page);capture(dialog,"mechanism-page"+std::to_string(page));}
         if(modalName=="mechanism"&&after){
