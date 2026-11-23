@@ -48,9 +48,9 @@ struct GraphPicker {
     GraphChoice choice;DialogColors colors;HFONT font=nullptr;bool done=false,ok=false,editStyle=false,inlinePanel=false;std::function<void(int)> preview;
 };
 const wchar_t* graphNames[]={L"부드러운 곡선",L"직선",L"준위 · 점선 연결",L"준위 · 실선 연결",L"독립 에너지 준위"};
-const wchar_t* graphDetails[]={L"봉우리와 중간체를 부드럽게 연결",L"상태 사이를 직선으로 연결",L"평평한 준위를 점선으로 연결",L"평평한 준위를 실선으로 연결",L"스핀 다중도 등 개별 상태 비교"};
+const wchar_t* graphDetails[]={L"봉우리·중간체의 곡선 연결",L"상태 사이를 직선으로 연결",L"평평한 준위의 점선 연결",L"평평한 준위의 실선 연결",L"연결선 없이 개별 상태 비교"};
 constexpr int inlineGraphPickerHeight=184;
-constexpr const wchar_t* mechanismNames[]={L"직선",L"가로 → 아래 → 순환",L"가로 → 아래 → 분기·합류",L"촉매 순환"};
+constexpr const wchar_t* mechanismNames[]={L"직선 경로",L"꺾인 순환 경로",L"분기·합류 경로",L"촉매 순환"};
 void drawMechanismPath(Gdiplus::Graphics& g,const Gdiplus::RectF& card,const yd::Reaction& reaction){
     using namespace Gdiplus;
     using yd::Vec;
@@ -137,7 +137,7 @@ void drawGraphCard(const DRAWITEMSTRUCT& item,const GraphPicker& picker,int mode
     const float labelY=box.Y+(compact?68:91);
     ui::drawLabel(g,graphNames[mode],{box.X+8,labelY,box.Width-16,25},14,focused?palette.accent:palette.text,true,true);
     if(focused)appearance::rounded(g,{box.X+box.Width/2-9,labelY+24,18,2},1,palette.accent);
-    if(!compact)ui::drawLabel(g,graphDetails[mode],{box.X+10,box.Y+118,box.Width-20,26},10.5f,palette.muted,false,true);
+    if(!compact)ui::drawLabel(g,graphDetails[mode],{box.X+10,box.Y+118,box.Width-20,26},12.f,palette.muted,false,true);
     if(selected){SolidBrush chosen(palette.accent);g.FillEllipse(&chosen,box.X+box.Width-19.f,box.Y+9.f,8.f,8.f);}
 }
 void layoutInlineGraphPicker(HWND hwnd,int width){
@@ -165,7 +165,7 @@ LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
             return 0;
         }
         if(!picker->mechanisms.empty()){
-            control(L"STATIC",L"경로 예시를 보고 양식을 선택하세요.",0,0,22,16,640,28);
+            control(L"STATIC",L"그림을 눌러 경로 선택 · Enter로 만들기",0,0,22,16,640,28);
             for(int i=0;i<picker->count();++i){
                 auto card=control(L"BUTTON",mechanismNames[i],WS_TABSTOP|BS_OWNERDRAW,100+i,16+i*164,50,160,182);
                 SetWindowTheme(card,L"",L"");
@@ -805,9 +805,11 @@ struct SearchDialog {
     const wchar_t* action;
     bool showDetails;
     HWND query=nullptr,list=nullptr,details=nullptr;
+    HFONT font=nullptr;
     std::vector<size_t> matches;
     std::optional<size_t> result;
     bool done=false;
+    ~SearchDialog(){if(font)DeleteObject(font);}
 
     void selection(HWND hwnd){
         const auto row=SendMessageW(list,LB_GETCURSEL,0,0);
@@ -835,13 +837,14 @@ struct SearchDialog {
         if(msg==WM_CREATE){ui::enableButtonHelp();
             s=static_cast<SearchDialog*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
             SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(s));
+            s->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
             auto control=[&](const wchar_t* cls,const wchar_t* text,int id,int x,int y,int w,int h,DWORD flags,DWORD ex=0){
                 auto c=CreateWindowExW(ex,cls,text,WS_CHILD|WS_VISIBLE|flags,x,y,w,h,hwnd,HMENU(INT_PTR(id)),nullptr,nullptr);
-                SendMessageW(c,WM_SETFONT,WPARAM(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
+                SendMessageW(c,WM_SETFONT,WPARAM(s->font?s->font:reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT))),TRUE);
                 return c;
             };
             s->query=control(L"EDIT",L"",10,14,14,608,27,WS_TABSTOP|ES_AUTOHSCROLL,WS_EX_CLIENTEDGE);
-            SendMessageW(s->query,EM_SETCUEBANNER,TRUE,LPARAM(L"검색어를 입력하세요"));
+            SendMessageW(s->query,EM_SETCUEBANNER,TRUE,LPARAM(L"이름·설명 검색 · ↓로 결과 선택 · Enter로 실행"));
             s->list=control(L"LISTBOX",L"",11,14,50,608,s->showDetails?170:252,
                 WS_TABSTOP|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS,WS_EX_CLIENTEDGE);
             SendMessageW(s->list,LB_SETITEMHEIGHT,0,22);

@@ -58,8 +58,11 @@ struct DialogColors {
         SetBkMode(item.hDC,TRANSPARENT);
         RECT rect=item.rcItem;
         if(!button){rect.left+=6;rect.right-=4;}
+        const auto font=reinterpret_cast<HFONT>(SendMessageW(item.hwndItem,WM_GETFONT,0,0));
+        const auto previousFont=font?SelectObject(item.hDC,font):nullptr;
         DrawTextW(item.hDC,text.c_str(),-1,&rect,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX|(button?DT_CENTER:DT_LEFT));
-        if(item.itemState&ODS_FOCUS){rect=item.rcItem;InflateRect(&rect,-3,-3);DrawFocusRect(item.hDC,&rect);}
+        if(previousFont)SelectObject(item.hDC,previousFont);
+        if((item.itemState&ODS_FOCUS)&&!(item.itemState&ODS_NOFOCUSRECT)){rect=item.rcItem;InflateRect(&rect,-3,-3);DrawFocusRect(item.hDC,&rect);}
     }
 };
 }
