@@ -227,6 +227,7 @@ int main(int argc,char** argv){
             DestroyWindow(hwnd);imageCache.clear();appearance::shutdown();GdiplusShutdown(token);OleUninitialize();return 0;
         }
 
+        BYTE initialKeys[256]{};check(SetKeyboardState(initialKeys)!=FALSE,"initialize the isolated pointer test keyboard state");
         doc={};int a=doc.addAtom({50,50}),b=doc.addAtom({80,50});doc.addBond(a,b);history.clear();dirty=false;selection={a};zoom=2;origin={300,200};tool=Select;
         auto before=toNative(doc);Vec start=screen(doc.atom(a)->p);
         mouseDown(start);mouseUp(start+Vec{24,18});

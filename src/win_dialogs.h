@@ -25,7 +25,8 @@ std::optional<yd::MechanismTemplate> mechanismChoice(HWND owner);
 struct SearchItem {std::wstring title,detail;};
 std::optional<size_t> search(HWND owner,const std::wstring& title,const std::vector<SearchItem>& entries,
     const wchar_t* action=L"열기",bool showDetails=false);
-struct Field {std::wstring label;std::string value;bool multiline=false;std::vector<std::wstring> choices;bool color=false;int rows=4;bool scripts=false;bool editableChoices=false;std::function<std::string(const std::string&,int)> stepValue={};bool stepWithSigns=false;bool stepButtons=false;bool toggle=false;};
+struct ChoiceUpdate {size_t field;std::vector<std::optional<std::string>> values;};
+struct Field {std::wstring label;std::string value;bool multiline=false;std::vector<std::wstring> choices;bool color=false;int rows=4;bool scripts=false;bool editableChoices=false;std::function<std::string(const std::string&,int)> stepValue={};bool stepWithSigns=false;bool stepButtons=false;bool toggle=false;std::optional<ChoiceUpdate> choiceUpdate;};
 std::vector<std::wstring> fontFamilies(HWND window);
 Field numericField(std::wstring label,double value,double minimum,double maximum,double increment);
 using Table = std::vector<std::vector<std::string>>;

@@ -684,6 +684,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         const std::string unitCaption=displayUnit.empty()?"":
             (plot.yUnitParenthetical?" (":" / (")+displayUnit+")";
         const std::string yCaption=plot.yLabel+unitCaption;
+        const std::string energyHeader=!plot.energySymbol.empty()||plot.yLabel=="ΔE"||plot.yLabel=="ΔG"?plotEnergySymbol(plot):"E";
         // Requested sizes are upper bounds: shrink only when the physical graph cannot fit them.
         axisFont=std::min(axisFont,std::max(4.,(plot.width-114)/std::max(1.,widthOf(plot.xLabel,1))));
         tickFont=std::min(tickFont,std::max(4.,plot.height*.14));
@@ -811,7 +812,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         if(!plot.stages.empty())y0-=stageBand+8;
         double topY=plot.p.y+std::max(25.,valueFont*1.3+12),h=std::max(25.,y0-topY);topY=y0-h;s.plotDragScales.emplace(owner,PlotDragScale{(displayHigh-displayLow)/h,low,high});
         auto yAt=[&](double value){return y0-h*(displayEnergy(displayBands,value)-displayLow)/(displayHigh-displayLow);};
-        energyFont=std::min(energyFont,std::max(4.,(plot.energyAtTop?w*.95:h*.95)/std::max(1.,scriptWidth(plot.energyAtTop?(plot.energySymbol.empty()?"E":plot.energySymbol)+unitCaption:yCaption,1))));
+        energyFont=std::min(energyFont,std::max(4.,(plot.energyAtTop?w*.95:h*.95)/std::max(1.,scriptWidth(plot.energyAtTop?energyHeader+unitCaption:yCaption,1))));
         auto plotText=[&](const std::string& text,Vec at,double size,const std::string& color="#000000",bool centered=false,int role=0,int index=-1){
             Primitive item;item.type=Primitive::Text;item.owner=owner;item.textRole=role;item.textIndex=index;item.text=text;item.fontSize=size;item.face=role==7&&plot.legendFace>=0?plot.legendFace:faceFor(text);item.color=color;
             item.font=graphFont(text,role==7);
@@ -893,7 +894,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             // Keep the quantity and unit on one baseline above the arrowhead. Reserve
             // the whole header, including superscripts, before laying out legends.
             const double headerY=topY-14*plot.axisScale-energyFont*1.7-titleGap;
-            const auto header=plot.energySymbol.empty()?std::string("E"):plot.energySymbol;
+            const auto& header=energyHeader;
             const double eWidth=scriptWidth(header,energyFont);
             const double unitWidth=unitCaption.empty()?0:scriptWidth(unitCaption,energyFont);
             axisText(header,{x0,headerY},energyFont,plot.yColor,false);

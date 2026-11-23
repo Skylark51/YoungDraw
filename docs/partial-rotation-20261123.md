@@ -8,6 +8,8 @@
 
 같은 새 회귀 검사를 수정 전 코드에 실행했을 때 `direct rotation uses the selected fragment center`에서 실패하여 문제를 재현했다. 로그는 `build/fragment-rotation-before/isolated-ctest.log`에 보관한다. 모든 UI 실행은 `scripts/test-isolated.ps1`을 통한 별도 데스크톱에서 수행한다.
 
+최종 통합 빌드의 CTest 33/33(58.09초) 및 실행 파일의 20개 내보내기 검사가 통과했다. 포인터 검사는 시작 시 해당 테스트 스레드의 키 상태를 초기화한다.
+
 독립 재현 명령:
 
 ```powershell

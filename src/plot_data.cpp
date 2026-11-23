@@ -43,7 +43,11 @@ void setEnergyStateLabel(EnergyState& state,const std::string& label){
     if(previousTS||nextTS)state.transitionState=nextTS;
     state.label=label;
 }
-std::string plotEnergySymbol(const EnergyPlot& p){return p.energySymbol.empty()?"ΔG":p.energySymbol;}
+std::string plotEnergySymbol(const EnergyPlot& p){
+    if(!p.energySymbol.empty())return p.energySymbol;
+    if(p.yLabel=="ΔE"||p.yLabel=="ΔG")return p.yLabel;
+    return "ΔG";
+}
 EnergyPlot newEnergyPlot(int mode,bool freeEnergy){
     if(mode<0||mode>independentEnergyLevels)throw std::runtime_error("Invalid graph mode");
     EnergyPlot p=mode==independentEnergyLevels?spinMultiplicityPlot():EnergyPlot{};

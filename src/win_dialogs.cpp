@@ -329,7 +329,7 @@ struct Form {
     DialogColors colors;
     std::vector<Field> fields;std::vector<HWND> edits;
     std::vector<std::string> result;Preview preview;
-    bool done=false,ok=false;HFONT font=nullptr;HWND error=nullptr,apply=nullptr;
+    bool done=false,ok=false,synchronizing=false;HFONT font=nullptr;HWND error=nullptr,apply=nullptr;
     bool ownsStorage=false,embedded=false;
     Preview embeddedApply;
     std::function<void()> dismiss;
@@ -755,6 +755,16 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         }
         if(id==IDOK||id==IDCANCEL){if(id==IDOK){if(!preview(*f))return 0;f->result=read(*f);f->ok=true;}f->done=true;PostMessageW(hwnd,WM_NULL,0,0);return 0;}
         if(f->apply&&f->edits.size()==f->fields.size()&&(HIWORD(wp)==EN_CHANGE||HIWORD(wp)==CBN_SELCHANGE||HIWORD(wp)==CBN_EDITCHANGE)){
+            if(f->synchronizing)return 0;
+            if(HIWORD(wp)==CBN_SELCHANGE&&id>=100&&size_t(id-100)<f->fields.size()){
+                const auto& binding=f->fields[size_t(id-100)].choiceUpdate;
+                const auto choice=SendMessageW(f->edits[size_t(id-100)],CB_GETCURSEL,0,0);
+                if(binding&&binding->field<f->edits.size()&&choice>=0&&size_t(choice)<binding->values.size()&&binding->values[size_t(choice)]){
+                    f->synchronizing=true;
+                    SetWindowTextW(f->edits[binding->field],wide(*binding->values[size_t(choice)]).c_str());
+                    f->synchronizing=false;
+                }
+            }
             preview(*f);
             if(f->illustration)InvalidateRect(hwnd,&f->picture,TRUE);
         }

@@ -392,6 +392,12 @@ static void CALLBACK driveForm(HWND parent,UINT,UINT_PTR timer,DWORD){
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(116,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,116));previewObserved=toNative(doc)!=formBefore;
     }else if(formAction==35||formAction==36){
         SetDlgItemTextW(dialog,100,formAction==35?L"Times New Roman":L"Arial");SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(100,CBN_EDITCHANGE),(LPARAM)GetDlgItem(dialog,100));SendDlgItemMessageW(dialog,101,CB_SETCURSEL,formAction==35?3:2,0);SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)GetDlgItem(dialog,101));previewObserved=toNative(doc)!=formBefore;
+    }else if(formAction==43||formAction==44){
+        const std::string symbol=formAction==43?"ΔE":"ΔG";
+        SendDlgItemMessageW(dialog,123,CB_SETCURSEL,formAction==43?1:2,0);
+        SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(123,CBN_SELCHANGE),reinterpret_cast<LPARAM>(GetDlgItem(dialog,123)));
+        wchar_t title[32]{};GetDlgItemTextW(dialog,103,title,32);
+        previewObserved=ui::utf8(title)==symbol&&doc.plots.front().energySymbol==symbol&&doc.plots.front().yLabel==symbol&&toSvg(makeScene(doc,measure)).find(symbol)!=std::string::npos;
     }else if(formAction>=37&&formAction<=40){
         if(formAction==37)SetDlgItemTextW(dialog,100,L"2.5");
         if(formAction<=38)SendDlgItemMessageW(dialog,109,BM_CLICK,0,0);
@@ -490,6 +496,12 @@ static void graphUnitChecks(HWND hwnd){
     formAction=22;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(doc.plots[0].unit=="kcal/mol","slash unit can be restored from the list");
     formAction=23;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(doc.plots[0].unit=="kJ/mol","custom energy units remain editable");
     formAction=24;SetTimer(hwnd,901,10,driveForm);plotSettings(owner);check(doc.plots[0].unit=="kJ/mol","custom unit survives reopening settings");
+    for(int notation:{43,44}){
+        const auto previous=toNative(doc);history.clear();formAction=notation;formDriven=previewObserved=false;
+        SetTimer(hwnd,901,10,driveForm);plotSettings(owner);
+        check(formDriven&&previewObserved,"general graph settings synchronize Delta notation, visible axis title and SVG");
+        check(history.undo(doc)&&toNative(doc)==previous&&!history.undo(doc),"Delta title change remains one undo step");
+    }
     doc={};history.clear();selection.clear();dirty=false;
     std::cout<<"Graph energy unit selection, preview, cancellation, undo and export checks passed\n";
 }
@@ -736,6 +748,7 @@ static void graphPreviewAccessChecks(HWND hwnd){
 }
 static int unifiedAxisMode=0,unifiedAxisWidth=0;
 static bool unifiedAxisDriven=false;
+static std::string unifiedAxisFailure;
 static void captureAxesManager(const std::wstring& name){
     RECT bounds{};GetClientRect(plotManagerWindow,&bounds);
     Bitmap image(bounds.right,bounds.bottom,PixelFormat32bppARGB);
@@ -747,6 +760,7 @@ static void captureAxesManager(const std::wstring& name){
 static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
     const auto dialog=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"축 관리");
     if(!dialog)return;KillTimer(parent,timer);unifiedAxisDriven=true;
+    try{
     const auto tabs=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);
     check(tabs&&TabCtrl_GetItemCount(tabs)==7,"one axis editor contains all seven X and Y detail tabs");
     const int icons[]={242,213,240,243,246,131,241};
@@ -773,6 +787,20 @@ static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
     choose(5);SetDlgItemTextW(dialog,122,L"-50");SetDlgItemTextW(dialog,123,L"70");SetDlgItemTextW(dialog,124,L"20");
     choose(0);wchar_t retained[32]{};GetDlgItemTextW(dialog,100,retained,32);
     check(std::wstring(retained)==L"3.5","switching X and Y icons retains pending input");
+    choose(4);
+    for(int top:{0,1})for(int notation:{1,2}){
+        SendDlgItemMessageW(dialog,118,CB_SETCURSEL,top,0);
+        SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(118,CBN_SELCHANGE),reinterpret_cast<LPARAM>(GetDlgItem(dialog,118)));
+        SendDlgItemMessageW(dialog,119,CB_SETCURSEL,notation,0);
+        SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(119,CBN_SELCHANGE),reinterpret_cast<LPARAM>(GetDlgItem(dialog,119)));
+        const std::string symbol=notation==1?"ΔE":"ΔG";
+        check(doc.plots.front().energySymbol==symbol&&doc.plots.front().yLabel==symbol,"energy notation choice updates both stored axis titles");
+        wchar_t title[32]{};GetDlgItemTextW(dialog,114,title,32);
+        check(ui::utf8(title)==symbol,"energy notation choice immediately updates the visible axis title field");
+        const auto scene=makeScene(doc,measure);
+        check(std::any_of(scene.items.begin(),scene.items.end(),[&](const auto& item){return item.type==Primitive::Text&&item.owner==doc.plots.front().id&&item.text.find(symbol)!=std::string::npos&&item.rotation==(top?0:-90);}),"Delta E and Delta G appear on the actual top or vertical axis");
+        check(toSvg(scene).find(symbol)!=std::string::npos,"selected energy notation reaches SVG export");
+    }
     for(int tab=0;tab<7;++tab){choose(tab);if(unifiedAxisMode==1)captureAxesManager(L"unified-axes-"+std::to_wstring(unifiedAxisWidth)+L"-"+std::to_wstring(tab)+L".png");}
     if(unifiedAxisMode==2){
         choose(4);SetDlgItemTextW(dialog,116,L"2");
@@ -780,6 +808,7 @@ static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
         choose(0);check(doc.plots.front().xAxisWidth==3.5,"invalid Y entry does not discard the valid combined preview");
     }
     PostMessageW(dialog,WM_COMMAND,unifiedAxisMode==1?IDOK:IDCANCEL,0);
+    }catch(const std::exception& error){unifiedAxisFailure=error.what();PostMessageW(dialog,WM_COMMAND,IDCANCEL,0);}
 }
 static void unifiedAxisChecks(HWND hwnd){
     doc=coordinateDemo();selection={doc.plots.front().id};history.clear();changed();dirty=false;
@@ -790,9 +819,10 @@ static void unifiedAxisChecks(HWND hwnd){
         SendMessageW(manager,WM_COMMAND,4001,0);unifiedAxisWidth=width;
         captureAxesManager(L"unified-axes-"+std::to_wstring(width)+L"-entry.png");
         for(int mode:{0,1,2}){
-            history.clear();dirty=false;unifiedAxisMode=mode;unifiedAxisDriven=false;
+            history.clear();dirty=false;unifiedAxisMode=mode;unifiedAxisDriven=false;unifiedAxisFailure.clear();
             SetTimer(hwnd,908,10,driveUnifiedAxes);SendMessageW(manager,WM_COMMAND,4406,0);KillTimer(hwnd,908);
             check(unifiedAxisDriven,"unified axis card opens the single embedded editor");
+            check(unifiedAxisFailure.empty(),unifiedAxisFailure.c_str());
             if(mode==1){
                 const auto& graph=doc.plots.front();
                 check(graph.xAxisWidth==3.5&&graph.yAxisWidth==4.5&&graph.xAxisHeadLength==12&&graph.yAxisHeadLength==18&&graph.yTitleGap==44&&graph.yMin==-50&&graph.yMax==70&&graph.yTickStep==20,"one apply commits independent X and Y settings, range and ticks");
