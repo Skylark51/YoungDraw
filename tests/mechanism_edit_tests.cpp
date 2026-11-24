@@ -67,6 +67,21 @@ int main(){try{
         int other=d.addAtom({0,50});d.addBond(d.atoms[2].id,other);check(collapsePhenyl(d,d.allIds())==0,"disubstituted benzene is not silently abbreviated");
     }
     {
+        Document d;d.ring({0,0},6,true);const int root=d.atoms[0].id;
+        std::vector<int> ring;for(auto& a:d.atoms){ring.push_back(a.id);a.label="C";a.labelRuns={{"C"}};}
+        const int outside=d.addAtom({100,0},8),connector=d.addBond(root,outside);
+        for(size_t i=1;i<ring.size();++i){const int h=d.addAtom(d.atom(ring[i])->p*1.4,1);d.addBond(ring[i],h);}
+        for(auto copy:{d,fromNative(toNative(d)),fromCdxml(toCdxml(d))}){
+            check(collapsePhenyl(copy,{connector})==1&&copy.atoms.size()==2&&copy.bonds.size()==1,"explicit C/H and connector-only selection convert after native/CDXML reopening");
+            check(copy.atom(root)->label=="Ph"&&copy.atom(outside)->element==8,"conversion retains the original connector and substituent");
+        }
+        auto isotope=d;isotope.atoms.back().isotope=2;const auto native=toNative(isotope);
+        check(!collapsePhenyl(isotope,{connector})&&toNative(isotope)==native,"isotopic hydrogen is preserved");
+        auto annotated=d;annotated.bonds.front().mayerOrder.value=1.4;
+        check(!collapsePhenyl(annotated,{connector}),"bond annotations are preserved");
+        Document bare;bare.ring({},6,true);check(!collapsePhenyl(bare,bare.allIds()),"free benzene is not changed into a phenyl substituent");
+    }
+    {
         Document d;int id=d.addAtom({20,20},1);auto* a=d.atom(id);a->label="+H^{+}";a->charge=2;a->color="#ff0000";
         auto picture=makeScene(d);for(auto& p:picture.items)check(p.textRole!=13,"explicit proton label has no synthetic floating 2+ annotation");
         a=d.atom(id);a->label.clear();a->charge=1;picture=makeScene(d);bool plus=false;for(auto& p:picture.items)if(p.textRole==13&&p.text=="+")plus=true;check(plus,"an explicitly set charge remains visible on an automatic atom label");

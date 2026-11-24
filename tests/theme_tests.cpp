@@ -231,7 +231,7 @@ void CALLBACK chooseTheme(HWND,UINT,UINT_PTR timer,DWORD){
   if(process==GetCurrentProcessId()&&GetWindow(picker,GW_OWNER)==win)break;
  }
  if(!picker)return;
- KillTimer(win,timer);driven=true;UpdateWindow(picker);valid=valid&&ui::regionHelpCount(picker)==18;
+ KillTimer(win,timer);driven=true;UpdateWindow(picker);valid=valid&&ui::regionHelpCount(picker)==21;
  SendMessageW(picker,WM_COMMAND,100+requested,0);
  SendMessageW(picker,WM_COMMAND,200+requested%6,0);
  SendMessageW(picker,WM_COMMAND,302,0);
