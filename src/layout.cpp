@@ -277,7 +277,7 @@ Document structureInSlot(const Document& d,int container,size_t index,bool above
     for(auto& group:result.groups)result.nextId=std::max(result.nextId,group.id+1);
     result.translate(result.allIds(),content.first*-1);result.bondGeometryVersion=d.bondGeometryVersion;return result;
 }
-void replaceSlotStructure(Document& d,const Document& fragment,int container,size_t index,bool above){
+void replaceSlotStructure(Document& d,const Document& fragment,int container,size_t index,bool above,bool preservePlacement){
     auto content=slotContents(d,container,index,above);
     if(!fragment.reactions.empty()||!fragment.plots.empty())throw std::runtime_error("개별 구조 편집에는 구조·텍스트·이미지만 사용할 수 있습니다.");
     Document candidate=d;
@@ -287,7 +287,13 @@ void replaceSlotStructure(Document& d,const Document& fragment,int container,siz
     candidate.erase(content.second);
     Document edited=fragment;
     edited.rebaseStructureStyle(candidate.style);
-    auto bounds=makeScene(edited).bounds;Vec delta=content.first-Vec{bounds.x+bounds.w/2,bounds.y+bounds.h/2};
+    // Existing editor coordinates are relative to the slot anchor. Restore them
+    // directly so moving a structure or growing it asymmetrically never recenters it.
+    Vec delta=content.first;
+    if(!preservePlacement||content.second.empty()){
+        auto bounds=makeScene(edited).bounds;
+        delta=delta-Vec{bounds.x+bounds.w/2,bounds.y+bounds.h/2};
+    }
     int first=candidate.nextId;candidate.append(edited,delta);std::vector<int> added;for(int id:candidate.allIds())if(id>=first)added.push_back(id);
     for(auto& r:candidate.reactions)if(r.id==container)r.slots[index].members=added;
     for(auto& p:candidate.plots)if(p.id==container)(above?p.states[index].above:p.states[index].below)=added;

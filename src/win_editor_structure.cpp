@@ -605,7 +605,7 @@ void editTargetStructure(){
     const int container=targetContainer;const size_t slot=targetSlot;const bool above=targetAbove;
     const Document before=doc;const auto fragment=structureInSlot(before,container,slot,above);
     auto result=structureEditor(fragment);if(!result||toNative(*result)==toNative(fragment))return;
-    Document candidate=before;replaceSlotStructure(candidate,*result,container,slot,above);
+    Document candidate=before;replaceSlotStructure(candidate,*result,container,slot,above,true);
     history.checkpoint(before);doc=std::move(candidate);selection={container};targetContainer=container;targetSlot=slot;targetAbove=above;
     status=L"이 단계의 구조만 수정했습니다. 다른 단계와 배치는 유지됩니다. Ctrl+Z: 되돌리기";changed();
 }

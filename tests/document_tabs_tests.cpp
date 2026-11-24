@@ -1186,11 +1186,26 @@ static void graphManagerChecks(HWND hwnd){
     bool lettering=false;for(const auto& item:makeScene(doc,measure).items)if(item.owner==owner&&item.type==Primitive::Text){lettering=true;check(item.font=="Times New Roman"&&(item.face&2),"axis, labels, legend and annotations use the selected graph font");}check(lettering,"graph font renders visible text");
     for(const auto& restored:{fromNative(toNative(doc)),fromCdxml(toCdxml(doc))})check(toNative(restored)==toNative(doc),"graph font persists through native and CDXML saving");
     SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"manager edits undo in one action");SendMessageW(manager,WM_COMMAND,105,0);check(doc.plots[0].fontFamily=="Times New Roman","manager redo restores font edits");
-    Document fragment;fragment.addAtom({0,0},7);replaceSlotStructure(doc,fragment,owner,0,true);history.clear();const auto originalSlot=toNative(structureInSlot(doc,owner,0,true));const auto otherSlot=toNative(structureInSlot(doc,owner,1,true));const auto energies=doc.plots[0].series[0].values;
-    auto savedEditor=structureEditor;structureEditor=[](const Document& current)->std::optional<Document>{auto changed=current;check(!changed.atoms.empty(),"manager passes only the selected structure to its editor");changed.atoms[0].element=8;return changed;};
+    Document fragment;fragment.addAtom({0,0},7);replaceSlotStructure(doc,fragment,owner,0,true);
+    doc.translate(doc.plots[0].states[0].above,{126,83});history.clear();
+    const auto movedStructure=structureInSlot(doc,owner,0,true);
+    const auto originalSlot=toNative(movedStructure);const auto otherSlot=toNative(structureInSlot(doc,owner,1,true));const auto energies=doc.plots[0].series[0].values;
+    const auto movedDocument=toNative(doc);
+    auto savedEditor=structureEditor;structureEditor=[](const Document& current)->std::optional<Document>{
+        auto changed=current;check(!changed.atoms.empty(),"manager passes only the selected structure to its editor");
+        changed.atoms[0].element=8;int added=changed.addAtom(changed.atoms[0].p+Vec{80,15},16);
+        changed.addBond(changed.atoms[0].id,added);return changed;
+    };
     SendMessageW(manager,WM_COMMAND,4003,0);SendDlgItemMessageW(manager,4200,CB_SETCURSEL,0,0);SendDlgItemMessageW(manager,4201,CB_SETCURSEL,0,0);SendMessageW(manager,WM_COMMAND,4300,0);structureEditor=savedEditor;
     check(structureInSlot(doc,owner,0,true).atoms[0].element==8&&toNative(structureInSlot(doc,owner,1,true))==otherSlot&&doc.plots[0].series[0].values==energies,"manager edits a chosen structure independently of other states and graph data");
-    SendMessageW(manager,WM_COMMAND,104,0);check(toNative(structureInSlot(doc,owner,0,true))==originalSlot,"independent structure edit undoes through the manager");
+    const auto appliedStructure=structureInSlot(doc,owner,0,true);
+    check(appliedStructure.atoms.size()==2&&(appliedStructure.atoms[0].p-movedStructure.atoms[0].p).length()<1e-6&&
+          (appliedStructure.atoms[1].p-movedStructure.atoms[0].p-Vec{80,15}).length()<1e-6,
+          "manager applies asymmetric structure growth at its moved placement");
+    const auto appliedDocument=toNative(doc);
+    SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==movedDocument,"independent structure edit undoes with its moved placement intact");
+    SendMessageW(manager,WM_COMMAND,105,0);check(toNative(doc)==appliedDocument,"redo restores the edited structure at its moved placement");
+    SendMessageW(manager,WM_COMMAND,104,0);
     const auto below=structureInSlot(doc,owner,0,false);
     check(below.allIds().empty(),"test uses an empty region opposite an existing structure");
     structureEditor=[](const Document& current)->std::optional<Document>{
