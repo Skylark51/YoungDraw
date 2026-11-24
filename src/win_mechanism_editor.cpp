@@ -26,11 +26,12 @@ struct Editor {
     int owner=0,stage=-1,edge=-1,connectFrom=-1,dragStage=-1,toolPage=0;
     bool comparing=false,connecting=false,updating=false,accepted=false,lengthGesture=false;
     int propertyGesture=0;
-    bool propertyInvalid=false;
+    bool propertyInvalid=false,lengthInvalid=false;
     HWND window=nullptr,list=nullptr,message=nullptr;
     HFONT font=nullptr;
     ui::DialogColors colors;
     RECT canvas{};
+    std::vector<std::pair<int,int>> listTargets;bool rightDragging=false;Vec panDown,panOffset;
     int buttonSize=58;
     int closingEdge(){auto& r=reaction();if(r.cyclic)return int(r.slots.size())-1;if(r.cycleStages.size()>1)for(size_t i=0;i<r.links.size();++i)if(r.links[i].from==r.cycleStages.back()&&r.links[i].to==r.cycleStages.front())return int(i);return -1;}
     double scale=1;
@@ -65,7 +66,7 @@ struct Editor {
         RECT r{};GetClientRect(window,&r);int w=r.right,h=r.bottom;
         const int side=std::clamp(w/5,190,240),tools=std::clamp(w/5,200,260),left=side+20,right=w-tools-20;
         auto place=[&](int id,int x,int y,int width,int height){MoveWindow(GetDlgItem(window,id),x,y,std::max(1,width),std::max(1,height),TRUE);};
-        place(10,10,10,side,23);place(11,10,35,side,220);place(12,10,71,side,23);place(13,10,96,side,220);place(14,10,132,side,23);place(15,10,157,side,220);place(16,10,193,side,23);place(17,10,218,side,30);place(18,10,252,side,23);place(19,10,278,side,28);place(64,10,278,side,28);place(21,10,315,side,23);MoveWindow(list,10,345,side,std::max(1,h-415),TRUE);
+        place(10,10,10,side,23);place(11,10,35,side,220);place(67,10,71,side,58);ShowWindow(GetDlgItem(window,12),SW_HIDE);ShowWindow(GetDlgItem(window,13),SW_HIDE);place(14,10,132,side,23);place(15,10,157,side,220);place(16,10,193,side,30);place(17,10,228,side-66,30);place(29,side-50,228,60,28);place(28,10,262,side,42);place(18,10,307,side,23);place(19,10,333,side,28);place(64,10,333,side,28);place(21,10,370,side,23);MoveWindow(list,10,400,side,std::max(1,h-470),TRUE);
         const int sx=w-tools-10,tabWidth=(tools-8)/3,tileWidth=(tools-8)/2,tileHeight=std::clamp((h-300)/5,44,68);
         for(int i=0;i<3;i++)place(70+i,sx+i*(tabWidth+4),10,tabWidth,30);
         const wchar_t* titles[]={L"구조·단계·연결",L"배치·설정",L"보기·원본 비교"};SetDlgItemTextW(window,23,titles[toolPage]);place(23,sx,50,tools,20);
@@ -77,10 +78,12 @@ struct Editor {
         place(22,left,10,right-left,36);canvas={left,54,right,h-60};
         const bool properties=!comparing&&(stage>=0||edge>=0);
         for(int id=80;id<=86;++id)ShowWindow(GetDlgItem(window,id),properties&&((id!=82&&id!=85)||edge>=0)?SW_SHOW:SW_HIDE);
+        ShowWindow(GetDlgItem(window,87),properties&&edge>=0?SW_SHOW:SW_HIDE);ShowWindow(GetDlgItem(window,88),properties&&edge>=0?SW_SHOW:SW_HIDE);
         if(properties){
-            const int top=h-60-(edge>=0?140:106),labelWidth=58;
+            const int top=h-60-(edge>=0?174:106),labelWidth=58;
             canvas.bottom=top-8;
             place(86,left+6,top,right-left-12,22);
+            if(edge>=0){place(88,left+6,top+130,labelWidth,25);place(87,left+labelWidth+8,top+127,right-left-labelWidth-14,28);}
             for(int i=0;i<3;++i){place(83+i,left+6,top+28+i*34,labelWidth,25);place(80+i,left+labelWidth+8,top+25+i*34,right-left-labelWidth-14,28);}
         }
         place(50,10,h-52,w-210,42);place(IDOK,w-180,h-48,80,32);place(IDCANCEL,w-90,h-48,80,32);
@@ -89,15 +92,26 @@ struct Editor {
     void sync(bool refreshProperties=true){
         updating=true;auto& r=reaction();
         SendMessageW(list,LB_RESETCONTENT,0,0);
-        for(size_t i=0;i<r.slots.size();++i){auto label=std::to_wstring(i+1)+L" · "+ui::wide(r.slots[i].label);SendMessageW(list,LB_ADDSTRING,0,(LPARAM)label.c_str());}
-        SendMessageW(list,LB_SETCURSEL,stage,0);
+        listTargets.clear();auto graph=r;makeMechanismGraph(graph);std::set<int> shown,shownEdges;
+        auto addRow=[&](std::wstring label,int slot,int connection){const auto row=SendMessageW(list,LB_ADDSTRING,0,(LPARAM)label.c_str());SendMessageW(list,LB_SETITEMDATA,row,slot>=0?slot+1:-(connection+1));listTargets.push_back({slot,connection});};
+        std::function<void(int,int)> visit=[&](int node,int depth){if(!shown.insert(node).second)return;
+            addRow(std::wstring(size_t(std::min(depth,6))*2,L' ')+L"□ "+ui::wide(r.slots[size_t(node)].label),node,-1);
+            for(size_t i=0;i<graph.links.size();++i)if(graph.links[i].from==node&&shownEdges.insert(int(i)).second){const auto& link=graph.links[i];
+                auto name=link.name.empty()?L"연결 "+std::to_wstring(i+1):ui::wide(link.name);
+                addRow(std::wstring(size_t(std::min(depth,6))*2,L' ')+L"  ↳ "+name+L" · "+ui::wide(r.slots[size_t(link.to)].label),-1,int(i));visit(link.to,depth+1);
+            }};
+        for(size_t i=0;i<r.slots.size();++i)if(std::none_of(graph.links.begin(),graph.links.end(),[&](const auto& link){return link.to==int(i);}))visit(int(i),0);
+        for(size_t i=0;i<r.slots.size();++i)visit(int(i),0);
+        int selected=-1;for(size_t i=0;i<listTargets.size();++i)if(listTargets[i]==std::pair{stage,edge})selected=int(i);
+        SendMessageW(list,LB_SETCURSEL,selected,0);
         int closing=closingEdge();bool open=closing>=0&&contains(r.hiddenArrows,closing);
         int mode=!r.cycleStages.empty()?7:r.circularMerge?5:r.cyclic?(open?6:3):r.explicitConnections()?4:r.vertical?1:r.wrapColumns>0?2:0;
         SendDlgItemMessageW(window,11,CB_SETCURSEL,mode,0);
         SetDlgItemTextW(window,13,ui::wide(r.unit).c_str());
         SendDlgItemMessageW(window,15,CB_SETCURSEL,edge>=0?mechanismArrowType(r,size_t(edge)):r.arrowType,0);
         SendDlgItemMessageW(window,17,TBM_SETPOS,TRUE,LONG(std::clamp(mechanismArrowLength(r,draft.style),20.,600.)));
-        auto length=L"화살표 길이 · "+std::to_wstring(int(mechanismArrowLength(r,draft.style)))+L" pt";
+        const std::wstring length=L"화살표 선 길이 (전체, pt)";SetDlgItemTextW(window,29,std::to_wstring(int(mechanismArrowLength(r,draft.style))).c_str());
+        SetDlgItemTextW(window,28,(L"□  ← "+std::to_wstring(int(mechanismArrowLength(r,draft.style)))+L" pt →  □\n그림 영역 사이 · 전체 연결").c_str());
         SetDlgItemTextW(window,16,length.c_str());
         SetDlgItemTextW(window,19,std::to_wstring(r.wrapColumns>0?r.wrapColumns:3).c_str());
         bool round=r.cyclic||!r.cycleStages.empty();ShowWindow(GetDlgItem(window,19),round?SW_HIDE:SW_SHOW);ShowWindow(GetDlgItem(window,64),round?SW_SHOW:SW_HIDE);
@@ -108,14 +122,14 @@ struct Editor {
     }
     void syncProperties(){
         const bool previous=updating;updating=true;propertyGesture=0;propertyInvalid=false;
-        std::string name,energy,bend;
+        std::string name,energy,bend,branch;
         auto& r=reaction();
         if(stage>=0&&size_t(stage)<r.slots.size()){name=r.slots[stage].label;energy=r.slots[stage].energy;}
         else if(edge>=0){auto copy=r;makeMechanismGraph(copy);if(size_t(edge)<copy.links.size()){
-            name=size_t(edge)<copy.above.size()?copy.above[edge]:"";energy=size_t(edge)<copy.below.size()?copy.below[edge]:"";bend=number(copy.links[edge].bend);
+            branch=copy.links[size_t(edge)].name;name=size_t(edge)<copy.above.size()?copy.above[edge]:"";energy=size_t(edge)<copy.below.size()?copy.below[edge]:"";bend=number(copy.links[edge].bend);
         }}
         SetDlgItemTextW(window,80,ui::wide(name).c_str());SetDlgItemTextW(window,81,ui::wide(energy).c_str());SetDlgItemTextW(window,82,ui::wide(bend).c_str());
-        SetDlgItemTextW(window,83,stage>=0?L"이름":L"TS 설명");
+        SetDlgItemTextW(window,87,ui::wide(branch).c_str());SetDlgItemTextW(window,83,stage>=0?L"이름":L"TS 설명");
         updating=previous;
     }
     void propertyChanged(int id){
@@ -123,7 +137,8 @@ struct Editor {
         const int length=GetWindowTextLengthW(GetDlgItem(window,id));std::wstring value(size_t(length)+1,0);
         GetDlgItemTextW(window,id,value.data(),length+1);value.resize(length);
         Document candidate=draft;auto& r=*std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[&](const auto& r){return r.id==owner;});
-        if(stage>=0&&size_t(stage)<r.slots.size()){
+        if(id==87&&edge>=0){makeMechanismGraph(r);r.links.at(size_t(edge)).name=ui::utf8(value);}
+        else if(stage>=0&&size_t(stage)<r.slots.size()){
             if(id==80)r.slots[stage].label=ui::utf8(value);else if(id==81)r.slots[stage].energy=ui::utf8(value);else return;
         }else if(edge>=0){
             auto copy=r;makeMechanismGraph(copy);if(size_t(edge)>=copy.links.size())return;
@@ -145,14 +160,14 @@ struct Editor {
     bool canInsert()const{const auto& r=const_cast<Editor*>(this)->reaction();const auto count=r.explicitConnections()?r.links.size():(r.slots.empty()?0:r.slots.size()-(r.cyclic?0:1));return !comparing&&edge>=0&&size_t(edge)<count&&r.slots.size()<40&&r.links.size()<100&&(!r.explicitConnections()||r.links[edge].from>=0)&&!contains(r.hiddenArrows,edge);}
     void updateActions(){
         auto& r=reaction();const bool selected=stage>=0&&size_t(stage)<r.slots.size()&&!comparing;
-        for(int id:{60,61,62})EnableWindow(GetDlgItem(window,id),selected);
+        for(int id:{60,61,62})EnableWindow(GetDlgItem(window,id),selected||(!comparing&&edge>=0));
         EnableWindow(GetDlgItem(window,65),!comparing&&(edge>=0||(selected&&r.slots.size()>1)));EnableWindow(GetDlgItem(window,66),selected&&r.slots.size()>1);
         EnableWindow(GetDlgItem(window,33),canBranch());EnableWindow(GetDlgItem(window,63),canInsert());
         EnableWindow(GetDlgItem(window,30),!comparing&&(selected||edge>=0));
         EnableWindow(GetDlgItem(window,15),!comparing&&edge>=0);EnableWindow(GetDlgItem(window,64),!comparing&&closingEdge()>=0);
-        for(int id:{11,13,17,19,31,32,34,35})EnableWindow(GetDlgItem(window,id),!comparing);
+        for(int id:{11,13,17,19,29,31,32,34,35,67})EnableWindow(GetDlgItem(window,id),!comparing);
         EnableWindow(GetDlgItem(window,42),!comparing&&!undo.empty());EnableWindow(GetDlgItem(window,43),!comparing&&!redo.empty());
-        SetDlgItemTextW(window,22,comparing?L"원본 비교 중 · ‘편집 결과’로 돌아가면 수정할 수 있습니다.":selected?L"그림 영역 선택됨  →  그리기 · 붙여넣기 · 파일 넣기 | 영역 더블클릭: 구조 편집":edge>=0?L"TS 연결 선택됨  →  이름·에너지 편집 · 중간체 삽입 | Delete: 연결 삭제":L"① 그림 영역 클릭   ② 그리기 · 붙여넣기 · 파일 넣기   |   +: 단계 추가 · 분기");
+        SetDlgItemTextW(window,22,comparing?L"원본 비교 중 · ‘편집 결과’로 돌아가면 수정할 수 있습니다.":selected?L"그림 영역 선택됨  →  그리기 · 붙여넣기 · 파일 넣기 | 영역 더블클릭: 구조 편집":edge>=0?L"TS 연결 선택됨 → TS 구조 입력 · 이름·에너지 · 분기명 편집":L"① 그림 영역 클릭   ② 그리기 · 붙여넣기 · 파일 넣기   |   +: 단계 추가 · 분기");
     }
     void commit(Document candidate,bool refit=true){
         auto it=std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[&](auto& r){return r.id==owner;});
@@ -166,6 +181,7 @@ struct Editor {
     int stageAt(Vec point){auto& r=reaction();auto p=world(point);double best=1e30;int result=-1;for(size_t i=0;i<r.slots.size();++i){auto c=reactionSlot(r,i);if(std::abs(p.x-c.x)<=r.slotWidth/2+6/scale&&std::abs(p.y-c.y)<=r.slotHeight/2+6/scale&&(p-c).length()<best){best=(p-c).length();result=int(i);}}return result;}
     int edgeAt(Vec point){auto sc=makeScene(draft,measure);double best=9;int found=-1;
         auto segment=[&](Vec a,Vec b,int edge){a=screen(a);b=screen(b);auto v=b-a;double n=v.x*v.x+v.y*v.y;double t=n>1e-9?std::clamp(((point-a).x*v.x+(point-a).y*v.y)/n,0.,1.):0;double distance=(point-a-v*t).length();if(distance<best){best=distance;found=edge;}};
+        for(size_t i=0;i<reaction().links.size();++i)if(!reaction().links[i].members.empty()){const auto b=makeScene(draft.subset(reaction().links[i].members),measure).bounds;const auto p=world(point);if(p.x>=b.x&&p.x<=b.x+b.w&&p.y>=b.y&&p.y<=b.y+b.h)return int(i);}
         for(const auto& p:sc.items)if(p.owner==owner&&p.reactionArrow>=0){
             if(p.type==Primitive::Line)for(size_t i=1;i<p.points.size();++i)segment(p.points[i-1],p.points[i],p.reactionArrow);
             if(p.type==Primitive::Bezier)for(size_t i=0;i+3<p.points.size();i+=3){Vec previous=p.points[i];for(int j=1;j<=40;++j){double t=j/40.,u=1-t;auto at=p.points[i]*(u*u*u)+p.points[i+1]*(3*u*u*t)+p.points[i+2]*(3*u*t*t)+p.points[i+3]*(t*t*t);segment(previous,at,p.reactionArrow);previous=at;}}
@@ -198,36 +214,48 @@ struct Editor {
         auto bytes=readFile(path);return imageMime(bytes).empty()?fromCdxml(bytes):imageDocument(bytes);
     }
     void structure(int action){
-        if(comparing||stage<0||size_t(stage)>=reaction().slots.size())return;
-        const auto original=structureInSlot(draft,owner,size_t(stage));std::optional<Document> result;
+        if(comparing||(stage<0&&edge<0))return;
+        Document original;
+        if(stage>=0)original=structureInSlot(draft,owner,size_t(stage));
+        else{auto copy=reaction();makeMechanismGraph(copy);const auto& ids=copy.links.at(size_t(edge)).members;Document flat=draft;flat.reactions.clear();flat.plots.clear();flat.groups.clear();original=flat.subset(ids);original.translate(original.allIds(),mechanismLinkCaption(copy,size_t(edge),draft.style)*-1);}
+        std::optional<Document> result;
         if(action==60)result=callbacks.editStructure?callbacks.editStructure(original,window):runStructureEditor(original,window);
         if(action==61)result=callbacks.clipboard?callbacks.clipboard():clipboardDocument();
         if(action==62)result=chooseFile();
         if(!result){if(action==61)say(L"복사한 구조가 없습니다. ChemDraw나 YoungDraw에서 구조를 복사하거나 파일 넣기를 사용하세요.");return;}
-        Document candidate=draft;replaceSlotStructure(candidate,*result,owner,size_t(stage));commit(std::move(candidate));
+        Document candidate=draft;
+        if(stage>=0)replaceSlotStructure(candidate,*result,owner,size_t(stage));
+        else{
+            if(!result->reactions.empty()||!result->plots.empty())throw std::runtime_error("TS에는 구조·텍스트·이미지만 넣을 수 있습니다.");
+            auto& r=*std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[&](const auto& r){return r.id==owner;});makeMechanismGraph(r);const auto ids=r.links.at(size_t(edge)).members;
+            candidate.erase(ids);auto fragment=*result;fragment.rebaseStructureStyle(candidate.style);const int first=candidate.nextId;candidate.append(fragment);
+            auto& target=*std::find_if(candidate.reactions.begin(),candidate.reactions.end(),[&](const auto& r){return r.id==owner;});target.links.at(size_t(edge)).members.clear();
+            for(int id:candidate.allIds())if(id>=first)target.links.at(size_t(edge)).members.push_back(id);
+        }
+        commit(std::move(candidate));
         say(L"선택한 그림 영역에 구조를 반영했습니다. 메커니즘 ‘적용’ 전에는 원본이 바뀌지 않습니다.");
     }
     void remove(){
         if(comparing)return;
-        if(edge>=0){checkpoint();if(reaction().cyclic||!reaction().cycleStages.empty()){if(!contains(reaction().hiddenArrows,edge))reaction().hiddenArrows.push_back(edge);}else removeMechanismConnection(reaction(),size_t(edge));edge=-1;say(L"선택한 연결을 삭제했습니다. Ctrl+Z로 복구할 수 있습니다.");changed(false);return;}
+        if(edge>=0){checkpoint();if(reaction().cyclic||!reaction().cycleStages.empty()){if(!contains(reaction().hiddenArrows,edge))reaction().hiddenArrows.push_back(edge);}else{if(size_t(edge)<reaction().links.size()){const auto members=reaction().links[size_t(edge)].members;draft.erase(members);}removeMechanismConnection(reaction(),size_t(edge));}edge=-1;say(L"선택한 연결을 삭제했습니다. Ctrl+Z로 복구할 수 있습니다.");changed(false);return;}
         if(stage>=0){if(reaction().slots.size()<=1){say(L"마지막 그림 영역입니다. 내용은 그림 그리기에서 수정할 수 있습니다.");return;}checkpoint();removeMechanismStage(draft,owner,size_t(stage),-1,true);stage=edge=-1;arrange();changed();say(L"선택한 단계와 그림을 삭제했습니다. Ctrl+Z: 복구");}
     }
     void editText(){
         if(comparing)return;auto& r=reaction();
         if(stage<0&&edge<0){say(L"편집할 그림 영역이나 화살표를 먼저 클릭하세요.");return;}
         if(stage>=0){auto& slot=r.slots.at(size_t(stage));auto result=ui::form(window,L"단계 이름·에너지",{{L"이름",slot.label,false,{},false,4,true},{L"에너지 (S=0:값 / S=1:값)",slot.energy,false,{},false,4,true}});if(result){checkpoint();slot.label=(*result)[0];slot.energy=(*result)[1];arrange();changed();}}
-        else{auto copy=r;makeMechanismGraph(copy);auto result=ui::form(window,L"연결 설명·에너지",{{L"화살표 위 설명 / TS 이름",size_t(edge)<copy.above.size()?copy.above[edge]:"",false,{},false,4,true},{L"화살표 아래 에너지",size_t(edge)<copy.below.size()?copy.below[edge]:"",false,{},false,4,true},{L"곡률 (−2~2, 0: 직선)",number(copy.links.at(size_t(edge)).bend)}});if(result){double bend=numeric((*result)[2],-2,2);checkpoint();if(r.explicitConnections()||bend!=0)makeMechanismGraph(r);r.above.resize(copy.links.size());r.below.resize(copy.links.size());r.above[edge]=(*result)[0];r.below[edge]=(*result)[1];if(r.explicitConnections())r.links[edge].bend=bend;arrange();changed();}}
+        else{auto copy=r;makeMechanismGraph(copy);auto result=ui::form(window,L"연결 설명·에너지",{{L"화살표 위 설명 / TS 이름",size_t(edge)<copy.above.size()?copy.above[edge]:"",false,{},false,4,true},{L"화살표 아래 에너지",size_t(edge)<copy.below.size()?copy.below[edge]:"",false,{},false,4,true},{L"곡률 (−2~2, 0: 직선)",number(copy.links.at(size_t(edge)).bend)},{L"분기 이름",copy.links.at(size_t(edge)).name,false,{},false,4,true}});if(result){double bend=numeric((*result)[2],-2,2);checkpoint();if(r.explicitConnections()||bend!=0||!(*result)[3].empty())makeMechanismGraph(r);r.above.resize(copy.links.size());r.below.resize(copy.links.size());r.above[edge]=(*result)[0];r.below[edge]=(*result)[1];if(r.explicitConnections()){r.links[edge].bend=bend;r.links[edge].name=(*result)[3];}arrange();changed();}}
     }
     void table(){
         if(comparing)return;auto original=reaction();
         if(!original.explicitConnections()){
-            auto rows=ui::table(window,L"이름·에너지 한 번에 편집",{L"구분 (중간체 / TS)",L"이름 / 설명",L"S",L"에너지"},mechanismRows(original),{},true,L"행 추가·삭제도 가능합니다. 그림에서는 + / Delete로 직접 편집합니다.",true);
+            auto rows=ui::table(window,L"데이터 편집",{L"구분 (중간체 / TS)",L"이름 / 설명",L"S",L"에너지"},mechanismRows(original),{},true,L"행 추가·삭제도 가능합니다. 그림에서는 + / Delete로 직접 편집합니다.",true);
             if(rows){auto result=mechanismGridData(original,*rows);checkpoint();reaction()=std::move(result);arrange();changed();}
         }else{
             makeMechanismGraph(original);ui::Table cells;
             for(size_t i=0;i<original.slots.size();++i)cells.push_back({"구조",std::to_string(i+1),number(original.slotGrid[i].x),number(original.slotGrid[i].y),original.slots[i].label,original.slots[i].energy,""});
             for(size_t i=0;i<original.links.size();++i)cells.push_back({"화살표",std::to_string(i+1),std::to_string(original.links[i].from+1),std::to_string(original.links[i].to+1),original.above[i],original.below[i],number(original.links[i].bend)});
-            auto rows=ui::table(window,L"이름·에너지·연결 한 번에 편집",{L"구분",L"번호",L"열 / 시작",L"행 / 도착",L"이름 / 설명",L"에너지",L"곡률"},cells,{},true,L"좌표와 연결 번호를 함께 편집할 수 있습니다.",false,4);
+            auto rows=ui::table(window,L"데이터 편집",{L"구분",L"번호",L"열 / 시작",L"행 / 도착",L"이름 / 설명",L"에너지",L"곡률"},cells,{},true,L"좌표와 연결 번호를 함께 편집할 수 있습니다.",false,4);
             if(rows){auto result=mechanismGraphData(original,*rows);checkpoint();reaction()=std::move(result);arrange();changed();}
         }
         stage=edge=-1;sync();
@@ -256,6 +284,7 @@ struct Editor {
     }
     void length(int value,bool save){
         if(updating||comparing)return;
+        if(save&&std::abs(mechanismArrowLength(reaction(),draft.style)-value)<.001)return;
         if(save)checkpoint();reaction().arrowLength=value;arrange();changed();
     }
     void paint(HDC dc){
@@ -277,7 +306,7 @@ struct Editor {
                 }
                 if(r.slots.size()<40&&r.links.size()<100&&!connecting){bool terminal=!r.explicitConnections()?i+1==r.slots.size():std::none_of(r.links.begin(),r.links.end(),[&](auto& l){return l.from==int(i);});if(r.cyclic){plus({box.GetRight()+20,p.y},int(i),-1,false);if(stage==int(i))plus({p.x,box.GetBottom()+mechanismCaptionHeight(r,draft.style)*scale+24},int(i),-1,true);}else if(!r.circularMerge){if(terminal)plus({box.GetRight()+20,p.y},int(i),-1,false);if(!r.vertical)plus({p.x,box.GetBottom()+mechanismCaptionHeight(r,draft.style)*scale+24},int(i),-1,true);}}
             }
-            if(edge>=0){auto localState=g.Save();transform();Scene selected;for(auto p:sc.items)if(p.owner==owner&&p.reactionArrow==edge){p.color="#008b80";p.width+=1;selected.items.push_back(p);}render(g,selected);g.Restore(localState);}
+            if(edge>=0){auto localState=g.Save();transform();Scene selected;for(auto p:sc.items)if(p.owner==owner&&p.reactionArrow==edge){p.color="#008b80";p.width+=1;selected.items.push_back(p);}render(g,selected);g.Restore(localState);if(size_t(edge)<r.links.size()&&!r.links[size_t(edge)].members.empty()){auto bounds=makeScene(draft.subset(r.links[size_t(edge)].members),measure).bounds;const auto at=screen({bounds.x,bounds.y});g.DrawRectangle(&active,float(at.x-4),float(at.y-4),float(bounds.w*scale+8),float(bounds.h*scale+8));}}
             if(connectFrom>=0){auto a=screen(reactionSlot(r,size_t(connectFrom)));g.DrawLine(&active,float(a.x),float(a.y),float(start.x),float(start.y));int target=stageAt(start);if(target>=0&&target!=connectFrom){auto p=screen(reactionSlot(r,size_t(target)));g.DrawEllipse(&active,float(p.x-12),float(p.y-12),24.f,24.f);}}
         }
         if(dragStage>=0&&(dragPoint-down).length()>3){auto& r=reaction();auto p=screen(reactionSlot(r,size_t(dragStage)))+dragPoint-down;Pen ghost(Color(255,0,139,128),2);ghost.SetDashStyle(DashStyleDash);g.DrawRectangle(&ghost,float(p.x-r.slotWidth*scale/2),float(p.y-r.slotHeight*scale/2),float(r.slotWidth*scale),float(r.slotHeight*scale));}
@@ -286,8 +315,23 @@ struct Editor {
     void draw(){PAINTSTRUCT ps{};auto dc=BeginPaint(window,&ps);paint(dc);EndPaint(window,&ps);
         std::vector<ui::HelpRegion> help;for(size_t i=0;i<pluses.size();i++){auto p=pluses[i].point;help.push_back({UINT_PTR(i+1),{LONG(p.x-11),LONG(p.y-11),LONG(p.x+11),LONG(p.y+11)},pluses[i].branch?L"이 단계에서 새 경로를 분기합니다. 새 단계와 TS 이름·에너지를 입력할 수 있습니다.":L"이 위치에 새 단계를 추가합니다. 적용 전까지 원본 문서는 유지됩니다."});}ui::setRegionHelp(window,help);
     }
+    void energySettings(){
+        if(comparing)return;const auto before=draft;const auto r=reaction();
+        ui::Field symbol{L"에너지 표기",r.energySymbol=="ΔE"?"1":r.energySymbol=="ΔG"?"2":"0",false,{L"단위만",L"ΔE",L"ΔG"}};
+        symbol.quickChoices={{0,L"단위만"},{1,L"ΔE"},{2,L"ΔG"}};symbol.buttonsOnly=true;
+        auto update=[&](const std::vector<std::string>& values)->std::wstring{try{
+            draft=before;auto& current=reaction();current.energySymbol=values[0]=="1"?"ΔE":values[0]=="2"?"ΔG":"";
+            current.unit=values[1]==ui::utf8(L"kcal mol⁻¹")?"kcal mol^{-1}":values[1]==ui::utf8(L"kJ mol⁻¹")?"kJ mol^{-1}":values[1];
+            sync(false);fit();UpdateWindow(window);return {};
+        }catch(const std::exception& e){return ui::wide(e.what());}};
+        const auto unit=r.unit=="kcal mol^{-1}"?ui::utf8(L"kcal mol⁻¹"):r.unit=="kJ mol^{-1}"?ui::utf8(L"kJ mol⁻¹"):r.unit;
+        const auto result=ui::form(window,L"에너지 표기·단위",{symbol,{L"단위 (빈칸: 숨김)",unit,false,{L"kcal/mol",L"kcal mol⁻¹",L"kJ/mol",L"kJ mol⁻¹",L"eV",L""},false,4,true,true}},update);
+        if(result){update(*result);if(toNative(draft)!=toNative(before)){undo.push_back(before);redo.clear();}}
+        else draft=before;sync();fit();say(result?L"에너지 표기와 단위를 변경했습니다. 입력한 에너지 수치는 유지됩니다.":L"에너지 표기 변경을 취소했습니다.");
+    }
     void action(int id){
-        if(id==IDOK){if(propertyInvalid){SetFocus(GetDlgItem(window,82));say(L"곡률은 −2~2의 숫자로 입력하세요.");return;}accepted=true;DestroyWindow(window);return;}if(id==IDCANCEL){DestroyWindow(window);return;}
+        if(id==IDOK){if(lengthInvalid){SetFocus(GetDlgItem(window,29));say(L"화살표 길이는 20~600 pt의 숫자로 입력하세요.");return;}if(propertyInvalid){SetFocus(GetDlgItem(window,82));say(L"곡률은 −2~2의 숫자로 입력하세요.");return;}accepted=true;DestroyWindow(window);return;}if(id==IDCANCEL){DestroyWindow(window);return;}
+        if(id==67){energySettings();return;}
         if(id==40){comparing=!comparing;SetDlgItemTextW(window,40,comparing?L"편집 결과":L"원본 비교");sync();fit();return;}
         if(id==41){fit();return;}
         if(id==44){scale=std::min(6.,scale*1.2);InvalidateRect(window,nullptr,TRUE);return;}
@@ -314,8 +358,9 @@ struct Editor {
         RectF tile(box.X+2,box.Y+2,box.Width-4,box.Height-4);appearance::rounded(g,tile,6,fillColor);
         if(draw.CtlID>=70&&draw.CtlID<=72){bool selected=int(draw.CtlID)-70==toolPage;appearance::rounded(g,tile,6,selected?p.accent:p.raised);wchar_t label[64]{};GetWindowTextW(draw.hwndItem,label,64);ui::drawLabel(g,label,tile,12.f,selected?p.onAccent:p.text,selected,true);return;}
         if(draw.CtlID==IDOK||draw.CtlID==IDCANCEL){colors.draw(draw,draw.CtlID==IDOK);return;}
-        int symbol=121;switch(draw.CtlID){case 60:symbol=186;break;case 61:symbol=123;break;case 62:symbol=124;break;case 63:symbol=143;break;case 65:symbol=144;break;case 66:symbol=146;break;case 31:symbol=131;break;case 32:symbol=145;break;case 33:symbol=169;break;case 34:symbol=125;break;case 35:symbol=127;break;case 40:symbol=140;break;case 41:symbol=107;break;case 42:symbol=104;break;case 43:symbol=105;break;case 44:case 45:symbol=107;break;}
+        int symbol=121;switch(draw.CtlID){case 67:symbol=137;break;case 60:symbol=186;break;case 61:symbol=123;break;case 62:symbol=124;break;case 63:symbol=143;break;case 65:symbol=144;break;case 66:symbol=146;break;case 31:symbol=131;break;case 32:symbol=145;break;case 33:symbol=169;break;case 34:symbol=125;break;case 35:symbol=127;break;case 40:symbol=140;break;case 41:symbol=107;break;case 42:symbol=104;break;case 43:symbol=105;break;case 44:case 45:symbol=107;break;}
         if(draw.CtlID==44||draw.CtlID==45){Pen mark(fg,1.8f);float x=box.X+box.Width/2-3,y=box.Y+17;g.DrawEllipse(&mark,x-9,y-9,18.f,18.f);g.DrawLine(&mark,x+7,y+7,x+15,y+15);g.DrawLine(&mark,x-4,y,x+4,y);if(draw.CtlID==44)g.DrawLine(&mark,x,y-4,x,y+4);}
+        else if(draw.CtlID==67)ui::drawLabel(g,L"ΔE / ΔG",{box.X+4,box.Y+6,box.Width-8,25},18,fg,true,true);
         else icon(g,symbol,{box.X+(box.Width-26)/2,box.Y+4,26,26},fg);
         wchar_t label[128]{};GetWindowTextW(draw.hwndItem,label,128);ui::drawLabel(g,label,{box.X+2,box.GetBottom()-19,box.Width-4,16},10,fg,active,true);
         if(draw.itemState&ODS_FOCUS){Pen outline(p.accent,1);g.DrawRectangle(&outline,box.X+1,box.Y+1,box.Width-2,box.Height-2);}
@@ -330,17 +375,18 @@ struct Editor {
             self->control(L"STATIC",L"배치 · 그림에서 직접 이동 가능",10);
             self->control(L"COMBOBOX",L"",11,CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP);
             for(auto label:{L"→ 직선",L"↓ 세로",L"↪ 여러 줄",L"⟳ 촉매 순환",L"⑂ 분기 · 자유 배치",L"⤵ 원형 분기·합류",L"◯ 원형 · 마지막 연결 없음",L"⟳ 촉매 순환 · 외부 분기"})SendDlgItemMessageW(h,11,CB_ADDSTRING,0,(LPARAM)label);
-            self->control(L"STATIC",L"에너지 단위 · 표시만 변경",12);
+            self->control(L"BUTTON",L"에너지 표기·단위",67,BS_OWNERDRAW|WS_TABSTOP);self->control(L"STATIC",L"에너지 단위",12);
             self->control(L"COMBOBOX",L"",13,CBS_DROPDOWN|WS_VSCROLL|WS_TABSTOP);
             for(auto label:{L"kcal mol^{-1}",L"kJ mol^{-1}",L"eV",L"단위 숨김"})SendDlgItemMessageW(h,13,CB_ADDSTRING,0,(LPARAM)label);
             self->control(L"STATIC",L"화살표 모양",14);self->control(L"COMBOBOX",L"",15,CBS_DROPDOWNLIST|WS_TABSTOP);
-            for(auto label:{L"→ 정방향",L"⇌ 평형"})SendDlgItemMessageW(h,15,CB_ADDSTRING,0,(LPARAM)label);
+            for(auto label:{L"→ 정방향",L"⇌ 평형",L"← 역방향"})SendDlgItemMessageW(h,15,CB_ADDSTRING,0,(LPARAM)label);
             self->control(L"STATIC",L"화살표 길이",16);self->control(TRACKBAR_CLASSW,L"",17,TBS_HORZ|TBS_NOTICKS|WS_TABSTOP);SendDlgItemMessageW(h,17,TBM_SETRANGE,TRUE,MAKELONG(20,600));
             self->control(L"STATIC",L"여러 줄 · 한 줄의 그림 수 (1~40)",18);self->control(L"EDIT",L"3",19,WS_BORDER|ES_NUMBER|WS_TABSTOP);
-            const wchar_t* tools[]={L"이름·에너지",L"전체 표",L"연결하기",L"분기 추가",L"자동 정렬",L"추가 설정"};for(int i=0;i<6;++i)self->control(L"BUTTON",tools[i],30+i,BS_OWNERDRAW|WS_TABSTOP);
+            const wchar_t* tools[]={L"이름·에너지",L"데이터 편집",L"연결하기",L"분기 추가",L"자동 정렬",L"추가 설정"};for(int i=0;i<6;++i)self->control(L"BUTTON",tools[i],30+i,BS_OWNERDRAW|WS_TABSTOP);
             self->list=self->control(L"LISTBOX",L"",20,LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_VSCROLL|WS_TABSTOP);
             const wchar_t* tools2[]={L"원본 비교",L"화면 맞춤",L"되돌리기",L"다시 실행",L"확대 +",L"축소 −"};for(int i=0;i<6;++i)self->control(L"BUTTON",tools2[i],40+i,BS_OWNERDRAW|WS_TABSTOP);
-            self->control(L"STATIC",L"그림 영역 · 클릭하여 선택",21);
+            self->control(L"STATIC",L"구조·연결 · 선택하여 편집",21);self->control(L"STATIC",L"",28);self->control(L"EDIT",L"",29,WS_BORDER|ES_NUMBER|WS_TABSTOP);
+            self->control(L"EDIT",L"",87,WS_BORDER|WS_TABSTOP|ES_AUTOHSCROLL);self->control(L"STATIC",L"분기명",88);
             self->control(L"BUTTON",L"⟳ 마지막 → 처음 연결",64,BS_AUTOCHECKBOX|WS_TABSTOP);
             const wchar_t* groups[]={L"구조 입력",L"단계 · 연결",L"배치 · 설정",L"보기",L"편집 기록"};for(int i=0;i<5;++i)self->control(L"STATIC",groups[i],23+i);
             self->control(L"STATIC",L"",22,SS_ENDELLIPSIS);
@@ -364,11 +410,12 @@ struct Editor {
         case WM_DRAWITEM:self->drawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
         case WM_COMMAND:{int id=LOWORD(wp),code=HIWORD(wp);
             if(id>=70&&id<=72&&code==BN_CLICKED){self->toolPage=id-70;self->layout(false);return 0;}
-            if(id>=80&&id<=82){if(code==EN_SETFOCUS)self->propertyGesture=0;if(code==EN_CHANGE)self->propertyChanged(id);return 0;}
-            if(id==20&&code==LBN_SELCHANGE&&!self->updating){self->stage=int(SendMessageW(self->list,LB_GETCURSEL,0,0));self->edge=-1;self->syncProperties();self->updateActions();self->layout();return 0;}
+            if((id>=80&&id<=82)||id==87){if(code==EN_SETFOCUS)self->propertyGesture=0;if(code==EN_CHANGE)self->propertyChanged(id);return 0;}
+            if(id==20&&code==LBN_SELCHANGE&&!self->updating){int row=int(SendMessageW(self->list,LB_GETCURSEL,0,0));if(row<0||size_t(row)>=self->listTargets.size())return 0;self->stage=self->listTargets[size_t(row)].first;self->edge=self->listTargets[size_t(row)].second;self->syncProperties();self->updateActions();self->layout();return 0;}
             if(id==20&&code==LBN_DBLCLK){self->editText();return 0;}
             if((id==11||id==13||id==15)&&(code==CBN_SELCHANGE||code==CBN_EDITCHANGE)){if(id==13&&code==CBN_SELCHANGE){int n=int(SendDlgItemMessageW(h,13,CB_GETCURSEL,0,0));wchar_t text[128]{};SendDlgItemMessageW(h,13,CB_GETLBTEXT,n,(LPARAM)text);SetDlgItemTextW(h,13,n==3?L"":text);}self->setting(id);return 0;}
             if(id==64&&code==BN_CLICKED){self->setting(id);return 0;}
+            if(id==29&&code==EN_KILLFOCUS&&!self->updating){wchar_t number[32]{};GetDlgItemTextW(h,29,number,32);try{const int value=int(numeric(ui::utf8(number),20,600));self->lengthInvalid=false;self->length(value,true);}catch(const std::exception&){self->lengthInvalid=true;self->say(L"화살표 길이는 20~600 pt의 숫자로 입력하세요.");}return 0;}
             if(id==19&&code==EN_KILLFOCUS){self->setting(id);return 0;}
             if(code==BN_CLICKED)self->action(id);return 0;}
         case WM_HSCROLL:if((HWND)lp==GetDlgItem(h,17)){const int code=LOWORD(wp);if(!self->lengthGesture){self->checkpoint();self->lengthGesture=true;}self->length(int(SendDlgItemMessageW(h,17,TBM_GETPOS,0,0)),false);if(code==TB_ENDTRACK)self->lengthGesture=false;}return 0;
@@ -377,11 +424,14 @@ struct Editor {
             int stage=self->stageAt(point);if(self->connecting){if(stage<0){self->say(L"그림 영역 안에서 시작·도착을 지정하세요.");return 0;}if(self->connectFrom>=0&&self->connectFrom!=stage){self->checkpoint();connectMechanismStages(self->reaction(),self->connectFrom,stage);self->connectFrom=-1;self->changed(false);self->say(L"연결했습니다. 다른 두 단계를 선택하거나 Esc로 연결 모드를 종료하세요.");return 0;}self->connectFrom=stage;self->start=point;SetCapture(h);InvalidateRect(h,nullptr,TRUE);return 0;}
             self->stage=stage;self->edge=stage<0?self->edgeAt(point):-1;self->sync();SetFocus(h);
             if(stage>=0){self->dragStage=stage;self->down=self->dragPoint=point;self->start=reactionSlot(self->reaction(),size_t(stage));SetCapture(h);}return 0;}
-        case WM_MOUSEMOVE:{Vec point{double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};if(self->dragStage>=0){self->dragPoint=point;InvalidateRect(h,nullptr,TRUE);}if(self->connectFrom>=0){self->start=point;InvalidateRect(h,nullptr,TRUE);}return 0;}
+        case WM_RBUTTONDOWN:{POINT point{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};if(PtInRect(&self->canvas,point)){self->rightDragging=true;self->panDown={double(point.x),double(point.y)};self->panOffset=self->offset;SetCapture(h);}return 0;}
+        case WM_RBUTTONUP:self->rightDragging=false;if(GetCapture()==h)ReleaseCapture();return 0;
+        case WM_CAPTURECHANGED:self->rightDragging=false;return 0;
+        case WM_MOUSEMOVE:{Vec point{double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};if(self->rightDragging){self->offset=self->panOffset+point-self->panDown;InvalidateRect(h,nullptr,FALSE);return 0;}if(self->dragStage>=0){self->dragPoint=point;InvalidateRect(h,nullptr,TRUE);}if(self->connectFrom>=0){self->start=point;InvalidateRect(h,nullptr,TRUE);}return 0;}
         case WM_LBUTTONUP:{Vec point{double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};ReleaseCapture();
             if(self->connecting&&self->connectFrom>=0){int target=self->stageAt(point);if(target>=0&&target!=self->connectFrom){self->checkpoint();connectMechanismStages(self->reaction(),self->connectFrom,target);self->connectFrom=-1;self->changed(false);self->say(L"연결했습니다. 화살표 클릭 → Delete: 삭제 · 자동 정렬: 재배치");}return 0;}
             if(self->dragStage>=0){int moved=self->dragStage;self->dragStage=-1;if((point-self->down).length()>3){self->checkpoint();auto& r=self->reaction();makeMechanismGraph(r);r.fixedFrames=true;r.circularMerge=false;auto delta=(point-self->down)*(1/self->scale);double stepX=r.spacing;double stepY=r.slotHeight+std::max(r.rowGap,mechanismCaptionHeight(r,Style{})+80);auto originalPosition=reactionSlot(r,size_t(moved));r.slotGrid[moved]=r.slotGrid[moved]+Vec{delta.x/std::max(1.,stepX),delta.y/std::max(1.,stepY)};self->draft.translate(r.slots[moved].members,reactionSlot(r,size_t(moved))-originalPosition);self->arrange();self->changed(false);self->say(L"그림 영역을 이동했습니다. Ctrl+Z: 되돌리기");}}return 0;}
-        case WM_LBUTTONDBLCLK:{Vec point{double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};int hit=self->stageAt(point);if(hit>=0){self->stage=hit;self->edge=-1;self->structure(60);}else{self->stage=-1;self->edge=self->edgeAt(point);if(self->edge>=0)self->editText();}return 0;}
+        case WM_LBUTTONDBLCLK:{Vec point{double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};int hit=self->stageAt(point);if(hit>=0){self->stage=hit;self->edge=-1;self->structure(60);}else{self->stage=-1;self->edge=self->edgeAt(point);if(self->edge>=0){if(size_t(self->edge)<self->reaction().links.size()&&!self->reaction().links[size_t(self->edge)].members.empty())self->structure(60);else self->editText();}}return 0;}
         case WM_MOUSEWHEEL:{POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(h,&p);if(PtInRect(&self->canvas,p)){Vec before=self->world({double(p.x),double(p.y)});self->scale=std::clamp(self->scale*(GET_WHEEL_DELTA_WPARAM(wp)>0?1.15:1/1.15),.03,6.);self->offset=Vec{double(p.x),double(p.y)}-before*self->scale;InvalidateRect(h,nullptr,TRUE);}return 0;}
         case WM_CLOSE:DestroyWindow(h);return 0;
         }}catch(const std::exception& error){const bool internal=dynamic_cast<const std::out_of_range*>(&error)!=nullptr;self->say(internal?L"선택한 항목이 바뀌었습니다. 그림 영역이나 연결을 다시 선택하세요.":ui::wide(error.what()).c_str());}
@@ -410,6 +460,7 @@ std::optional<Document> mechanismEditor(HWND parent,const Document& draft,int ow
     MSG msg{};while(IsWindow(window)){
         auto result=GetMessageW(&msg,nullptr,0,0);if(result<=0){if(result==0)PostQuitMessage(int(msg.wParam));break;}
         if(msg.message==WM_KEYDOWN){bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0;bool edit=false;wchar_t cls[32]{};GetClassNameW(GetFocus(),cls,32);edit=wcscmp(cls,L"Edit")==0;
+            if(edit&&GetParent(msg.hwnd)==window&&GetDlgCtrlID(msg.hwnd)==29&&msg.wParam==VK_RETURN){SendMessageW(window,WM_COMMAND,MAKEWPARAM(29,EN_KILLFOCUS),reinterpret_cast<LPARAM>(msg.hwnd));if(!editor.lengthInvalid)SetFocus(editor.list);continue;}
             if(edit&&GetParent(msg.hwnd)==window&&GetDlgCtrlID(msg.hwnd)>=80&&GetDlgCtrlID(msg.hwnd)<=82&&msg.wParam==VK_RETURN){if(!editor.propertyInvalid)SetFocus(editor.list);continue;}
             if(!edit&&(msg.wParam==VK_DELETE||msg.wParam==VK_BACK)){try{editor.remove();}catch(const std::exception& e){editor.say(ui::wide(e.what()).c_str());}continue;}
             if(!edit&&ctrl&&(msg.wParam=='Z'||msg.wParam=='Y')){editor.action(msg.wParam=='Z'?42:43);continue;}

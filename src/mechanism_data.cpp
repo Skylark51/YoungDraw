@@ -138,6 +138,7 @@ double mechanismArrowLength(const Reaction& r,const Style& style){
         }catch(...){measure(raw);}
     };
     for(auto& raw:r.above){auto caption=transitionCaption(raw);measure(caption.description);measure(caption.name);}
+    for(const auto& link:r.links)measure(link.name);
     for(auto& raw:r.below)measureEnergy(raw);
     return std::max(font*3.,widest+font*.6);
 }

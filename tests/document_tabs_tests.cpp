@@ -113,7 +113,7 @@ static void CALLBACK driveGraphStyle(HWND parent,UINT,UINT_PTR timer,DWORD){
         graphStyleCardsSeen=graphStyleCardsSeen&&card&&ui::hasButtonHelp(card)&&
             (GetWindowLongPtrW(card,GWL_STYLE)&BS_TYPEMASK)==BS_OWNERDRAW&&
             bounds.left>=panel.left&&bounds.right<=panel.right&&bounds.right>bounds.left&&
-            (!i||(bounds.left>=previous.right&&bounds.top==previous.top));
+            (!i||(i%3==0?bounds.top>previous.top:bounds.left>=previous.right&&bounds.top==previous.top));
         previous=bounds;
     }
     if(graphStyleCardsSeen){
@@ -613,8 +613,9 @@ static void annotationPreviewChecks(HWND){
         // The longest black vertical run inside the white preview is the Y-axis shaft,
         // independent of the preview's fitting implementation or model coordinates.
         RECT best{};int longest=0;
-        for(int x=40;x<client.right-40;++x){int start=0,length=0;
-            for(int y=100;y<tab.top-30;++y){Color pixel;image.GetPixel(x,y,&pixel);
+        const auto view=plotManagerPreview();check(bool(view),"annotation has a preview viewport");
+        for(int x=int(view->viewport.x)+6;x<int(view->viewport.x+view->viewport.w)-6;++x){int start=0,length=0;
+            for(int y=int(view->viewport.y)+4;y<int(view->viewport.y+view->viewport.h)-4;++y){Color pixel;image.GetPixel(x,y,&pixel);
                 if(pixel.GetR()<45&&pixel.GetG()<45&&pixel.GetB()<45){
                     if(!length)start=y;++length;
                     if(length>longest){longest=length;best={x,start,x+1,y+1};}
@@ -657,7 +658,7 @@ static void annotationPreviewChecks(HWND){
             // the maximum tracking size and reject requests to grow the window.
             SetWindowPos(manager,nullptr,0,0,width,height-60,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
             const auto resized=axisPixels(L"reaction-annotation-resized.png");
-            check(resized.bottom-resized.top<moved.bottom-moved.top-15,
+            check(resized.bottom-resized.top<=moved.bottom-moved.top+1,
                   "explicit window resize still fits the retained annotation preview frame");
             SetWindowPos(manager,nullptr,0,0,width,height,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
             const auto restored=axisPixels(L"reaction-annotation-size-restored.png");
@@ -680,11 +681,7 @@ static void graphPreviewAccessChecks(HWND hwnd){
     check(manager!=nullptr,"preview access fixture opens its graph manager");
     RECT anchored{};GetWindowRect(GetDlgItem(manager,4000),&anchored);
     auto position=[&](const Scene& scene,Vec point){
-        RECT tab{},client{};GetWindowRect(GetDlgItem(manager,4000),&tab);
-        POINT origin{tab.left,tab.top};ScreenToClient(manager,&origin);GetClientRect(manager,&client);
-        const double width=client.right-40,height=origin.y-110;const auto& bounds=scene.bounds;
-        const double scale=std::max(.01,std::min((width-32)/std::max(1.,bounds.w),(height-32)/std::max(1.,bounds.h)));
-        return (point-Vec{bounds.x,bounds.y})*scale+Vec{20+(width-bounds.w*scale)/2,88+(height-bounds.h*scale)/2};
+        (void)scene;const auto view=plotManagerPreview();check(bool(view),"preview exposes its current document transform");return point*view->scale+view->origin;
     };
     auto doubleClick=[&](const Scene& scene,Vec point){
         const auto at=position(scene,point);
@@ -855,10 +852,7 @@ static void axisQuickChecks(HWND hwnd){
     drive(2,[&]{SendMessageW(plotManagerWindow,WM_COMMAND,4406,0);});
     check(history.undo(doc)&&toNative(doc)==before&&!history.undo(doc),"quick notation apply is exactly one reversible edit");changed();
     auto sc=makeScene(doc.subset({owner}),measure);RECT client{};GetClientRect(plotManagerWindow,&client);
-    const double panelTop=std::max(180L,client.bottom-460),height=panelTop-110,width=client.right-40;
-    const double scale=std::max(.01,std::min((width-32)/sc.bounds.w,(height-32)/sc.bounds.h));
-    const Vec offset{20+(width-sc.bounds.w*scale)/2-sc.bounds.x*scale,88+(height-sc.bounds.h*scale)/2-sc.bounds.y*scale};
-    const auto x=axisTitlePoint(sc,true)*scale+offset;
+    const auto view=plotManagerPreview();check(bool(view),"preview has a current view");const auto x=axisTitlePoint(sc,true)*view->scale+view->origin;
     drive(3,[&]{SendMessageW(plotManagerWindow,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(int(x.x),int(x.y)));});
     check(toNative(doc)==before,"preview X title access preserves data on cancel");closePlotManager();
     doc.plots.front().energyAtTop=true;changed();fit();const auto upper=screen(axisTitlePoint(scene(),false));
@@ -977,6 +971,48 @@ static void unifiedAxisChecks(HWND hwnd){
     check(unifiedAxisDriven&&unifiedAxisFailure.empty(),"standalone axis editor also exposes both compact axis screens");
     check(toNative(doc)==original&&!history.undo(doc),"standalone axis cancellation restores every setting");
 }
+static int previewUxMode=0;static bool previewUxDriven=false;static std::string previewUxFailure;
+static void CALLBACK drivePreviewMagnet(HWND parent,UINT,UINT_PTR timer,DWORD){
+    const auto dialog=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",nullptr);if(!dialog)return;
+    wchar_t title[128]{};GetWindowTextW(dialog,title,128);
+    if(std::wstring(title)==L"반응 이름"){SetDlgItemTextW(dialog,100,L"Preview reaction");KillTimer(parent,timer);previewUxDriven=true;}
+    SendMessageW(dialog,WM_COMMAND,IDOK,0);
+}
+static void CALLBACK drivePreviewUx(HWND parent,UINT,UINT_PTR timer,DWORD){
+    const auto dialog=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",nullptr);if(!dialog)return;KillTimer(parent,timer);previewUxDriven=true;
+    try{
+        if(previewUxMode==0){SetDlgItemTextW(dialog,101,L"6.25");check(doc.plots.front().series[1].width==6.25&&doc.plots.front().series[0].width==3.5,"curve width preview changes only its selected path");}
+        else if(previewUxMode==1){SetDlgItemTextW(dialog,107,L"-50");SetDlgItemTextW(dialog,103,L"#238855");check(doc.plots.front().states[2].gapOffset.x==-50&&doc.plots.front().states[2].gapStyle.color=="#238855","one gap editor previews its position and text color");}
+        else{SetDlgItemTextW(dialog,103,L"15");SetDlgItemTextW(dialog,104,L"-12");check(doc.plots.front().states[1].labelOffset.x==15&&doc.plots.front().states[1].labelOffset.y==-12,"clicking a state name edits that exact state's position");}
+    }catch(const std::exception& error){previewUxFailure=error.what();}
+    PostMessageW(dialog,WM_COMMAND,previewUxMode==0&&previewUxFailure.empty()?IDOK:IDCANCEL,0);
+}
+static void graphPreviewUxChecks(HWND hwnd){
+    doc=coordinateDemo();auto second=doc.plots.front().series.front();second.name="Alternate";second.color="#b44758";doc.plots.front().series.push_back(second);doc.plots.front().states[2].gapFrom=0;
+    selection={doc.plots.front().id};history.clear();changed();const auto before=toNative(doc);managePlot(selection.front(),true);const auto manager=plotManagerWindow;
+    for(const auto size:std::vector<std::pair<int,int>>{{900,640},{1280,900}}){SetWindowPos(manager,nullptr,0,0,size.first,size.second,SWP_NOZORDER|SWP_NOACTIVATE);const auto view=plotManagerPreview();check(view&&view->viewport.w>=240&&view->viewport.h>=400,"preview remains large at the smallest supported window");}
+    RECT reactions{},appearance{};GetWindowRect(GetDlgItem(manager,4002),&reactions);GetWindowRect(GetDlgItem(manager,4001),&appearance);check(reactions.left<appearance.left,"reaction annotations precede appearance tools");
+    const auto fitted=*plotManagerPreview();SendMessageW(manager,WM_COMMAND,4411,0);check(plotManagerPreview()->scale>fitted.scale,"preview has a working zoom button");
+    const auto zoomed=*plotManagerPreview();const int x=int(zoomed.viewport.x+zoomed.viewport.w/2),y=int(zoomed.viewport.y+zoomed.viewport.h/2);
+    SendMessageW(manager,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(x,y));SendMessageW(manager,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(x+36,y+24));SendMessageW(manager,WM_RBUTTONUP,0,MAKELPARAM(x+36,y+24));
+    check((plotManagerPreview()->origin-zoomed.origin-Vec{36,24}).length()<1e-6&&toNative(doc)==before,"right drag changes only the preview view");SendMessageW(manager,WM_COMMAND,4410,0);
+    auto drive=[&](int mode,const std::function<void()>& open){previewUxMode=mode;previewUxDriven=false;previewUxFailure.clear();SetTimer(hwnd,913,10,drivePreviewUx);open();KillTimer(hwnd,913);check(previewUxDriven&&previewUxFailure.empty(),previewUxFailure.empty()?"preview opens its requested editor":previewUxFailure.c_str());};
+    SendMessageW(manager,WM_COMMAND,4004,0);drive(0,[&]{SendMessageW(manager,WM_COMMAND,244,0);});check(doc.plots.front().series[1].width==6.25&&doc.plots.front().series[0].width==3.5,"per-path widths apply independently");SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"per-path widths undo together");
+    doc.plots.front().curveWidth=4;changed();const auto legacy=toNative(doc);SendMessageW(manager,WM_COMMAND,4000,0);SendMessageW(manager,WM_COMMAND,133,0);
+    const auto pathForm=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);check(pathForm!=nullptr,"path styles open for legacy shared widths");SetDlgItemTextW(pathForm,103,L"7.5");SendMessageW(pathForm,WM_COMMAND,IDOK,0);
+    check(doc.plots.front().curveWidth==0&&doc.plots.front().series[0].width==7.5&&doc.plots.front().series[1].width==4,"path style replaces a legacy override while preserving other paths' visible widths");SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==legacy,"legacy width migration undoes exactly");doc.plots.front().curveWidth=0;changed();history.clear();
+    auto click=[&](Vec at){const auto view=*plotManagerPreview();const auto point=at*view.scale+view.origin;SendMessageW(manager,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(int(point.x),int(point.y)));SendMessageW(manager,WM_LBUTTONUP,0,MAKELPARAM(int(point.x),int(point.y)));};
+    SendMessageW(manager,WM_COMMAND,4002,0);SendMessageW(manager,WM_COMMAND,139,0);check(IsWindowVisible(GetDlgItem(manager,136)),"reaction editor includes magnet placement");previewUxDriven=false;SetTimer(hwnd,914,10,drivePreviewMagnet);SendMessageW(manager,WM_COMMAND,136,0);KillTimer(hwnd,914);check(previewUxDriven&&snapPlot==doc.plots.front().id,"magnet placement stays in the graph manager");
+    const auto magnets=makeScene(doc.subset({doc.plots.front().id}),measure).plotSnapPoints.at(doc.plots.front().id);click(magnets.front().p);check(snapStart&&toNative(doc)==before,"first preview magnet click is nonmutating");click(magnets.back().p);check(!snapPlot&&doc.plots.front().stages.back().label=="Preview reaction","second preview magnet click places its reaction arrow");SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"preview magnet placement undoes in one step");
+    auto sc=makeScene(doc.subset({doc.plots.front().id}),measure);check(!sc.gapCaptions.empty(),"gap preview contains a caption target");const auto gap=sc.gapCaptions.front().bounds;
+    drive(1,[&]{click({gap.x+gap.w/2,gap.y+gap.h/2});});check(toNative(doc)==before,"cancelling a directly clicked gap restores its geometry and style");
+    sc=makeScene(doc.subset({doc.plots.front().id}),measure);const auto name=std::find_if(sc.items.begin(),sc.items.end(),[](const auto& item){return item.type==Primitive::Text&&item.textRole==6&&item.textIndex==1&&!item.text.empty();});check(name!=sc.items.end(),"TS name is visible in preview");
+    drive(2,[&]{click(name->points.front()+Vec{measure(name->text,name->fontSize,name->font,name->face)/2,name->fontSize*.5});});check(toNative(doc)==before,"cancelling direct TS positioning restores the document");
+    SendMessageW(manager,WM_COMMAND,4000,0);SendMessageW(manager,WM_COMMAND,131,0);auto grid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);check(GetDlgItem(grid,34)!=nullptr,"data table has an add path column button");
+    SendMessageW(grid,WM_COMMAND,34,0);check(doc.plots.front().series.size()==3&&!doc.plots.front().series.back().hasValue(0),"new path column starts empty and is immediately editable");
+    RECT shape{};GetWindowRect(GetDlgItem(grid,20),&shape);for(int id:{24,21,29,34,27,28}){RECT button{};GetWindowRect(GetDlgItem(grid,id),&button);check(button.right-button.left==shape.right-shape.left&&button.bottom-button.top==shape.bottom-shape.top,"table actions have consistent button dimensions");}
+    SendMessageW(grid,WM_COMMAND,27,0);check(toNative(doc)==before,"undo removes an added path column");SendMessageW(grid,WM_COMMAND,28,0);check(doc.plots.front().series.size()==3,"redo restores an added path column");SendMessageW(manager,WM_COMMAND,104,0);closePlotManager();history.clear();
+}
 static void graphTableStructureChecks(){
     doc=coordinateDemo();doc.plots.front().series.front().values.back()=.987654321012345;doc.plots.front().states.back().energy=.987654321012345;
     auto alternate=doc.plots.front().series.front();alternate.name="Comparison";doc.plots.front().series.push_back(alternate);
@@ -1012,6 +1048,7 @@ static void graphTableStructureChecks(){
     closePlotManager();history.clear();
 }
 static void graphManagerChecks(HWND hwnd){
+    graphPreviewUxChecks(hwnd);
     graphPreviewAccessChecks(hwnd);
     graphTableStructureChecks();
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
@@ -1171,11 +1208,7 @@ static void graphManagerChecks(HWND hwnd){
     POINT tabOrigin{topTab.left,topTab.top};
     ScreenToClient(manager,&tabOrigin);
     GetClientRect(manager,&client);
-    const double w=client.right-40,h=tabOrigin.y-110;
-    const auto& b=preview.bounds;
-    const double scale=std::min((w-32)/std::max(1.,b.w),(h-32)/std::max(1.,b.h));
-    const auto position=(item->points.front()-Vec{b.x,b.y}+Vec{4,4})*scale+
-        Vec{20+(w-b.w*scale)/2,88+(h-b.h*scale)/2};
+    const auto view=plotManagerPreview();check(bool(view),"legend preview has a current view");const auto position=(item->points.front()+Vec{4,4})*view->scale+view->origin;
     SendMessageW(manager,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(int(position.x),int(position.y)));
     SendMessageW(manager,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(int(position.x)+18,int(position.y)+10));
     SendMessageW(manager,WM_LBUTTONUP,0,MAKELPARAM(int(position.x)+18,int(position.y)+10));
@@ -1283,7 +1316,7 @@ static void graphManagerChecks(HWND hwnd){
         auto previewFrame=[&](){
             RECT client{};GetClientRect(manager,&client);Bitmap image(client.right,client.bottom,PixelFormat32bppARGB);
             Graphics graphics(&image);auto dc=graphics.GetHDC();SendMessageW(manager,WM_PRINTCLIENT,(WPARAM)dc,PRF_CLIENT);graphics.ReleaseHDC(dc);
-            bool found=false;for(int y=88;y<client.bottom-460&&!found;y++)for(int x=20;x<client.right-20;x++){
+            const auto view=plotManagerPreview();bool found=false;for(int y=int(view->viewport.y);y<int(view->viewport.y+view->viewport.h)&&!found;y++)for(int x=int(view->viewport.x);x<int(view->viewport.x+view->viewport.w);x++){
                 Color pixel;image.GetPixel(x,y,&pixel);
                 if(std::abs(int(pixel.GetR())-18)<6&&std::abs(int(pixel.GetG())-85)<6&&std::abs(int(pixel.GetB())-217)<6){found=true;break;}
             }
@@ -1491,9 +1524,9 @@ static void energyGapStyleChecks(HWND hwnd){
     doc={};auto graph=newEnergyPlot(0,true);graph.id=doc.nextId++;graph.states[1].gapFrom=0;graph.states[2].gapFrom=1;doc.plots={graph};
     selection={graph.id};history.clear();dirty=false;const auto before=toNative(doc);
     managePlot(graph.id,false);auto manager=plotManagerWindow;SendMessageW(manager,WM_COMMAND,4002,0);
-    check(GetDlgItem(manager,energyGapStyleCommand)!=nullptr,"graph annotation management exposes a dedicated gap style tool");
+    check(GetDlgItem(manager,addEnergyGapCommand)!=nullptr&&GetDlgItem(manager,energyGapStyleCommand)==nullptr,"graph annotations expose one unified energy gap tool");
     auto menu=canvasContextMenu(graph.id);
-    check(GetMenuState(menu,addEnergyGapCommand,MF_BYCOMMAND)!=UINT(-1)&&GetMenuState(menu,energyGapStyleCommand,MF_BYCOMMAND)!=UINT(-1),"graph right-click menu provides gap addition and gap formatting");DestroyMenu(menu);
+    check(GetMenuState(menu,addEnergyGapCommand,MF_BYCOMMAND)!=UINT(-1)&&GetMenuState(menu,energyGapStyleCommand,MF_BYCOMMAND)==UINT(-1),"graph right-click menu provides one unified gap editor");DestroyMenu(menu);
     for(int mode:{0,1,2}){
         gapFormMode=mode;gapFormDriven=gapPreviewSeen=false;gapFormFailure.clear();history.clear();dirty=false;
         SetTimer(hwnd,909,10,driveGapStyle);SendMessageW(manager,WM_COMMAND,energyGapStyleCommand,0);KillTimer(hwnd,909);

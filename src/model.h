@@ -60,6 +60,7 @@ struct MechanismLink {
     int from=0,to=1; // from -1: common external vertical spine.
     std::vector<int> members;
     double bend=0; // Signed quadratic control offset as a fraction of the chord length.
+    std::string name; // Optional branch name displayed with its connection.
 };
 struct Object {
     int id=0; ObjectKind kind=ObjectKind::Line; std::vector<Vec> points;
@@ -93,6 +94,7 @@ struct Reaction {
     double arrowLength=0; // 0: caption-driven automatic length.
     bool fixedFrames=false; // Keep the explicit column and row of each stage during sizing.
     bool circularMerge=false; // Fit both directed branches to a shared circle.
+    std::string energySymbol; // Empty retains the original unit-only header.
     bool explicitConnections() const {return manualConnections||!links.empty();}
 };
 struct StructureBorder {
