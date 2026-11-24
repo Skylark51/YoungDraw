@@ -26,7 +26,7 @@ struct SearchItem {std::wstring title,detail;};
 std::optional<size_t> search(HWND owner,const std::wstring& title,const std::vector<SearchItem>& entries,
     const wchar_t* action=L"열기",bool showDetails=false);
 struct ChoiceUpdate {size_t field;std::vector<std::optional<std::string>> values;};
-struct Field {std::wstring label;std::string value;bool multiline=false;std::vector<std::wstring> choices;bool color=false;int rows=4;bool scripts=false;bool editableChoices=false;std::function<std::string(const std::string&,int)> stepValue={};bool stepWithSigns=false;bool stepButtons=false;bool toggle=false;std::optional<ChoiceUpdate> choiceUpdate;std::vector<std::pair<int,std::wstring>> quickChoices;};
+struct Field {std::wstring label;std::string value;bool multiline=false;std::vector<std::wstring> choices;bool color=false;int rows=4;bool scripts=false;bool editableChoices=false;std::function<std::string(const std::string&,int)> stepValue={};bool stepWithSigns=false;bool stepButtons=false;bool toggle=false;std::optional<ChoiceUpdate> choiceUpdate;std::vector<std::pair<int,std::wstring>> quickChoices;bool buttonsOnly=false;};
 std::vector<std::wstring> fontFamilies(HWND window);
 Field numericField(std::wstring label,double value,double minimum,double maximum,double increment);
 using Table = std::vector<std::vector<std::string>>;
@@ -34,8 +34,17 @@ using TablePreview = std::function<std::wstring(const Table&)>;
 using TableCellError = std::function<std::wstring(size_t column,const std::string& value)>;
 using TableColumnEdit = std::function<std::optional<std::wstring>(HWND,size_t column)>;
 using TableReadback = std::function<Table()>;
-std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview={},bool scripts=false,const std::wstring& hint=L"",bool stages=false,int scriptColumn=-1,const TableCellError& cellError={},const TableColumnEdit& columnEdit={});
-HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,const TableCellError& cellError={},const TableColumnEdit& columnEdit={},const TableReadback& readback={});
+// Revisions are unique for this table's lifetime. retained contains the current
+// revision plus every revision reachable through undo/redo, sorted and unique.
+struct TableHistory {size_t revision=0;std::vector<size_t> retained;};
+// Opt in to path-column deletion. sourceColumns includes the state-name column
+// (0); remaining entries identify columns in the originally opened table.
+// Cache full model states by history.revision to restore exact metadata/energies
+// on undo/redo. Discard cached revisions not listed in history.retained.
+// This callback replaces TablePreview and also receives undoable column titles.
+using TableStructurePreview = std::function<std::wstring(const Table& rows,const std::vector<size_t>& sourceColumns,const std::vector<std::wstring>& titles,const TableHistory& history)>;
+std::optional<Table> table(HWND parent,const std::wstring& title,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview={},bool scripts=false,const std::wstring& hint=L"",bool stages=false,int scriptColumn=-1,const TableCellError& cellError={},const TableColumnEdit& columnEdit={},const TableStructurePreview& structurePreview={});
+HWND embeddedTable(HWND parent,const std::vector<std::wstring>& columns,const Table& rows,const TablePreview& preview,const TableCellError& cellError={},const TableColumnEdit& columnEdit={},const TableReadback& readback={},const TableStructurePreview& structurePreview={});
 void selectEmbeddedTableCell(HWND grid,int row,int column);
 bool commitEmbeddedTable(HWND grid);
 void setEmbeddedTableFontSize(HWND grid,int points);
@@ -43,7 +52,7 @@ void distributeEmbeddedStages(HWND grid);
 HWND embeddedStageTable(HWND parent,const Table& rows,const TablePreview& preview);
 std::optional<COLORREF> chooseColor(HWND parent,COLORREF initial);
 using Preview = std::function<std::wstring(const std::vector<std::string>&)>;
-struct FormTabStyle {std::vector<int> icons;int initial=0;int* remember=nullptr;};
+struct FormTabStyle {std::vector<int> icons;int initial=0;int* remember=nullptr;bool unified=false;};
 HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fields,const Preview& preview,
     const Preview& apply,const std::function<void()>& dismiss,
     const std::function<std::optional<COLORREF>(COLORREF)>& pickColor={});

@@ -349,7 +349,7 @@ static std::vector<std::string> read(Form& f){
 static bool preview(Form& f){
     if(!f.preview)return true;std::wstring error;
     try{error=f.preview(read(f));}catch(const std::exception& e){error=wide(e.what());}
-    SetWindowTextW(f.error,error.empty()?(f.embedded?L"":L"미리보기가 갱신되었습니다. 취소하면 원래 그림으로 복원합니다."):error.c_str());
+    SetWindowTextW(f.error,error.empty()?(f.tabStyle.unified?L"길이·글자: pt · 크기·간격 0 / 범위 빈칸: 자동":f.embedded?L"":L"미리보기가 갱신되었습니다. 취소하면 원래 그림으로 복원합니다."):error.c_str());
     EnableWindow(f.apply,error.empty());return error.empty();
 }
 static void drawFormTabs(HWND hwnd,HDC dc){
@@ -470,45 +470,53 @@ static void layoutEmbeddedForm(HWND hwnd,Form& f){
     constexpr int margin=16,gap=26,columns=2;
     const int width=std::max(600L,bounds.right);
     const int columnWidth=(width-2*margin-gap)/columns;
-    constexpr int labelWidth=158,buttonWidth=32,buttonGap=4;
-    const int top=f.tab?63:28;
+    const int labelWidth=f.tabStyle.unified?128:158,buttonWidth=f.tabStyle.unified?26:32,buttonGap=4;
+    const int top=f.tabStyle.unified?57:f.tab?63:28;
     std::vector<size_t> rows;
     if(f.tab){
         MoveWindow(f.tab,margin,23,width-2*margin,32,TRUE);
+        if(f.tabStyle.unified)TabCtrl_SetItemSize(f.tab,(width-2*margin-6)/2,30);
         const int active=TabCtrl_GetCurSel(f.tab);
         if(active>=0&&size_t(active)<f.tabs.size())rows=f.tabs[size_t(active)].second;
         for(const auto& row:f.rows)for(auto item:row)ShowWindow(item,SW_HIDE);
     }else for(size_t i=0;i<f.rows.size();++i)rows.push_back(i);
+    const int rowCount=int((rows.size()+1)/2);
+    const int rowPitch=f.tabStyle.unified?std::clamp((int(bounds.bottom)-top-43)/std::max(1,rowCount),27,43):37;
     int y=top;
     for(size_t slot=0;slot<rows.size();++slot){
         const size_t i=rows[slot];
         const auto& row=f.rows[i];
         const auto& field=f.fields[i];
         const int x=margin+int(slot%columns)*(columnWidth+gap);
-        const int reserve=int(row.size()-2)*(buttonWidth+buttonGap);
+        const int reserve=field.buttonsOnly?0:int(row.size()-2)*(buttonWidth+buttonGap);
         const int inputWidth=columnWidth-labelWidth-reserve;
-        const int h=field.multiline?std::min(64,inputHeight(field)):29;
-        MoveWindow(row[0],x,y+2,labelWidth-5,36,TRUE);
+        const int h=field.multiline?std::min(64,inputHeight(field)):f.tabStyle.unified?25:29;
+        MoveWindow(row[0],x,y+2,labelWidth-5,f.tabStyle.unified?28:36,TRUE);
         MoveWindow(row[1],x+labelWidth,y,inputWidth,field.choices.empty()?h:200,TRUE);
         for(size_t j=2;j<row.size();++j){
-            const int buttonX=x+labelWidth+inputWidth+buttonGap+int(j-2)*(buttonWidth+buttonGap);
-            MoveWindow(row[j],buttonX,y,buttonWidth,29,TRUE);
+            const int count=int(row.size()-2);
+            const int choiceWidth=(columnWidth-labelWidth-(count-1)*buttonGap)/std::max(1,count);
+            const int buttonX=field.buttonsOnly?x+labelWidth+int(j-2)*(choiceWidth+buttonGap):x+labelWidth+inputWidth+buttonGap+int(j-2)*(buttonWidth+buttonGap);
+            MoveWindow(row[j],buttonX,y,field.buttonsOnly?choiceWidth:buttonWidth,h,TRUE);
         }
         if(f.tab)for(auto item:row)ShowWindow(item,SW_SHOWNA);
+        if(field.buttonsOnly)ShowWindow(row[1],SW_HIDE);
+        if(f.tabStyle.unified)for(auto item:row)SetWindowPos(item,HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
         if(slot%columns==1||slot+1==rows.size()){
             const auto& first=f.fields[rows[slot-slot%columns]];
             const int firstHeight=first.multiline?std::min(64,inputHeight(first)):29;
-            y+=std::max(h,firstHeight)+8;
+            y+=f.tabStyle.unified?rowPitch:std::max(h,firstHeight)+8;
         }
     }
     if(f.illustration){
         f.picture={margin,y,width-margin,y+116};
         y+=120;
     }
-    const int footer=y+4;
-    MoveWindow(f.error,margin,footer+3,width-260,38,TRUE);
+    const int footer=f.tabStyle.unified?int(bounds.bottom)-38:y+4;
+    MoveWindow(f.error,margin,footer+3,width-260,f.tabStyle.unified?32:38,TRUE);
     MoveWindow(f.apply,width-margin-210,footer,100,32,TRUE);
     MoveWindow(GetDlgItem(hwnd,IDCANCEL),width-margin-100,footer,100,32,TRUE);
+    if(f.tabStyle.unified)for(auto item:{f.apply,GetDlgItem(hwnd,IDCANCEL)})SetWindowPos(item,HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
 }
 
 static void drawEmbeddedCombo(HWND hwnd,HDC dc){
@@ -634,6 +642,7 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 SendMessageW(edit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(6,6));
             }
             SendMessageW(edit,WM_SETFONT,(WPARAM)f->font,TRUE);
+            if(f->tabStyle.unified&&(field.label==L"최솟값"||field.label==L"최댓값"))SendMessageW(edit,EM_SETCUEBANNER,FALSE,reinterpret_cast<LPARAM>(L"빈칸: 자동"));
             if(f->embedded&&!field.toggle&&field.choices.empty())appearance::nativeControl(edit);
             SendMessageW(edit,EM_SETLIMITTEXT,100000,0);
             f->edits.push_back(edit);f->rows.push_back({label,edit});
@@ -657,7 +666,7 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         if(f->tab&&!f->embedded){layoutFormTabs(*f);y=f->contentBottom;}
         if(f->illustration){f->picture={16,y,660,y+f->illustrationHeight};y+=f->illustrationHeight+8;}
         if(f->embedded){
-            f->error=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,16,y+2,420,40,hwnd,nullptr,nullptr,nullptr);
+            f->error=CreateWindowW(L"STATIC",f->tabStyle.unified?L"길이·글자: pt · 크기·간격 0 / 범위 빈칸: 자동":L"",WS_CHILD|WS_VISIBLE,16,y+2,420,40,hwnd,nullptr,nullptr,nullptr);
             SendMessageW(f->error,WM_SETFONT,(WPARAM)f->font,TRUE);
         }else if(f->preview){f->error=CreateWindowW(L"STATIC",L"올바른 입력은 그림에 즉시 반영됩니다.",WS_CHILD|WS_VISIBLE,16,y,644,40,hwnd,nullptr,nullptr,nullptr);SendMessageW(f->error,WM_SETFONT,(WPARAM)f->font,TRUE);y+=43;}
         for(int i=0;i<2;i++){HWND b=CreateWindowW(L"BUTTON",i?L"취소":L"적용",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,450+i*110,y+4,100,32,hwnd,(HMENU)(INT_PTR)(i?IDCANCEL:IDOK),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)f->font,TRUE);if(!i)f->apply=b;}
@@ -816,7 +825,7 @@ HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fie
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& callback,const FormTabs& tabs,
     const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration,int illustrationHeight,const FormTabStyle& tabStyle){
     static bool registered=false;if(!registered){WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawForm";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);registered=true;}
-    Form f;f.fields=fields;f.preview=callback;f.tabs=tabs;f.tabStyle=tabStyle;f.illustration=illustration;f.illustrationHeight=std::clamp(illustrationHeight,124,360);
+    Form f;f.fields=fields;f.preview=callback;f.tabs=tabs;f.tabStyle=tabStyle;f.embedded=tabStyle.unified;f.illustration=illustration;f.illustrationHeight=std::clamp(illustrationHeight,124,360);
     if(tabs.empty())for(auto& v:fields)f.contentBottom+=rowHeight(v);
     else{
         INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_TAB_CLASSES};InitCommonControlsEx(&controls);
@@ -837,9 +846,10 @@ std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& tit
         if(f.ok)return f.result;
         return {};
     }
-    const int height=92+f.contentBottom+(callback?43:0)+(illustration?f.illustrationHeight+8:0);
-    const RECT r=ownedWindowRect(parent,700,height,bool(callback));
-    HWND hwnd=CreateWindowExW(0,L"YoungDrawForm",title.c_str(),WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,700,height,parent,nullptr,GetModuleHandleW(nullptr),&f);
+    const int height=tabStyle.unified?490:92+f.contentBottom+(callback?43:0)+(illustration?f.illustrationHeight+8:0);
+    const int width=tabStyle.unified?1000:700;
+    const RECT r=ownedWindowRect(parent,width,height,bool(callback));
+    HWND hwnd=CreateWindowExW(0,L"YoungDrawForm",title.c_str(),WS_CAPTION|WS_SYSMENU|WS_POPUP|WS_CLIPCHILDREN,r.left,r.top,width,height,parent,nullptr,GetModuleHandleW(nullptr),&f);
     if(!hwnd)return {};
     const auto previousFocus=GetFocus();
     appearance::titlebar(hwnd);EnableWindow(parent,FALSE);ShowWindow(hwnd,SW_SHOW);

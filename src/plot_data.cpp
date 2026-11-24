@@ -308,6 +308,62 @@ static size_t branchRoot(const EnergyPlot& plot,size_t path,size_t state){
           size_t(plot.series[path].branchSource)<path)path=size_t(plot.series[path].branchSource);
     return path;
 }
+EnergyPlot selectEnergyPaths(const EnergyPlot& original,const std::vector<size_t>& paths){
+    EnergyPlot source=original;
+    if(source.series.empty()){
+        EnergySeries path;for(const auto& state:source.states)path.values.push_back(state.energy);
+        source.series.push_back(std::move(path));
+    }
+    if(paths.empty())throw std::runtime_error("그래프에는 최소 한 개의 경로가 필요합니다.");
+    std::vector<int> mapping(source.series.size(),-1);
+    EnergyPlot result=source;result.series.clear();
+    for(size_t i=0;i<paths.size();++i){
+        if(paths[i]>=source.series.size()||(i&&paths[i]<=paths[i-1]))
+            throw std::runtime_error("삭제할 경로의 선택 범위를 확인하세요.");
+        mapping[paths[i]]=int(i);result.series.push_back(source.series[paths[i]]);
+    }
+    for(size_t i=0;i<paths.size();++i){
+        auto& path=result.series[i];
+        if(path.branchSource>=0&&path.branchState>=0){
+            const size_t state=size_t(path.branchState),root=branchRoot(source,paths[i],state);
+            int parent=-1;
+            // If the source was removed, another retained member of the same
+            // shared point can own it. Never join equal but unrelated energies.
+            if(size_t(path.branchSource)<mapping.size())parent=mapping[size_t(path.branchSource)];
+            if(parent<0)for(size_t j=0;j<i;++j)
+                if(branchRoot(source,paths[j],state)==root){parent=int(j);break;}
+            if(parent>=0)path.branchSource=parent;
+            else{path.branchSource=path.branchState=-1;path.sharedStart=false;}
+        }else if(path.sharedStart){
+            bool shared=false;
+            for(size_t state=0;state<path.values.size();++state)if(path.hasValue(state)){
+                for(size_t j=0;j<i;++j)if(result.series[j].hasValue(state)&&
+                    std::abs(result.series[j].values[state]-path.values[state])<1e-9){shared=true;break;}
+                break;
+            }
+            path.sharedStart=shared;
+        }
+    }
+    auto remap=[&](int path){return path>=0&&size_t(path)<mapping.size()?mapping[size_t(path)]:-1;};
+    for(size_t i=0;i<result.states.size();++i){
+        auto& state=result.states[i];
+        const auto available=std::find_if(result.series.begin(),result.series.end(),[&](const auto& path){return path.hasValue(i);});
+        const int fallback=available==result.series.end()?0:int(available-result.series.begin());
+        const int label=remap(state.labelPath),gap=remap(state.gapPath),brk=remap(state.breakPath);
+        state.labelPath=label<0?fallback:label;
+        state.gapPath=gap<0?fallback:gap;if(gap<0)state.gapFrom=-1;
+        state.breakPath=brk<0?fallback:brk;if(brk<0)state.breakAfter=false;
+        state.photoPath=remap(state.photoPath);
+        state.energy=result.series.front().hasValue(i)?result.series.front().values[i]:0.;
+    }
+    result.crossings.clear();
+    for(auto crossing:source.crossings){
+        crossing.firstPath=remap(crossing.firstPath);crossing.secondPath=remap(crossing.secondPath);
+        if(crossing.firstPath>=0&&crossing.secondPath>=0)result.crossings.push_back(std::move(crossing));
+    }
+    validateEnergyAnnotations(result);validateEnergyCrossings(result);
+    return result;
+}
 void setPlotEnergy(EnergyPlot& plot,size_t path,size_t state,double energy){
     if(state>=plot.states.size()||!std::isfinite(energy)||std::abs(energy)>1e6)
         throw std::runtime_error("에너지는 ±1,000,000 이내의 숫자로 입력하세요.");
