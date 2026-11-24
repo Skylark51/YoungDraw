@@ -67,7 +67,9 @@ static void CALLBACK drivePathName(HWND parent,UINT,UINT_PTR timer,DWORD){
     if(!grid)return;
     const auto header=ListView_GetHeader(GetDlgItem(grid,10));
     if(pathNameStep==0){
+        SetWindowPos(plotManagerWindow,nullptr,0,0,900,640,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
         RECT rect{};Header_GetItemRect(header,2,&rect);
+        RECT visible{};GetClientRect(header,&visible);check(rect.right<=visible.right,"path header fits the compact graph editor without scrolling");
         const auto point=MAKELPARAM((rect.left+rect.right)/2,(rect.top+rect.bottom)/2);
         PostMessageW(header,WM_LBUTTONDOWN,MK_LBUTTON,point);
         PostMessageW(header,WM_LBUTTONUP,0,point);
