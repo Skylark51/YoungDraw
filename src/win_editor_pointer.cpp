@@ -210,17 +210,7 @@ int drawingItemAt(Vec p){
 static void beginRotation(Vec p){
     auto ids=selection;
     const int hit=drawingItemAt(p);
-    // Bonds between selected atoms and endpoints of selected bonds belong to
-    // the selection even when their IDs were not added by the selection tool.
-    auto selectedAtom=[&](int id){
-        if(contains(ids,id))return true;
-        for(const auto& b:doc.bonds)if(contains(ids,b.id)&&(b.a==id||b.b==id))return true;
-        return false;
-    };
-    bool selectedHit=contains(ids,hit);
-    if(const auto* b=doc.bond(hit))selectedHit=selectedAtom(b->a)&&selectedAtom(b->b);
-    else if(doc.atom(hit))selectedHit=selectedAtom(hit);
-    const bool wholeMolecules=hit&&!selectedHit;
+    const bool wholeMolecules=ids.empty()&&hit;
     if(wholeMolecules)ids=groupedSelection({hit});
     if(ids.empty())return;
     try{
@@ -320,8 +310,8 @@ void updateDrag(){
     if(curveHandle>=0){for(auto& o:doc.objects)if(o.id==curveOwner){o.points[size_t(curveHandle)]=o.points[size_t(curveHandle)]+delta;}return;}
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
-void cancel(){cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(rotationDrag||!dragSelection.empty())selection=dragSelection;}rotationDrag.reset();dragSelection.clear();energyDrag.reset();stageArrowDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
-void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!finishInline(true))return;for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!canvas(p))return;SetFocus(win);if(canvas(p)){
+void cancel(){cancelToolHold();cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(rotationDrag||!dragSelection.empty())selection=dragSelection;}rotationDrag.reset();dragSelection.clear();energyDrag.reset();stageArrowDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
+void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!finishInline(true))return;for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){if(!beginToolHold(h.id,p))command(h.id);return;}if(!canvas(p))return;SetFocus(win);if(canvas(p)){
     const Vec at=world(p);int hit=atomHit(at);if(!hit)hit=doc.bondAt(at,5/zoom);if(!hit)hit=objectAt(at);
     if(plot(hit)){sidebarPage=1;showLayers=false;}
     else if(reaction(hit)){sidebarPage=0;showLayers=false;}
@@ -433,7 +423,7 @@ static void finishErase(Vec p){
     }
     redraw();
 }
-void mouseUp(Vec p){if(tool==Erase&&boxing){finishErase(p);return;}if(mechanismConnectionDrag){finishMechanismConnection(p);return;}if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging&&energyDrag){dragging=false;if((p-down).length()>2)dropEnergy(world(p));energyDrag.reset();stageArrowDrag.reset();ReleaseCapture();redraw();return;}if(dragging){mouse=p;updateDrag();crossingDrag.reset();gapDrag.reset();
+void mouseUp(Vec p){if(finishToolHold(p))return;if(tool==Erase&&boxing){finishErase(p);return;}if(mechanismConnectionDrag){finishMechanismConnection(p);return;}if(rightPanning)return;if(panning){panning=false;ReleaseCapture();redraw();return;}if(dragging&&energyDrag){dragging=false;if((p-down).length()>2)dropEnergy(world(p));energyDrag.reset();stageArrowDrag.reset();ReleaseCapture();redraw();return;}if(dragging){mouse=p;updateDrag();crossingDrag.reset();gapDrag.reset();
  if(plotLevelDrag&&!plotLevelDrag->horizontal&&moved){
     auto* graph=plot(plotLevelDrag->owner);
     for(const auto& original:dragBefore.plots)if(original.id==graph->id){graph->yMin=original.yMin;graph->yMax=original.yMax;break;}

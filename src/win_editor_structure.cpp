@@ -485,10 +485,10 @@ void transformSelected(int operation){
     if(selection.empty())throw std::runtime_error("회전·반전할 구조의 원자나 결합을 먼저 선택하세요.");Document before=doc;auto originalSelection=selection;
     if(operation==164){
         auto result=ui::form(win,L"선택 구조 회전",{{L"회전 각도 (도, +는 시계방향)","0"}},[&](const std::vector<std::string>& values)->std::wstring{
-            try{Document preview=before;auto ids=transformStructures(preview,originalSelection,numeric(values[0],-36000,36000));doc=std::move(preview);selection=std::move(ids);redraw();UpdateWindow(win);return {};}catch(const std::exception& e){return ui::wide(e.what());}
+            try{Document preview=before;auto ids=transformStructures(preview,originalSelection,numeric(values[0],-36000,36000),false,false,nullptr,false);doc=std::move(preview);selection=std::move(ids);redraw();UpdateWindow(win);return {};}catch(const std::exception& e){return ui::wide(e.what());}
         });
         if(!result){doc=before;selection=originalSelection;redraw();return;}if(toNative(doc)==toNative(before))return;history.checkpoint(before);
-    }else{Document result=before;selection=transformStructures(result,originalSelection,operation==162?-90:operation==163?90:0,operation==160,operation==161);history.checkpoint(before);doc=std::move(result);}
+    }else{Document result=before;selection=transformStructures(result,originalSelection,operation==162?-90:operation==163?90:0,operation==160,operation==161,nullptr,false);history.checkpoint(before);doc=std::move(result);}
     tool=Select;changed();status=L"선택 구조를 회전·반전했습니다. Ctrl+Z로 되돌릴 수 있습니다.";
 }
 

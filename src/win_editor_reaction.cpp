@@ -388,7 +388,7 @@ HMENU canvasContextMenu(int contextOwner,int copyOwner){
     }else if(!selection.empty()){
         add(121,L"선택 항목 편집…");add(165,L"크기 조정…");
         const bool chemical=std::any_of(selection.begin(),selection.end(),[](int id){return doc.atom(id)||doc.bond(id);});
-        if(chemical){add(110,L"구조 정리…");add(166,L"벤젠을 Ph로 축약");}
+        if(chemical){add(molecularAnnotationsCommand,L"분자 주석…");add(abbreviateGroupsCommand,L"작용기 약어…");add(110,L"구조 정리…");add(166,L"벤젠을 Ph로 축약");}
         if(!isolatedStructureEditing)add(includeMechanismCommand,L"메커니즘에 편입…");add(112,L"템플릿으로 보관…");add(copyPngCommand,L"그림으로 복사");
         appendSelectionFormattingMenu(menu);
     }else{
@@ -409,7 +409,7 @@ void mechanismContextMenu(Vec at){
             break;
         }
     SetFocus(hwnd);if(auto hit=cycleArrowAt(world(at))){selection={hit->first};selectedCycleOwner=hit->first;selectedCycleArrow=hit->second;if(!copyOwner)copyOwner=hit->first;}
-    else if(!pickSlot(world(at))){int objectHit=atomHit(world(at));if(!objectHit)objectHit=doc.bondAt(world(at),5/zoom);if(!objectHit)objectHit=objectAt(world(at));if(objectHit&&!contains(selection,objectHit))selection=groupedSelection({objectHit});else if(!objectHit){selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;}}
+    else if(int chemicalHit=atomHit(world(at))?atomHit(world(at)):doc.bondAt(world(at),5/zoom);chemicalHit){if(!contains(selection,chemicalHit))selection=groupedSelection({chemicalHit});targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;}else if(!pickSlot(world(at))){int objectHit=0;if(!objectHit)objectHit=objectAt(world(at));if(objectHit&&!contains(selection,objectHit))selection=groupedSelection({objectHit});else if(!objectHit){selection.clear();targetContainer=0;selectedCycleOwner=0;selectedCycleArrow=-1;}}
     if(!copyOwner)copyOwner=objectAt(pointInDocument);
     const int contextOwner=activeStructureTarget()?targetContainer:primary();
     HMENU menu=canvasContextMenu(contextOwner,copyOwner);

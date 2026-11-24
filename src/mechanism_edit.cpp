@@ -82,6 +82,11 @@ bool atomLabelHasCharge(const Atom& a){
     auto s=chemicalScripts(a.label);return !s.empty()&&(s.back()=='+'||s.back()=='-'||s.find("+}")!=std::string::npos||s.find("-}")!=std::string::npos||s.find("−}")!=std::string::npos||s.find("⁺")!=std::string::npos||s.find("⁻")!=std::string::npos);
 }
 int collapsePhenyl(Document& d,const std::vector<int>& selection){
+    auto plainLabel=[](const Atom& a,const std::string& symbol){
+        if(!a.label.empty()&&a.label!=symbol)return false;
+        std::string text;for(const auto& run:a.labelRuns)text+=run.text;
+        return text.empty()||text==symbol;
+    };
     std::vector<std::vector<int>> rings;std::set<std::set<int>> seen;
     for(auto& start:d.atoms){std::vector<int> path{start.id};std::function<void(int)> walk=[&](int id){
         for(auto& b:d.bonds){int n=b.a==id?b.b:b.b==id?b.a:0;if(!n)continue;
@@ -90,17 +95,26 @@ int collapsePhenyl(Document& d,const std::vector<int>& selection){
         }};if(start.element==6)walk(start.id);
     }
     int count=0;
-    for(auto& ring:rings){bool valid=true;int attachment=0,external=0,doubles=0,aromatics=0;std::vector<int> edges;
-        for(int id:ring){auto* a=d.atom(id);if(!a||a->charge||a->isotope||a->radical||a->protect||a->mullikenSpin||a->partialCharge.value||!a->label.empty()||!a->labelRuns.empty()){valid=false;break;}}
+    for(auto& ring:rings){bool valid=true;int attachment=0,external=0,doubles=0,aromatics=0;std::vector<int> edges,hydrogens,connectors;
+        for(int id:ring){auto* a=d.atom(id);if(!a||a->charge||a->isotope||a->radical||a->protect||a->mullikenSpin||a->partialCharge.value||a->explicitH>1||!plainLabel(*a,"C")){valid=false;break;}}
         if(!valid)continue;
         for(auto& b:d.bonds){bool a=has(ring,b.a),z=has(ring,b.b);if(a&&z){edges.push_back(b.id);doubles+=b.kind==BondKind::Double;aromatics+=b.kind==BondKind::Aromatic;if(b.kind!=BondKind::Single&&b.kind!=BondKind::Double&&b.kind!=BondKind::Aromatic)valid=false;}
-            else if(a||z){external++;attachment=a?b.a:b.b;if(b.kind!=BondKind::Single)valid=false;}}
-        bool selected=std::any_of(ring.begin(),ring.end(),[&](int id){return has(selection,id);})||std::any_of(edges.begin(),edges.end(),[&](int id){return has(selection,id);});
-        if(!valid||!selected||external!=1||edges.size()!=6||!((doubles==3&&aromatics==0)||aromatics==6))continue;
+            else if(a||z){
+                const auto* outside=d.atom(a?b.b:b.a);
+                if(outside&&outside->element==1){
+                    const int degree=int(std::count_if(d.bonds.begin(),d.bonds.end(),[&](const Bond& edge){return edge.a==outside->id||edge.b==outside->id;}));
+                    if(degree!=1||b.kind!=BondKind::Single||outside->charge||outside->isotope||outside->radical||outside->protect||outside->mullikenSpin||outside->partialCharge.value||!plainLabel(*outside,"H"))valid=false;
+                    hydrogens.push_back(outside->id);edges.push_back(b.id);
+                }else{external++;attachment=a?b.a:b.b;connectors.push_back(b.id);if(b.kind!=BondKind::Single)valid=false;}
+            }}
+        bool selected=std::any_of(ring.begin(),ring.end(),[&](int id){return has(selection,id);})||std::any_of(edges.begin(),edges.end(),[&](int id){return has(selection,id);})||std::any_of(connectors.begin(),connectors.end(),[&](int id){return has(selection,id);});
+        if(!valid||!selected||external!=1||edges.size()!=6+hydrogens.size()||!((doubles==3&&aromatics==0)||aromatics==6))continue;
+        for(int id:edges)if(d.bond(id)->mayerOrder.value)valid=false;
+        for(int id:ring){int h=int(std::count_if(d.bonds.begin(),d.bonds.end(),[&](const Bond& b){return (b.a==id&&has(hydrogens,b.b))||(b.b==id&&has(hydrogens,b.a));}));if(h>(id==attachment?0:1)||(id==attachment&&d.atom(id)->explicitH>0))valid=false;}
         // Alternation is required; cyclohexadienes and fused/substituted rings are not Ph.
         if(!aromatics)for(int id:ring){int n=0;for(auto& b:d.bonds)if(has(edges,b.id)&&(b.a==id||b.b==id)&&b.kind==BondKind::Double)n++;if(n!=1)valid=false;}
         if(!valid)continue;
-        std::vector<int> removed=edges;for(int id:ring)if(id!=attachment)removed.push_back(id);
+        std::vector<int> removed=edges;removed.insert(removed.end(),hydrogens.begin(),hydrogens.end());for(int id:ring)if(id!=attachment)removed.push_back(id);
         // Detach electron arrows from atoms that disappear, retaining their visible path.
         for(auto& o:d.objects)if(has(removed,o.sourceAtom)||has(removed,o.targetAtom)||has(removed,o.sourceBond)||has(removed,o.targetBond)){o.points=routeArrow(d,o);o.autoRoute=false;o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;}
         eraseExact(d,removed);auto* a=d.atom(attachment);a->label="Ph";a->labelRuns.clear();a->explicitH=0;count++;

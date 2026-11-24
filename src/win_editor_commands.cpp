@@ -238,7 +238,7 @@ void command(int id){cancelStageCopy();if(isolatedStructureEditing){if(id==102)i
     status=doc.showMolecularAnnotations?L"분자 주석을 표시합니다.":L"분자 주석을 숨겼습니다.";
     changed();break;
  case abbreviateGroupsCommand:abbreviateGroups();break;
- case 166:{auto candidate=doc;auto ids=groupedSelection(selection);if(ids.empty())throw std::runtime_error("벤젠이 포함된 그룹이나 고리를 선택하세요.");int count=collapsePhenyl(candidate,ids);if(!count)throw std::runtime_error("단일 결합 하나로 연결된 비치환 벤젠을 찾지 못했습니다.");history.checkpoint(doc);doc=std::move(candidate);selection.erase(std::remove_if(selection.begin(),selection.end(),[&](int id){auto all=doc.allIds();return !contains(all,id);}),selection.end());changed();break;}
+ case 166:{auto candidate=doc;auto ids=groupedSelection(selection);if(activeStructureTarget()){if(auto* r=reaction(targetContainer))ids=r->slots.at(targetSlot).members;if(auto* p=plot(targetContainer))ids=targetAbove?p->states.at(targetSlot).above:p->states.at(targetSlot).below;}if(ids.empty())throw std::runtime_error("벤젠 고리, 연결 결합 또는 구조를 선택하세요.");int count=collapsePhenyl(candidate,ids);if(!count){status=L"Ph로 축약할 고리를 찾지 못했습니다. 벤젠 고리 또는 연결 결합을 선택하세요. 치환기 두 개 이상·융합 고리·주석 원자는 유지됩니다.";redraw();break;}history.checkpoint(doc);doc=std::move(candidate);const auto all=doc.allIds();selection.erase(std::remove_if(selection.begin(),selection.end(),[&](int id){return !contains(all,id);}),selection.end());status=L"벤젠 고리 "+std::to_wstring(count)+L"개를 Ph로 바꿨습니다. Ctrl+Z: 실행 취소";changed();break;}
  case 167:arrangeImported();break;
  case recognizeMechanismCommand:arrangeImported(true);break;
  case insertBranchArrowsCommand:insertBranchArrows();break;case externalMechanismCommand:externalMechanism();break;

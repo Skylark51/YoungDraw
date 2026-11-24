@@ -18,10 +18,13 @@
 
 namespace yd::editor {
 namespace {
-constexpr int drawingPanelBottom=830;
+constexpr int drawingPanelBottom=796;
 int topOffset=0,leftOffset=0,rightOffset=0,topLimit=0;
 std::vector<int> favorites;
 bool favoritesLoaded=false;
+int heldTool=0;
+Vec heldAt;
+bool toolReleaseConsumed=false;
 
 void loadFavorites(){
     if(favoritesLoaded)return;
@@ -34,6 +37,46 @@ void loadFavorites(){
             favorites.push_back(id);
     }
 }
+}
+bool beginToolHold(int id,Vec at){
+    if(id!=218&&id!=dottedBondCommand)return false;
+    heldTool=id;heldAt=at;toolReleaseConsumed=false;
+    SetCapture(win);SetTimer(win,915,500,nullptr);return true;
+}
+void cancelToolHold(){
+    KillTimer(win,915);heldTool=0;toolReleaseConsumed=false;
+}
+bool finishToolHold(Vec at){
+    if(toolReleaseConsumed){toolReleaseConsumed=false;return true;}
+    if(!heldTool)return false;
+    const int id=heldTool;cancelToolHold();ReleaseCapture();
+    if((at-heldAt).length()<14)command(id);
+    return true;
+}
+static void openToolOptions(int id,Vec at){
+    HMENU menu=CreatePopupMenu();
+    if(id==218){
+        AppendMenuW(menu,MF_STRING,218,L"오비탈 그리기");
+        AppendMenuW(menu,MF_STRING,219,L"종류·색상…");
+    }else{
+        AppendMenuW(menu,MF_STRING,dottedBondCommand,L"점선 결합");
+        AppendMenuW(menu,MF_STRING,interactionToolCommand,L"상호작용 점선");
+    }
+    POINT point{LONG(at.x),LONG(at.y)};ClientToScreen(win,&point);
+    int chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,win,nullptr);
+    DestroyMenu(menu);if(chosen)command(chosen);
+}
+void showHeldToolOptions(){
+    if(!heldTool)return;
+    const int id=heldTool;Vec at=heldAt;
+    cancelToolHold();ReleaseCapture();toolReleaseConsumed=true;
+    openToolOptions(id,at+Vec{36,24});toolReleaseConsumed=false;
+}
+bool toolOptions(Vec at){
+    for(const auto& hit:hits)if((hit.id==218||hit.id==dottedBondCommand)&&hit.box.Contains(float(at.x),float(at.y))){
+        openToolOptions(hit.id,{hit.box.GetRight(),hit.box.Y});return true;
+    }
+    return false;
 }
 bool pinTool(Vec at){
     for(const auto& hit:hits){
@@ -121,7 +164,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  loadFavorites();
  constexpr int structureHeaderWidth=418;
  const int toolbarWidth=isolatedStructureEditing?ww-structureHeaderWidth:ww;
- topLimit=std::max(0,(isolatedStructureEditing?1036:1308)+int(favorites.size())*48-toolbarWidth);
+ topLimit=std::max(0,(isolatedStructureEditing?1036:1356)+int(favorites.size())*48-toolbarWidth);
  topOffset=std::min(topOffset,topLimit);
  const auto toolbarClip=RectF(0,0,float(toolbarWidth),63);
  auto toolbarState=g.Save();g.SetClip(toolbarClip);g.TranslateTransform(float(-topOffset),0);
@@ -132,9 +175,9 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
          const bool active=id==rotateToolCommand&&tool==Rotate;
          if(active||hovered)appearance::rounded(g,box,8,active?palette.accent:palette.hover);
          Color tint=active?palette.onAccent:(id==101||id==102)?palette.accent:ink;
-         icon(g,id,{box.X+9,box.Y,26,26},tint);
+         icon(g,id,{box.X+9,box.Y+(id==184?9:0),26,26},tint);
          std::wstring label=helpText(id);auto cut=label.find_first_of(L"\n ·([");if(cut!=std::wstring::npos)label.resize(cut);
-         switch(id){case 100:label=L"새 문서";break;case 104:label=L"되돌림";break;case 105:label=L"재실행";break;case 107:label=L"맞춤";break;case 125:label=L"정렬";break;case molecularAnnotationsCommand:label=L"주석";break;case 155:label=L"원자 색";break;case arrowColorCommand:label=L"화살표 색";break;case rotateToolCommand:label=L"직접 회전";break;case 156:label=L"글자 색";break;case 160:label=L"좌우 반전";break;case 161:label=L"상하 반전";break;case 162:label=L"좌회전";break;case 163:label=L"우회전";break;case 164:label=L"각도";break;case 185:label=L"프로젝트";break;case bondAnimationCommand:label=L"움짤";break;case copyPngCommand:label=L"그림복사";break;}
+         switch(id){case 100:label=L"새 문서";break;case 104:label=L"실행 취소";break;case 105:label=L"다시 실행";break;case 107:label=L"맞춤";break;case 125:label=L"정렬";break;case molecularAnnotationsCommand:label=L"주석";break;case 155:label=L"원자 색";break;case arrowColorCommand:label=L"화살표 색";break;case rotateToolCommand:label=L"직접 회전";break;case 156:label=L"글자 색";break;case 160:label=L"좌우 반전";break;case 161:label=L"상하 반전";break;case 162:label=L"좌회전";break;case 163:label=L"우회전";break;case 164:label=L"각도";break;case 185:label=L"프로젝트";break;case bondAnimationCommand:label=L"움짤";break;case copyPngCommand:label=L"그림복사";break;case 184:label=L"";break;}
          ui::drawLabel(g,label,{box.X-2,box.Y+28,48,15},9.5f,active?palette.onAccent:palette.text,false,true);toolbarX+=48;
      }
  };
@@ -153,20 +196,18 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
      separator();group({107,125});
  }
  separator();group({170,171,172,173,174});
- if(!isolatedStructureEditing){separator();group({bondAnimationCommand,copyPngCommand});}
+ if(!isolatedStructureEditing){separator();group({bondAnimationCommand,copyPngCommand,184});}
  for(int id:favorites)group({id});
  g.Restore(toolbarState);
  clipHits(topHits,toolbarClip,float(-topOffset),0);
  if(isolatedStructureEditing){
-     button(g,copyPngCommand,L"그림복사",{float(ww-structureHeaderWidth+8),23,102,34});
+     button(g,copyPngCommand,L"그림복사",{float(ww-structureHeaderWidth+8),23,66,34});
+     button(g,184,L"",{float(ww-338),23,30,34});icon(g,184,{float(ww-336),27,26,26},ink);
      button(g,186,L"적용 · Ctrl+S",{float(ww-300),23,140,34});
      button(g,187,L"취소",{float(ww-152),23,136,34});
- }else{
-     button(g,184,L"배경 · 테마 ◇",{float(ww-168),63,152,22});
  }
- ui::drawLabel(g,L"YoungDraw · 구조·메커니즘·그래프",{16,67,180,18},9.f,muted,false,false);
  if(isolatedStructureEditing)text(g,L"이 창에서는 선택한 단계의 구조만 편집합니다. 적용하면 원래 메커니즘에 반영됩니다.",left+12,96,12,ink,true);
- // Keep every existing tool in place; selection actions use the spare chrome row.
+ // Selection formatting occupies the spare chrome row.
  const auto formatting=selectionFormatting();
  const auto quickCommands=selectionFormattingCommands(formatting);
  const bool showFormatting=!quickCommands.empty()&&!inlineEdit&&!drawing&&!dragging&&!boxing&&!panning&&!snapPlot&&!stageCopyOwner;
@@ -186,17 +227,17 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  leftOffset=std::min(leftOffset,std::max(0,drawingPanelBottom-(wh-bottom)));
  const auto leftHits=hits.size();auto leftState=g.Save();g.SetClip(leftClip);g.TranslateTransform(0,float(-leftOffset));
  text(g,L"그리기",16,101,11,muted,true);
- const std::vector<int> drawingTools={200,201,202,217,203,204,205,206,207,208,209,210,211,212,213,214,215,216,218,219,interactionToolCommand,dottedBondCommand};
- for(size_t i=0;i<drawingTools.size();i++)toolButton(g,drawingTools[i],{float(12+(i%2)*82),float(122+(i/2)*44),74,40},drawingTools[i]==(tool==DottedBond?dottedBondCommand:tool==Interaction?interactionToolCommand:200+int(tool)));
- text(g,L"원소",16,620,11,muted,true);std::vector<int> elements={6,7,8,16,15,9,17,35,53,1,5,14};
- for(int i=0;i<int(elements.size());i++)button(g,300+elements[i],ui::wide(symbol(elements[i])),{float(12+i%3*53),float(642+i/3*30),49,26},element==elements[i]);
+ const std::vector<int> drawingTools={200,209,201,204,202,205,203,217,207,208,210,211,212,216,215,dottedBondCommand,213,214,218};
+ for(size_t i=0;i<drawingTools.size();i++)toolButton(g,drawingTools[i],{float(12+(i%2)*82),float(122+(i/2)*44),74,40},drawingTools[i]==(tool==DottedBond||tool==Interaction?dottedBondCommand:200+int(tool)));
+ text(g,L"원소",16,586,11,muted,true);std::vector<int> elements={1,6,7,8,9,17,25,26,27,29};
+ for(int i=0;i<int(elements.size());i++)button(g,300+elements[i],ui::wide(symbol(elements[i])),{float(12+i%3*53),float(608+i/3*30),49,26},element==elements[i]);
  int shown=int(tool);for(auto& h:hits)if(h.box.Contains(float(mouse.x),float(mouse.y))){
      if(h.id==dottedBondCommand)shown=DottedBond;
      else if(h.id==interactionToolCommand)shown=Interaction;
      else if(h.id>=200&&h.id<=218)shown=h.id-200;
  }
- text(g,toolNames[size_t(shown)],12,772,10,muted);
- button(g,150,ui::wide(doc.style.labelFont)+((doc.style.labelFace&1)?L" 굵게":L"")+L" / "+ui::wide(number(doc.style.lineWidth))+L" pt",{12,794,156,29});
+ text(g,toolNames[size_t(shown)],12,738,10,muted);
+ button(g,150,ui::wide(doc.style.labelFont)+((doc.style.labelFace&1)?L" 굵게":L"")+L" / "+ui::wide(number(doc.style.lineWidth))+L" pt",{12,760,156,29});
 
  g.Restore(leftState);clipHits(leftHits,leftClip,0,float(-leftOffset));
  if(wh-bottom<drawingPanelBottom)text(g,L"↕ 휠",float(left-46),89,10,muted);

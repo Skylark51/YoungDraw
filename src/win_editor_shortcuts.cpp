@@ -92,7 +92,7 @@ void nudgeSelection(Vec delta){
     if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();repeatAction=[delta](){nudgeSelection(delta);};}
 }
 void rotateSelection(double degrees){
-    if(selection.empty())return;auto candidate=doc;auto ids=transformStructures(candidate,selection,degrees);
+    if(selection.empty())return;auto candidate=doc;auto ids=transformStructures(candidate,selection,degrees,false,false,nullptr,false);
     history.checkpoint(doc);doc=std::move(candidate);selection=std::move(ids);changed();repeatAction=[degrees](){rotateSelection(degrees);};
 }
 void copyCdxmlText(){

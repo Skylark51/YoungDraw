@@ -1,6 +1,9 @@
 #include "win_button_help.h"
 #include "win_theme.h"
 #include "win_ui.h"
+#include "win_dialogs.h"
+#include <iomanip>
+#include <sstream>
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <shobjidl_core.h>
@@ -28,13 +31,23 @@ const Palette themes[]={
  {c(0xe5ebf1),c(0xedf1f5),c(0xfbfcfe),c(0xced9e3),c(0xc7d1dc),c(0x34404b),c(0x667687),c(0x4c6278),c(0xffffff),c(0xedf1f5),c(0x283a4a),L"교수님이 보고있어",L"반투명 사진 · 2.4초마다 번쩍이는 눈빛",false,205}
 };
 Settings current;
+std::unique_ptr<Bitmap> customImage;
+std::wstring customImagePath;
+unsigned customRevision=0;
+const Palette& customPalette(){
+ static Palette result=themes[2];
+ const auto& v=current.colors;
+ result={c(v[0]),c(v[1]),c(v[2]),c(v[3]),c(v[4]),c(v[5]),c(v[6]),c(v[7]),c(v[8]),c(v[9]),c(v[10]),
+     current.customName.c_str(),L"",(.2126*c(v[9]).GetR()+.7152*c(v[9]).GetG()+.0722*c(v[9]).GetB())<128,0};
+ return result;
+}
 std::array<std::unique_ptr<Bitmap>,4> images;
 std::array<IStream*,4> streams{};
 std::unique_ptr<Bitmap> cached;
 int cacheW=0,cacheH=0,cacheKey=-1;
 const wchar_t* patternNames[]={L"없음",L"도트",L"격자",L"줄노트",L"등각 격자",L"육각 결합"};
 const wchar_t* intensityNames[]={L"약하게",L"보통",L"강하게"};
-void resetCache(){cached.reset();cacheKey=-1;}
+void resetCache(){cached.reset();cacheKey=-1;++customRevision;}
 Bitmap* image(int id){
  if((id<201||id>203)&&id!=205)return nullptr;size_t i=id==205?3:size_t(id-201);
  if(images[i])return images[i].get();
@@ -80,8 +93,15 @@ void pattern(Graphics& g,RectF box,int kind,Color color,float spacing=24){
  g.Restore(saved);
 }
 void scene(Graphics& g,RectF box,int theme,int strength,bool thumbnail){
- const auto& p=themes[theme];SolidBrush base(p.canvas);g.FillRectangle(&base,box);
- if(p.resource==205){
+ const auto& p=palette(theme);SolidBrush base(p.canvas);g.FillRectangle(&base,box);
+ if(theme==7&&!current.backgroundImage.empty()){
+  if(customImagePath!=current.backgroundImage){
+   customImagePath=current.backgroundImage;customImage.reset(Bitmap::FromFile(customImagePath.c_str(),FALSE));
+   if(customImage&&customImage->GetLastStatus()!=Ok)customImage.reset();
+  }
+  cover(g,customImage.get(),box);
+  SolidBrush veil(Color(BYTE(255*(100-current.imageOpacity)/100),p.canvas.GetR(),p.canvas.GetG(),p.canvas.GetB()));g.FillRectangle(&veil,box);
+ }else if(p.resource==205){
   if(auto* photo=image(205))g.DrawImage(photo,portraitBox(box));
   BYTE alpha=BYTE(thumbnail?80:strength==0?153:strength==1?102:76);
   SolidBrush veil(Color(alpha,p.canvas.GetR(),p.canvas.GetG(),p.canvas.GetB()));g.FillRectangle(&veil,box);
@@ -93,7 +113,15 @@ void scene(Graphics& g,RectF box,int theme,int strength,bool thumbnail){
   if(!thumbnail){GraphicsPath oval;oval.AddEllipse(box.X-box.Width*.18f,box.Y-box.Height*.2f,box.Width*1.36f,box.Height*1.4f);PathGradientBrush light(&oval);light.SetCenterColor(Color(p.darkCanvas?45:72,p.canvas.GetR(),p.canvas.GetG(),p.canvas.GetB()));Color edge(0,p.canvas.GetR(),p.canvas.GetG(),p.canvas.GetB());INT count=1;light.SetSurroundColors(&edge,&count);g.FillRectangle(&light,box);}
  }else if(theme==2){pattern(g,box,3,c(0xb5a38c,35),thumbnail?12.f:28.f);}
 }
-void save(){HKEY key;if(RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Appearance",0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr)!=ERROR_SUCCESS)return;DWORD a=current.theme,b=current.pattern,d=current.intensity;RegSetValueExW(key,L"Theme",0,REG_DWORD,reinterpret_cast<BYTE*>(&a),4);RegSetValueExW(key,L"Pattern",0,REG_DWORD,reinterpret_cast<BYTE*>(&b),4);RegSetValueExW(key,L"Intensity",0,REG_DWORD,reinterpret_cast<BYTE*>(&d),4);RegCloseKey(key);}
+void save(){
+ HKEY key;if(RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Appearance",0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr)!=ERROR_SUCCESS)return;
+ auto number=[&](const wchar_t* name,int value){DWORD n=DWORD(value);RegSetValueExW(key,name,0,REG_DWORD,reinterpret_cast<BYTE*>(&n),4);};
+ auto text=[&](const wchar_t* name,const std::wstring& value){RegSetValueExW(key,name,0,REG_SZ,reinterpret_cast<const BYTE*>(value.c_str()),DWORD((value.size()+1)*sizeof(wchar_t)));};
+ number(L"Theme",current.theme);number(L"Pattern",current.pattern);number(L"Intensity",current.intensity);
+ number(L"CustomSpacing",current.patternSpacing);number(L"CustomPatternOpacity",current.patternOpacity);number(L"CustomImageOpacity",current.imageOpacity);
+ RegSetValueExW(key,L"CustomColors",0,REG_BINARY,reinterpret_cast<const BYTE*>(current.colors.data()),DWORD(sizeof(current.colors)));
+ text(L"CustomName",current.customName);text(L"CustomImage",current.backgroundImage);RegCloseKey(key);
+}
 // The picker is painted as one surface. Native owner-drawn BUTTON children used to
 // repaint independently, leaving seams and uneven outlines between adjacent cards.
 struct Picker {
@@ -105,13 +133,15 @@ struct Picker {
 };
 struct Target {RectF box;int id;};
 constexpr float pickerWidth=916.f,pickerHeight=700.f;
-std::array<Target,18> targets(){
- std::array<Target,18> result{};
- for(int i=0;i<7;i++)result[size_t(i)]={{24.f+float(i%4)*220.f,108.f+float(i/4)*160.f,208.f,148.f},100+i};
- for(int i=0;i<6;i++)result[size_t(7+i)]={{24.f+float(i)*146.f,466.f,134.f,40.f},200+i};
- for(int i=0;i<3;i++)result[size_t(13+i)]={{24.f+float(i)*194.f,567.f,182.f,40.f},300+i};
- result[16]={{648.f,644.f,240.f,42.f},IDOK};
- result[17]={{526.f,644.f,110.f,42.f},IDCANCEL};
+std::array<Target,21> targets(){
+ std::array<Target,21> result{};
+ for(int i=0;i<8;i++)result[size_t(i)]={{24.f+float(i%4)*220.f,108.f+float(i/4)*160.f,208.f,148.f},100+i};
+ for(int i=0;i<6;i++)result[size_t(8+i)]={{24.f+float(i)*146.f,466.f,134.f,40.f},200+i};
+ for(int i=0;i<3;i++)result[size_t(14+i)]={{24.f+float(i)*194.f,567.f,182.f,40.f},300+i};
+ result[17]={{24.f,644.f,220.f,42.f},400};
+ result[18]={{256.f,644.f,174.f,42.f},401};
+ result[19]={{648.f,644.f,240.f,42.f},IDOK};
+ result[20]={{526.f,644.f,110.f,42.f},IDCANCEL};
  return result;
 }
 void roundPath(GraphicsPath& path,RectF r,float radius){
@@ -127,7 +157,7 @@ void outline(Graphics& g,RectF r,float radius,Color color,float width){
  Pen pen(color,width);pen.SetLineJoin(LineJoinRound);g.DrawPath(&pen,&path);
 }
 void pickerCard(Graphics& g,const Picker& state,int theme,RectF box){
- const auto& pal=palette(),&look=themes[theme];
+ const auto& pal=palette(),&look=palette(theme);
  bool selected=current.theme==theme,hot=state.hover==100+theme;
  rounded(g,box,12,look.panel);
  // Clip the entire thumbnail to rounded top corners. No rectangular image
@@ -143,7 +173,7 @@ void pickerCard(Graphics& g,const Picker& state,int theme,RectF box){
      box.X+1.f,box.Y+88.f,box.Width-2.f,box.Height-89.f);
  g.Restore(saved);
  label(g,look.name,{box.X+10.f,box.Y+94.f,box.Width-20.f,27.f},18,look.text,true,true);
- label(g,theme>=3?L"사진 배경":L"기본 배경",
+ label(g,theme==7?L"사용자 테마":theme>=3?L"사진 배경":L"기본 배경",
      {box.X+10.f,box.Y+123.f,box.Width-20.f,19.f},13,look.muted,false,true);
  // One crisp outline after painting the contents avoids doubled 1px borders.
  outline(g,{box.X+1.f,box.Y+1.f,box.Width-2.f,box.Height-2.f},11,
@@ -182,19 +212,19 @@ void drawPicker(Graphics& g,const Picker& state){
  g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
  g.SetCompositingQuality(CompositingQualityHighQuality);
  label(g,L"테마 선택",{24,20,870,35},23,pal.text,true);
- label(g,L"누르면 미리보기 · 적용으로 저장 · 취소로 복원. 문서·SVG·Office 출력 색상은 유지됩니다.",
-       {24,62,870,25},14,pal.muted);
+ label(g,L"",{24,62,870,25},14,pal.muted);
  const auto items=targets();
- for(int i=0;i<7;i++)pickerCard(g,state,i,items[size_t(i)].box);
+ for(int i=0;i<8;i++)pickerCard(g,state,i,items[size_t(i)].box);
  label(g,L"배경 무늬",{24,424,870,28},15,pal.text,true);
- for(int i=0;i<6;i++)pickerButton(g,state,200+i,items[size_t(7+i)].box,
+ for(int i=0;i<6;i++)pickerButton(g,state,200+i,items[size_t(8+i)].box,
      patternNames[i],current.pattern==i);
  label(g,L"사진 배경 강도",{24,526,870,28},15,pal.text,true);
- for(int i=0;i<3;i++)pickerButton(g,state,300+i,items[size_t(13+i)].box,
-     intensityNames[i],current.intensity==i);
- label(g,pal.description,{24,613,600,24},13,pal.muted);
- pickerButton(g,state,IDCANCEL,items[17].box,L"취소");
- pickerButton(g,state,IDOK,items[16].box,L"적용",true);
+ for(int i=0;i<3;i++)pickerButton(g,state,300+i,items[size_t(14+i)].box,
+     intensityNames[i],current.theme==7?current.imageOpacity==25+25*i:current.intensity==i);
+ pickerButton(g,state,400,items[17].box,L"내 테마 편집");
+ pickerButton(g,state,401,items[18].box,L"배경 사진…");
+ pickerButton(g,state,IDCANCEL,items[20].box,L"취소");
+ pickerButton(g,state,IDOK,items[19].box,L"적용",true);
 }
 int hitTest(float x,float y){
  const auto items=targets();
@@ -208,10 +238,50 @@ PointF pointInPicker(HWND hwnd,LPARAM lp){
  float w=float(std::max(1L,rc.right-rc.left)),h=float(std::max(1L,rc.bottom-rc.top));
  return {GET_X_LPARAM(lp)*pickerWidth/w,GET_Y_LPARAM(lp)*pickerHeight/h};
 }
+void customize(Picker& state){
+ const auto before=current;
+ auto hex=[](unsigned color){std::ostringstream s;s<<'#'<<std::hex<<std::setfill('0')<<std::setw(6)<<color;return s.str();};
+ const int order[]={9,10,0,1,2,3,4,5,6,7,8};
+ const wchar_t* names[]={L"배경",L"캔버스 글자·선",L"상단",L"사이드바",L"버튼",L"마우스를 올린 버튼",L"테두리",L"글자",L"보조 글자",L"강조",L"강조 버튼 글자"};
+ std::vector<ui::Field> fields={{L"이름",ui::utf8(current.customName)}};
+ for(size_t i=0;i<std::size(order);++i)fields.push_back({names[i],hex(current.colors[size_t(order[i])]),false,{},true});
+ fields.push_back(ui::numericField(L"무늬 간격 (px)",current.patternSpacing,8,100,2));
+ fields.push_back(ui::numericField(L"무늬 진하기 (%)",current.patternOpacity,0,100,5));
+ fields.push_back(ui::numericField(L"사진 진하기 (%)",current.imageOpacity,0,100,5));
+ fields.push_back({L"배경 사진",ui::utf8(current.backgroundImage)});
+ auto preview=[&](const std::vector<std::string>& values)->std::wstring{
+  try{
+   Settings next=before;next.theme=7;next.customName=ui::wide(values[0]);
+   if(next.customName.empty()||next.customName.size()>40)return L"이름은 1–40자로 입력하세요.";
+   for(size_t i=0;i<std::size(order);++i){
+    const auto& value=values[i+1];
+    if(value.size()!=7||value[0]!='#'||value.find_first_not_of("0123456789abcdefABCDEF",1)!=std::string::npos)return L"색은 #RRGGBB 형식으로 입력하세요.";
+    next.colors[size_t(order[i])]=unsigned(std::stoul(value.substr(1),nullptr,16));
+   }
+   auto number=[&](size_t i,int low,int high){size_t used=0;double n=std::stod(values[i],&used);if(used!=values[i].size()||!std::isfinite(n)||n<low||n>high)throw std::runtime_error("range");return int(std::round(n));};
+   next.patternSpacing=number(12,8,100);next.patternOpacity=number(13,0,100);next.imageOpacity=number(14,0,100);
+   next.backgroundImage=ui::wide(values[15]);
+   if(!next.backgroundImage.empty()&&GetFileAttributesW(next.backgroundImage.c_str())==INVALID_FILE_ATTRIBUTES)return L"배경 사진 파일을 확인하세요.";
+   current=std::move(next);resetCache();if(state.refresh)state.refresh();InvalidateRect(state.window,nullptr,FALSE);return {};
+  }catch(const std::exception&){return L"간격은 8–100, 진하기는 0–100으로 입력하세요.";}
+ };
+ if(!ui::form(state.window,L"내 테마",fields,preview,
+     {{L"작업 영역",{0,1,2,12,13,14,15}},{L"도구 영역",{3,4,5,6,7,8,9,10,11}}}))current=before;
+ resetCache();if(state.refresh)state.refresh();InvalidateRect(state.window,nullptr,FALSE);
+}
 void choose(Picker& state,int id){
- if(id>=100&&id<107)current.theme=id-100;
+ if(id>=100&&id<108)current.theme=id-100;
+ else if(id==400){customize(state);return;}
+ else if(id==401){
+  wchar_t path[32768]{};OPENFILENAMEW file{sizeof(file)};file.hwndOwner=state.window;file.lpstrFile=path;file.nMaxFile=DWORD(std::size(path));
+  file.lpstrFilter=L"사진 (PNG, JPEG, BMP)\0*.png;*.jpg;*.jpeg;*.bmp\0\0";file.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+  if(!openFileDialog(file))return;
+  std::unique_ptr<Bitmap> candidate(Bitmap::FromFile(path,FALSE));
+  if(!candidate||candidate->GetLastStatus()!=Ok){messageBox(state.window,L"사진을 읽을 수 없습니다.",L"배경 사진",MB_OK);return;}
+  current.backgroundImage=path;current.theme=7;
+ }
  else if(id>=200&&id<206)current.pattern=id-200;
- else if(id>=300&&id<303)current.intensity=id-300;
+ else if(id>=300&&id<303){current.intensity=id-300;if(current.theme==7)current.imageOpacity=25+25*(id-300);}
  else if(id==IDOK||id==IDCANCEL){
      state.accepted=id==IDOK;state.done=true;return;
  }else return;
@@ -234,8 +304,8 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
  // existing theme regression tests even though buttons are painted in one view.
  case WM_COMMAND:{
      int id=LOWORD(wp);
-     if((id>=100&&id<107)||(id>=200&&id<206)||
-        (id>=300&&id<303)||id==IDOK||id==IDCANCEL){
+     if((id>=100&&id<108)||(id>=200&&id<206)||
+        (id>=300&&id<303)||id==400||id==401||id==IDOK||id==IDCANCEL){
          state->focus=id;choose(*state,id);
      }
      return 0;
@@ -255,14 +325,16 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
      std::vector<ui::HelpRegion> help;
      for(const auto& target:targets()){
          const int id=target.id;std::wstring text;
-         if(id>=100&&id<107){
-             const auto& look=themes[id-100];
+         if(id>=100&&id<108){
+             const auto& look=palette(id-100);
              text=std::wstring(look.name)+L" · "+look.description+L". 클릭하여 미리 보고 적용으로 저장합니다.";
          }else if(id>=200&&id<206){
-             text=std::wstring(patternNames[id-200])+L" 배경 무늬를 미리 봅니다. 문서 데이터와 SVG·Office 출력은 바뀌지 않습니다.";
+             text=std::wstring(patternNames[id-200])+L" 배경 무늬를 미리 봅니다.";
          }else if(id>=300&&id<303){
              text=std::wstring(intensityNames[id-300])+L": 사진 배경의 선명도를 미리 봅니다. 기본 배경과 무늬의 강도는 바뀌지 않습니다.";
-         }else if(id==IDOK)text=L"미리 본 테마·배경 무늬·사진 강도를 저장하고 닫습니다. 문서 내용은 바뀌지 않습니다.";
+         }else if(id==400)text=L"내 테마의 색상·사진·무늬 간격과 진하기를 편집합니다.";
+         else if(id==401)text=L"내 테마의 배경 사진을 고릅니다.";
+         else if(id==IDOK)text=L"미리 본 테마·배경 무늬·사진 강도를 저장하고 닫습니다.";
          else text=L"이 창을 열기 전의 테마·배경 무늬·사진 강도로 돌아갑니다. Esc로도 취소할 수 있습니다.";
          const auto b=target.box;
          help.push_back({UINT_PTR(id),{LONG(b.X*w/pickerWidth),LONG(b.Y*h/pickerHeight),LONG(b.GetRight()*w/pickerWidth),LONG(b.GetBottom()*h/pickerHeight)},text});
@@ -310,13 +382,13 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
      }
      if(wp==VK_LEFT||wp==VK_RIGHT||wp==VK_UP||wp==VK_DOWN){
          int id=state->focus;
-         if(id>=100&&id<107){
+         if(id>=100&&id<108){
              int index=id-100,step=0;
              if(wp==VK_LEFT)step=-1;
              if(wp==VK_RIGHT)step=1;
              if(wp==VK_UP)step=-4;
              if(wp==VK_DOWN)step=4;
-             state->focus=100+std::clamp(index+step,0,6);
+             state->focus=100+std::clamp(index+step,0,7);
          }else if(id>=200&&id<206){
              state->focus=200+std::clamp(id-200+
                  ((wp==VK_LEFT||wp==VK_UP)?-1:1),0,5);
@@ -337,11 +409,21 @@ LRESULT CALLBACK pickerProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
  return DefWindowProcW(hwnd,msg,wp,lp);
 }
 }
-const Palette& palette(){return themes[current.theme];}const Palette& palette(int index){return themes[std::clamp(index,0,6)];}Settings settings(){return current;}
-void load(){HKEY key;if(RegOpenKeyExW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Appearance",0,KEY_QUERY_VALUE,&key)!=ERROR_SUCCESS)return;auto read=[&](const wchar_t* name,int fallback,int max){DWORD value=0,size=4,type=0;if(RegQueryValueExW(key,name,nullptr,&type,reinterpret_cast<BYTE*>(&value),&size)==ERROR_SUCCESS&&type==REG_DWORD&&size==4&&value<=DWORD(max))return int(value);return fallback;};current={read(L"Theme",Settings{}.theme,6),read(L"Pattern",1,5),read(L"Intensity",1,2)};RegCloseKey(key);resetCache();}
-void shutdown(){cached.reset();for(auto& i:images)i.reset();for(auto& s:streams)if(s){s->Release();s=nullptr;}}
+const Palette& palette(){return palette(current.theme);}const Palette& palette(int index){return index==7?customPalette():themes[std::clamp(index,0,6)];}Settings settings(){return current;}
+void load(){
+ current=Settings{};HKEY key;if(RegOpenKeyExW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\Appearance",0,KEY_QUERY_VALUE,&key)!=ERROR_SUCCESS){resetCache();return;}
+ auto read=[&](const wchar_t* name,int fallback,int low,int high){DWORD value=0,size=4,type=0;if(RegQueryValueExW(key,name,nullptr,&type,reinterpret_cast<BYTE*>(&value),&size)==ERROR_SUCCESS&&type==REG_DWORD&&size==4&&value>=DWORD(low)&&value<=DWORD(high))return int(value);return fallback;};
+ auto text=[&](const wchar_t* name,std::wstring fallback){DWORD type=0,size=0;if(RegQueryValueExW(key,name,nullptr,&type,nullptr,&size)!=ERROR_SUCCESS||type!=REG_SZ||size<2||size>65536)return fallback;std::vector<wchar_t> value(size/2+1,0);if(RegQueryValueExW(key,name,nullptr,&type,reinterpret_cast<BYTE*>(value.data()),&size)!=ERROR_SUCCESS)return fallback;return std::wstring(value.data());};
+ current.theme=read(L"Theme",2,0,7);current.pattern=read(L"Pattern",1,0,5);current.intensity=read(L"Intensity",1,0,2);
+ current.patternSpacing=read(L"CustomSpacing",28,8,100);current.patternOpacity=read(L"CustomPatternOpacity",11,0,100);current.imageOpacity=read(L"CustomImageOpacity",45,0,100);
+ DWORD type=0,size=DWORD(sizeof(current.colors));auto colors=current.colors;
+ if(RegQueryValueExW(key,L"CustomColors",nullptr,&type,reinterpret_cast<BYTE*>(colors.data()),&size)==ERROR_SUCCESS&&type==REG_BINARY&&size==sizeof(colors)&&std::all_of(colors.begin(),colors.end(),[](unsigned v){return v<=0xffffff;}))current.colors=colors;
+ current.customName=text(L"CustomName",L"내 테마");if(current.customName.empty()||current.customName.size()>40)current.customName=L"내 테마";
+ current.backgroundImage=text(L"CustomImage",L"");RegCloseKey(key);resetCache();
+}
+void shutdown(){customImage.reset();customImagePath.clear();cached.reset();for(auto& i:images)i.reset();for(auto& s:streams)if(s){s->Release();s=nullptr;}}
 void rounded(Graphics& g,RectF r,float radius,Color color){if(r.Width<=0||r.Height<=0)return;float d=std::min({radius*2,r.Width,r.Height});GraphicsPath p;p.AddArc(r.X,r.Y,d,d,180,90);p.AddArc(r.GetRight()-d,r.Y,d,d,270,90);p.AddArc(r.GetRight()-d,r.GetBottom()-d,d,d,0,90);p.AddArc(r.X,r.GetBottom()-d,d,d,90,90);p.CloseFigure();SolidBrush b(color);g.FillPath(&b,&p);}
-void background(Graphics& g,RectF box){int w=std::max(1,int(box.Width)),h=std::max(1,int(box.Height)),key=current.theme*100+current.pattern*10+current.intensity;if(!cached||cacheW!=w||cacheH!=h||cacheKey!=key){cached=std::make_unique<Bitmap>(w,h,PixelFormat32bppARGB);Graphics bg(cached.get());bg.SetSmoothingMode(SmoothingModeAntiAlias);bg.SetInterpolationMode(InterpolationModeHighQualityBicubic);scene(bg,{0,0,float(w),float(h)},current.theme,current.intensity,false);const auto& p=palette();pattern(bg,{0,0,float(w),float(h)},current.pattern,Color(p.darkCanvas?24:28,p.canvasInk.GetR(),p.canvasInk.GetG(),p.canvasInk.GetB()));cacheW=w;cacheH=h;cacheKey=key;}g.DrawImage(cached.get(),box.X,box.Y);
+void background(Graphics& g,RectF box){int w=std::max(1,int(box.Width)),h=std::max(1,int(box.Height)),key=current.theme*100+current.pattern*10+current.intensity;if(!cached||cacheW!=w||cacheH!=h||cacheKey!=key){cached=std::make_unique<Bitmap>(w,h,PixelFormat32bppARGB);Graphics bg(cached.get());bg.SetSmoothingMode(SmoothingModeAntiAlias);bg.SetInterpolationMode(InterpolationModeHighQualityBicubic);scene(bg,{0,0,float(w),float(h)},current.theme,current.intensity,false);const auto& p=palette();pattern(bg,{0,0,float(w),float(h)},current.pattern,Color(BYTE(current.theme==7?255*current.patternOpacity/100:p.darkCanvas?24:28),p.canvasInk.GetR(),p.canvasInk.GetG(),p.canvasInk.GetB()),current.theme==7?float(current.patternSpacing):28.f);cacheW=w;cacheH=h;cacheKey=key;}g.DrawImage(cached.get(),box.X,box.Y);
  if(current.theme==6){float phase=float(GetTickCount64()%2400)/2400.f;
   float pulse=.16f+.84f*std::pow(.5f+.5f*std::cos(phase*6.2831853f),12.f);
   eyeGlints(g,box,pulse);
@@ -363,7 +445,7 @@ void themePopup(HMENU menu){
         item.fMask=MIIM_FTYPE|MIIM_DATA;item.fType|=MFT_OWNERDRAW;item.dwItemData=data;SetMenuItemInfoW(menu,i,TRUE,&item);
     }
 }
-struct NativeColors {ui::DialogColors colors;int theme=settings().theme;};
+struct NativeColors {ui::DialogColors colors;int theme=settings().theme;unsigned revision=customRevision;};
 constexpr UINT_PTR windowThemeId=991;
 
 LRESULT CALLBACK themedWindow(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR paintClient){
@@ -373,7 +455,7 @@ LRESULT CALLBACK themedWindow(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DW
         return DefSubclassProc(h,msg,wp,lp);
     }
     auto* state=static_cast<NativeColors*>(GetPropW(h,L"YoungDraw.NativeColors"));
-    if(!state||state->theme!=settings().theme){
+    if(!state||state->theme!=settings().theme||state->revision!=customRevision){
         auto next=std::make_unique<NativeColors>();
         if(!SetPropW(h,L"YoungDraw.NativeColors",next.get()))return DefSubclassProc(h,msg,wp,lp);
         delete state;

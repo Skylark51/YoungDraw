@@ -522,9 +522,11 @@ static void pngExportChecks(HWND hwnd){
     {Graphics graphics(&toolbar);HDC dc=graphics.GetHDC();paint(dc);graphics.ReleaseHDC(dc);}
     const auto copyIcon=std::find_if(hits.begin(),hits.end(),[](const auto& hit){return hit.id==copyPngCommand;});
     const auto applyButton=std::find_if(hits.begin(),hits.end(),[](const auto& hit){return hit.id==186;});
+    const auto themeIcon=std::find_if(hits.begin(),hits.end(),[](const auto& hit){return hit.id==184;});
     check(copyIcon!=hits.end()&&applyButton!=hits.end()&&copyIcon->box.Y==applyButton->box.Y&&
-        copyIcon->box.Height==applyButton->box.Height&&applyButton->box.X-copyIcon->box.GetRight()==8,
-        "independent structure editor displays PNG copy next to Apply in the top header");
+        copyIcon->box.Height==applyButton->box.Height&&themeIcon!=hits.end()&&
+        themeIcon->box.X>copyIcon->box.GetRight()&&themeIcon->box.GetRight()<applyButton->box.X,
+        "independent structure header keeps copy, theme and apply controls separate");
     const auto copyPoint=MAKELPARAM(int(copyIcon->box.X+copyIcon->box.Width/2),int(copyIcon->box.Y+copyIcon->box.Height/2));
     selection.clear();
     auto highResolution=drawingBitmap(doc,true,highResolutionDpi);
@@ -1717,7 +1719,7 @@ int main(int argc,char** argv){
                   "narrow stage editing keeps mouse rotation and the adjacent color palettes visible");
             isolatedStructureEditing=false;
             ww=fullWidth;repaint();
-            check(present(218)&&present(219)&&hit(150).GetBottom()<=wh-bottom,"orbital tools and style button fit the client height");
+            check(present(218)&&!present(219)&&hit(150).GetBottom()<=wh-bottom,"unified orbital tool and style button fit the client height");
             auto before=toNative(doc);command(183);repaint();
             check(present(plotManagerCommand)&&present(130)&&!helpText(plotManagerCommand).empty(),"graph sidebar exposes the manager and new graph entry");
             check(hit(plotManagerCommand).Y==hit(130).Y,"graph management is the primary sidebar action");
@@ -1726,7 +1728,7 @@ int main(int argc,char** argv){
             doc=Document{};selection.clear();history.clear();origin={left+160.,top+180.};zoom=2;dirty=false;
             check(present(dottedBondCommand)&&!helpText(dottedBondCommand).empty(),"dotted single bond tool is available in the sidebar with help");
             const auto dotted=hit(dottedBondCommand);
-            mouseDown({dotted.X+dotted.Width/2,dotted.Y+dotted.Height/2});
+            mouseDown({dotted.X+dotted.Width/2,dotted.Y+dotted.Height/2});mouseUp({dotted.X+dotted.Width/2,dotted.Y+dotted.Height/2});
             mouseDown(origin);mouseUp(origin+Vec{60,0});
             check(tool==DottedBond&&doc.atoms.size()==2&&doc.bonds.size()==1&&doc.bonds[0].kind==BondKind::Dot&&doc.objects.empty(),"dotted bond tool draws a real single bond between two atoms");
             const int dottedId=doc.bonds.front().id;
@@ -1740,13 +1742,12 @@ int main(int argc,char** argv){
             check(doc.bonds.size()==1&&doc.bond(dottedId)->kind==BondKind::Dot,"dotted tool converts an existing bond on click");
             check(fromCdxml(toCdxml(doc)).bond(dottedId)->kind==BondKind::Dot,"drawn dotted bond survives a CDXML round trip");
             doc=Document{};selection.clear();history.clear();dirty=false;
-            const auto interaction=hit(interactionToolCommand);
-            mouseDown({interaction.X+interaction.Width/2,interaction.Y+interaction.Height/2});
+            command(interactionToolCommand);
             mouseDown(origin);mouseUp(origin+Vec{60,20});
             check(tool==Interaction&&doc.atoms.empty()&&doc.bonds.empty()&&doc.objects.size()==1&&
                   doc.objects.front().kind==ObjectKind::Line&&doc.objects.front().dash==2&&
                   fromCdxml(toCdxml(doc)).objects.front().dash==2,
-                  "the sidebar interaction tool draws a dotted graphic that survives a CDXML round trip");
+                  "the combined dotted tool interaction mode draws a dotted graphic that survives a CDXML round trip");
             command(104);check(doc.objects.empty(),"interaction line can be undone");
             const int donor=doc.addAtom({0,0},8),acceptor=doc.addAtom({45,0},7);
             mouseDown(screen(doc.atom(donor)->p));mouseUp(screen(doc.atom(acceptor)->p));
