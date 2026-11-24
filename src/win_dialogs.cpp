@@ -142,14 +142,10 @@ void drawGraphCard(const DRAWITEMSTRUCT& item,const GraphPicker& picker,int mode
     if(selected){SolidBrush chosen(palette.accent);g.FillEllipse(&chosen,box.X+box.Width-19.f,box.Y+9.f,8.f,8.f);}
 }
 void layoutInlineGraphPicker(HWND hwnd,int width){
-    constexpr int count=5,gap=10;
-    const int available=width-(count-1)*gap;
-    for(int i=0;i<count;++i){
-        const int left=available*i/count,right=available*(i+1)/count;
-        MoveWindow(GetDlgItem(hwnd,100+i),left+i*gap,32,right-left,104,TRUE);
-    }
-    MoveWindow(GetDlgItem(hwnd,IDOK),width-210,150,100,34,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDCANCEL),width-100,150,100,34,TRUE);
+    constexpr int columns=3,gap=10;const int card=(width-(columns-1)*gap)/columns;
+    for(int i=0;i<5;++i)MoveWindow(GetDlgItem(hwnd,100+i),(i%columns)*(card+gap),32+(i/columns)*112,card,104,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDOK),width-210,264,100,34,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDCANCEL),width-100,264,100,34,TRUE);
 }
 LRESULT CALLBACK graphPickerProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
     auto* picker=reinterpret_cast<GraphPicker*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
@@ -318,7 +314,7 @@ using FormTabs=std::vector<std::pair<std::wstring,std::vector<size_t>>>;
 struct Form {
     FormTabs tabs;
     FormTabStyle tabStyle;
-    HWND tab=nullptr;
+    HWND tab=nullptr,heading=nullptr;
     HWND wheelInput=nullptr;
     int wheelDelta=0;
     std::vector<std::vector<HWND>> rows;
@@ -467,10 +463,8 @@ static LRESULT CALLBACK formEditEdgeProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,
 static void layoutEmbeddedForm(HWND hwnd,Form& f){
     RECT bounds{};
     GetClientRect(hwnd,&bounds);
-    constexpr int margin=16,gap=26,columns=2;
-    const int width=std::max(600L,bounds.right);
-    const int columnWidth=(width-2*margin-gap)/columns;
-    const int labelWidth=f.tabStyle.unified?128:158,buttonWidth=f.tabStyle.unified?26:32,buttonGap=4;
+    constexpr int margin=16,gap=26;int columns=2;
+    const int width=std::max(400L,bounds.right);
     const int top=f.tabStyle.unified?57:f.tab?63:28;
     std::vector<size_t> rows;
     if(f.tab){
@@ -480,7 +474,13 @@ static void layoutEmbeddedForm(HWND hwnd,Form& f){
         if(active>=0&&size_t(active)<f.tabs.size())rows=f.tabs[size_t(active)].second;
         for(const auto& row:f.rows)for(auto item:row)ShowWindow(item,SW_HIDE);
     }else for(size_t i=0;i<f.rows.size();++i)rows.push_back(i);
-    const int rowCount=int((rows.size()+1)/2);
+    int singleHeight=top+44;for(auto i:rows)singleHeight+=(f.fields[i].multiline?std::min(64,inputHeight(f.fields[i])):29)+8;
+    if(!f.tabStyle.unified&&width<760&&singleHeight<=bounds.bottom)columns=1;
+    const int columnWidth=(width-2*margin-(columns-1)*gap)/columns;
+    const bool narrow=width<760&&columns==2;
+    const int labelWidth=narrow?96:f.tabStyle.unified?128:158,buttonWidth=narrow?22:f.tabStyle.unified?26:32,buttonGap=4;
+    if(f.heading)MoveWindow(f.heading,margin,0,width-2*margin,23,TRUE);
+    const int rowCount=int((rows.size()+columns-1)/columns);
     const int rowPitch=f.tabStyle.unified?std::clamp((int(bounds.bottom)-top-43)/std::max(1,rowCount),27,43):37;
     int y=top;
     for(size_t slot=0;slot<rows.size();++slot){
@@ -502,7 +502,7 @@ static void layoutEmbeddedForm(HWND hwnd,Form& f){
         if(f.tab)for(auto item:row)ShowWindow(item,SW_SHOWNA);
         if(field.buttonsOnly)ShowWindow(row[1],SW_HIDE);
         if(f.tabStyle.unified)for(auto item:row)SetWindowPos(item,HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
-        if(slot%columns==1||slot+1==rows.size()){
+        if(slot%columns==size_t(columns-1)||slot+1==rows.size()){
             const auto& first=f.fields[rows[slot-slot%columns]];
             const int firstHeight=first.multiline?std::min(64,inputHeight(first)):29;
             y+=f.tabStyle.unified?rowPitch:std::max(h,firstHeight)+8;
@@ -605,7 +605,7 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             wchar_t title[96]{};
             GetWindowTextW(hwnd,title,int(std::size(title)));
             auto label=CreateWindowW(L"STATIC",title,WS_CHILD|WS_VISIBLE,16,0,630,24,hwnd,nullptr,nullptr,nullptr);
-            SendMessageW(label,WM_SETFONT,(WPARAM)f->font,TRUE);
+            SendMessageW(label,WM_SETFONT,(WPARAM)f->font,TRUE);f->heading=label;SetWindowLongPtrW(label,GWL_STYLE,GetWindowLongPtrW(label,GWL_STYLE)|SS_ENDELLIPSIS);
             y=28;
         }
         if(!f->tabs.empty()){
@@ -656,11 +656,13 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 f->rows.back().push_back(b);
             }
             for(size_t choice=0;choice<field.quickChoices.size();++choice){
-                const int x=664-int(field.quickChoices.size()-choice)*48;
+                const int choiceWidth=field.buttonsOnly?(430-int(field.quickChoices.size()-1)*6)/int(field.quickChoices.size()):44;
+                const int x=field.buttonsOnly?230+int(choice)*(choiceWidth+6):664-int(field.quickChoices.size()-choice)*48;
                 auto b=CreateWindowW(L"BUTTON",field.quickChoices[choice].second.c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
-                    x,y,44,29,hwnd,reinterpret_cast<HMENU>(INT_PTR(20000+i*32+choice)),nullptr,nullptr);
+                    x,y,choiceWidth,29,hwnd,reinterpret_cast<HMENU>(INT_PTR(20000+i*32+choice)),nullptr,nullptr);
                 SendMessageW(b,WM_SETFONT,reinterpret_cast<WPARAM>(f->font),TRUE);f->rows.back().push_back(b);
             }
+            if(field.buttonsOnly)ShowWindow(edit,SW_HIDE);
             if(f->tabs.empty())y+=f->embedded?34:rowHeight(field);
         }
         if(f->tab&&!f->embedded){layoutFormTabs(*f);y=f->contentBottom;}

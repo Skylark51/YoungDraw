@@ -414,6 +414,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         if(std::find(reaction.hiddenArrows.begin(),reaction.hiddenArrows.end(),int(i))!=reaction.hiddenArrows.end())return;
         auto caption=transitionCaption(i<reaction.above.size()?reaction.above[i]:"");
         double font=mechanismFontSize(reaction,d.style),gap=reaction.spacing-reaction.slotWidth-2*mechanismArrowMargin(reaction,d.style);
+        if(i<reaction.links.size()&&!reaction.links[i].name.empty())addText(reaction.links[i].name,mid+Vec{0,aboveY-font*1.6},font*10/d.style.fontSize,"#000000",true);
         auto description=caption.description;
         if(i<reaction.above.size())addText(description,mid+Vec{0,aboveY-font*1.3*std::count(description.begin(),description.end(),'\n')},font*10/d.style.fontSize,"#000000",true,2,int(i));
         if(!caption.name.empty())addText(caption.name,mid+Vec{0,belowY},font*10/d.style.fontSize,"#000000",true,11,int(i));
@@ -427,13 +428,13 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(link.from>=0&&++outgoing[link.from]>1)branched=true;
         }
         if(r.cyclic||!r.cycleStages.empty())addText(r.centerLabel,r.p+Vec{0,-font*.65},10*factor,"#000000",true,10);
-        if(!branched&&!r.cyclic&&!r.unit.empty()&&!r.slots.empty()){double right=-1e20,top=1e20;for(size_t j=0;j<r.slots.size();j++){Vec pos=reactionSlot(r,j);right=std::max(right,pos.x);top=std::min(top,pos.y);}addText("("+r.unit+")",{right+r.slotWidth/2,top-r.slotHeight/2-font*2},10*factor,"#000000",true);}
+        if(!branched&&!r.cyclic&&(!r.unit.empty()||!r.energySymbol.empty())&&!r.slots.empty()){double right=-1e20,top=1e20;for(size_t j=0;j<r.slots.size();j++){Vec pos=reactionSlot(r,j);right=std::max(right,pos.x);top=std::min(top,pos.y);}addText(r.energySymbol.empty()?"("+r.unit+")":r.energySymbol+(r.unit.empty()?"":" / ("+r.unit+")"),{right+r.slotWidth/2,top-r.slotHeight/2-font*2},10*factor,"#000000",true);}
         for(size_t i=0;i<r.slots.size();i++){arrowIndex=int(i);Vec c=reactionSlot(r,i);addText(r.slots[i].label,c+Vec{0,r.slotHeight/2+font*.6},10*factor,"#000000",true,1,int(i));
             if(r.cyclic||!r.slots[i].energy.empty())addEnergy(r.slots[i].energy,c+Vec{0,r.slotHeight/2+font*.6+font*1.5*(1+std::count(r.slots[i].label.begin(),r.slots[i].label.end(),'\n'))},9,int(i),r.spacing-20);
             if(r.cyclic){
                 bool hidden=std::find(r.hiddenArrows.begin(),r.hiddenArrows.end(),int(i))!=r.hiddenArrows.end();
                 double radius=(c-r.p).length(),step=2*pi/r.slots.size(),start=-pi/2+step*i,trim=std::asin(std::min(.95,(mechanismCycleNodeRadius(r,d.style)+font*.5)/radius));
-                auto arc=[&](double rad,double begin,double end){double bend=4./3*std::tan((end-begin)/4);Vec a=r.p+Vec{std::cos(begin),std::sin(begin)}*rad,z=r.p+Vec{std::cos(end),std::sin(end)}*rad,t0{-std::sin(begin),std::cos(begin)},t1{-std::sin(end),std::cos(end)};double direction=end>begin?1:-1;Vec u=t1*direction,n{-u.y,u.x};Primitive curve;curve.reactionArrow=int(i);curve.owner=owner;curve.type=Primitive::Bezier;curve.width=mechanismArrowWeight(r,d.style);double headSize=5*mechanismArrowHead(r,d.style);curve.points={a,a+t0*(bend*rad),z-t1*(bend*rad),z-u*(headSize*.96)};s.items.push_back(curve);Primitive head;head.reactionArrow=int(i);head.owner=owner;head.type=Primitive::Polygon;head.points={z,z-u*headSize+n*(headSize*.4),z-u*headSize-n*(headSize*.4)};s.items.push_back(head);};
+                auto arc=[&](double rad,double begin,double end){if(mechanismArrowType(r,size_t(arrowIndex))==2)std::swap(begin,end);double bend=4./3*std::tan((end-begin)/4);Vec a=r.p+Vec{std::cos(begin),std::sin(begin)}*rad,z=r.p+Vec{std::cos(end),std::sin(end)}*rad,t0{-std::sin(begin),std::cos(begin)},t1{-std::sin(end),std::cos(end)};double direction=end>begin?1:-1;Vec u=t1*direction,n{-u.y,u.x};Primitive curve;curve.reactionArrow=int(i);curve.owner=owner;curve.type=Primitive::Bezier;curve.width=mechanismArrowWeight(r,d.style);double headSize=5*mechanismArrowHead(r,d.style);curve.points={a,a+t0*(bend*rad),z-t1*(bend*rad),z-u*(headSize*.96)};s.items.push_back(curve);Primitive head;head.reactionArrow=int(i);head.owner=owner;head.type=Primitive::Polygon;head.points={z,z-u*headSize+n*(headSize*.4),z-u*headSize-n*(headSize*.4)};s.items.push_back(head);};
                 if(!hidden){arc(radius-(mechanismArrowType(r,size_t(arrowIndex))==1?2:0),start+trim,start+step-trim);if(mechanismArrowType(r,size_t(arrowIndex))==1)arc(radius+2,start+step-trim,start+trim);}
                 Vec mid=mechanismCycleTransitionPosition(r,i,d.style,radius);
                 transitionLabels(r,i,mid,-font*1.7,font*.65);continue;
@@ -443,7 +444,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 if(r.vertical){
                     double margin=mechanismArrowMargin(r,d.style),weight=mechanismArrowWeight(r,d.style),head=mechanismArrowHead(r,d.style);
                     Vec a=c+Vec{0,r.slotHeight/2+mechanismCaptionHeight(r,d.style)+margin},b=next-Vec{0,r.slotHeight/2+margin};
-                    if(mechanismArrowType(r,size_t(arrowIndex))==1){arrow(a+Vec{-2,0},b+Vec{-2,0},"#000000",weight,1,head);arrow(b+Vec{2,0},a+Vec{2,0},"#000000",weight,1,head);}else arrow(a,b,"#000000",weight,1,head);
+                    if(mechanismArrowType(r,size_t(arrowIndex))==1){arrow(a+Vec{-2,0},b+Vec{-2,0},"#000000",weight,1,head);arrow(b+Vec{2,0},a+Vec{2,0},"#000000",weight,1,head);}else if(mechanismArrowType(r,size_t(arrowIndex))==2)arrow(b,a,"#000000",weight,1,head);else arrow(a,b,"#000000",weight,1,head);
                     auto caption=transitionCaption(i<r.above.size()?r.above[i]:"");Vec mid=(a+b)*.5;
                     double w=textWidth(measure,caption.description,font);
                     addText(caption.description,mid-Vec{font+w/2,font*.65*(1+std::count(caption.description.begin(),caption.description.end(),'\n'))},10*factor,"#000000",true,2,int(i));
@@ -459,7 +460,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                     double outside=c.x+direction*(edge+font*2),weight=mechanismArrowWeight(r,d.style),head=mechanismArrowHead(r,d.style);
                     Vec a=c+Vec{direction*edge,0},b=next+Vec{direction*edge,0};
                     auto bent=[&](Vec from,Vec to,double x,double dy){from.y+=dy;to.y+=dy;Vec p{x,from.y},q{x,to.y};arrow(from,p,"#000000",weight,0);arrow(p,q,"#000000",weight,0);arrow(q,to,"#000000",weight,1,head);};
-                    if(mechanismArrowType(r,size_t(arrowIndex))==1){bent(a,b,outside+direction*2,-2);bent(b,a,outside-direction*2,2);}else bent(a,b,outside,0);
+                    if(mechanismArrowType(r,size_t(arrowIndex))==1){bent(a,b,outside+direction*2,-2);bent(b,a,outside-direction*2,2);}else if(mechanismArrowType(r,size_t(arrowIndex))==2)bent(b,a,outside,0);else bent(a,b,outside,0);
                     auto caption=transitionCaption(i<r.above.size()?r.above[i]:"");
                     double captionWidth=std::max(textWidth(measure,caption.description,font),textWidth(measure,caption.name,font));
                     if(i<r.below.size())captionWidth=std::max(captionWidth,textWidth(measure,r.below[i],font));
@@ -468,7 +469,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 }
                 double trim=std::min(len*.49,r.slotWidth/2+mechanismArrowMargin(r,d.style));Vec a=c+u*trim,b=next-u*trim,n{-u.y,u.x};
                 double weight=mechanismArrowWeight(r,d.style),head=mechanismArrowHead(r,d.style);
-                if(mechanismArrowType(r,size_t(arrowIndex))==1){arrow(a-n*2,b-n*2,"#000000",weight,1,head);arrow(b+n*2,a+n*2,"#000000",weight,1,head);}else arrow(a,b,"#000000",weight,1,head);
+                if(mechanismArrowType(r,size_t(arrowIndex))==1){arrow(a-n*2,b-n*2,"#000000",weight,1,head);arrow(b+n*2,a+n*2,"#000000",weight,1,head);}else if(mechanismArrowType(r,size_t(arrowIndex))==2)arrow(b,a,"#000000",weight,1,head);else arrow(a,b,"#000000",weight,1,head);
                 Vec mid=(a+b)*.5;transitionLabels(r,i,mid,-font*1.7,font*.65);
             }
         }
@@ -509,7 +510,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 };
                 if(std::find(r.hiddenArrows.begin(),r.hiddenArrows.end(),int(e))==r.hiddenArrows.end()){
                     if(mechanismArrowType(r,size_t(arrowIndex))==1){auto reverse=*arc;reverse.radius+=2;std::swap(reverse.start,reverse.end);arc->radius-=2;drawArc(*arc);drawArc(reverse);}
-                    else drawArc(*arc);
+                    else{if(mechanismArrowType(r,size_t(arrowIndex))==2)std::swap(arc->start,arc->end);drawArc(*arc);}
                 }
                 const size_t firstLabel=s.items.size();
                 transitionLabels(r,e,mechanismLinkCaption(r,e,d.style),-font*1.7,font*.65);
@@ -553,6 +554,7 @@ Scene makeScene(const Document& d,const Measure& measure){
                 }
                 for(size_t j=1;j<points.size();j++)arrow(points[j-1]+delta,points[j]+delta,"#000000",weight,j+1==points.size()?1:0,head);
             };
+            if(mechanismArrowType(r,size_t(arrowIndex))==2)std::reverse(path.begin(),path.end());
             draw(path,mechanismArrowType(r,size_t(arrowIndex))==1?-2:0);if(mechanismArrowType(r,size_t(arrowIndex))==1){std::reverse(path.begin(),path.end());draw(path,2);}
             transitionLabels(r,e,mechanismLinkCaption(r,e,d.style),-font*1.7,font*.65);
         }
@@ -595,9 +597,9 @@ Scene makeScene(const Document& d,const Measure& measure){
                 return textWidth(measure,text,font,d.style.labelFont,d.style.labelFace);
             };
             double y=top-font*3;
-            if(!r.unit.empty()&&!spins.empty())y-=font*1.5;
-            if(!r.unit.empty()){
-                const std::string unit="Energy ("+r.unit+")";
+            if((!r.unit.empty()||!r.energySymbol.empty())&&!spins.empty())y-=font*1.5;
+            if((!r.unit.empty()||!r.energySymbol.empty())){
+                const std::string unit=r.energySymbol.empty()?"Energy ("+r.unit+")":r.energySymbol+(r.unit.empty()?"":" / ("+r.unit+")");
                 addText(unit,{right-legendWidth(unit),y},10*factor);
                 y+=font*1.5;
             }
@@ -622,10 +624,10 @@ Scene makeScene(const Document& d,const Measure& measure){
                 }
             }
         }
-        if(r.cyclic&&!r.unit.empty()&&!r.slots.empty()){
+        if(r.cyclic&&(!r.unit.empty()||!r.energySymbol.empty())&&!r.slots.empty()){
             double right=r.p.x,top=r.p.y;
             for(auto& item:s.items)if(item.owner==r.id&&item.type==Primitive::Text&&!item.points.empty()){right=std::max(right,item.points[0].x+textWidth(measure,item.text,item.fontSize,item.font,item.face));top=std::min(top,item.points[0].y);}
-            addText("("+r.unit+")",{right+font,top-font*2},10*factor,"#000000",false);
+            addText(r.energySymbol.empty()?"("+r.unit+")":r.energySymbol+(r.unit.empty()?"":" / ("+r.unit+")"),{right+font,top-font*2},10*factor,"#000000",false);
         }
     }
     for(auto& plot:d.plots){

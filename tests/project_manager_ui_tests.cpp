@@ -9,6 +9,7 @@ namespace fs=std::filesystem;
 namespace {
 std::string failure;fs::path projectFolder;int phase=0,openCalls=0;bool fullEditorSeen=false;
 void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+void capture(HWND window,const wchar_t* filename){RECT r{};GetClientRect(window,&r);Gdiplus::Bitmap bitmap(r.right,r.bottom,PixelFormat32bppARGB);{Gdiplus::Graphics graphics(&bitmap);auto dc=graphics.GetHDC();PrintWindow(window,dc,PW_CLIENTONLY);graphics.ReleaseHDC(dc);}const CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};bitmap.Save(filename,&png);}
 void command(HWND h,int id){SendMessageW(h,WM_COMMAND,MAKEWPARAM(id,BN_CLICKED),0);}
 void CALLBACK cancelFullEditor(HWND manager,UINT,UINT_PTR timer,DWORD){
     HWND form=nullptr;while((form=FindWindowExW(nullptr,form,L"YoungDrawForm",L"파일 이름·노트")))if(GetWindow(form,GW_OWNER)==manager)break;
@@ -23,6 +24,8 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
     try{
         ui::attachWindowHelp(manager);for(int id=10;id<=35;id++){auto control=GetDlgItem(manager,id);if(control)check(ui::hasButtonHelp(control),"every project action has tooltip help");}
         auto list=GetDlgItem(manager,41),search=GetDlgItem(manager,44),note=GetDlgItem(manager,42);
+        int iconWidth=0,iconHeight=0;ImageList_GetIconSize(ListView_GetImageList(list,LVSIL_NORMAL),&iconWidth,&iconHeight);
+        check((GetWindowLongPtrW(list,GWL_STYLE)&LVS_TYPEMASK)==LVS_ICON&&iconWidth>=48&&iconHeight>=48,"project files use large folder and drawing icons");
         if(phase==1){
             auto saved=Project::load(projectFolder);
             check(!ListView_GetEditControl(list)&&IsWindow(manager)&&openCalls==0,"inline rename Enter finishes without opening the drawing or closing the manager");
@@ -41,11 +44,11 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
             check(fullEditorSeen&&!ListView_GetEditControl(list),"existing F2 still opens the full name and note dialog");
             check(Project::load(projectFolder).items[2].name==L"Nested renamed","cancelling the original F2 dialog preserves the renamed item");
         }else{
-        check(ListView_GetItemCount(list)==2,"root displays folder and file");
+        check(ListView_GetItemCount(list)==2,"root displays folder and file");capture(manager,L"project-large-icons.png");
         SetWindowPos(manager,nullptr,0,0,640,480,SWP_NOMOVE|SWP_NOZORDER);
         RECT bounds{};GetClientRect(manager,&bounds);
         for(int id=10;id<=45;++id){auto c=GetDlgItem(manager,id);if(!c||!IsWindowVisible(c))continue;RECT r{};GetWindowRect(c,&r);MapWindowPoints(nullptr,manager,reinterpret_cast<POINT*>(&r),2);check(r.left>=0&&r.top>=0&&r.right<=bounds.right&&r.bottom<=bounds.bottom,"controls fit compact monitor layout");}
-        SetWindowTextW(search,L"needle");check(ListView_GetItemCount(list)==1,"notes search finds nested item");
+        capture(manager,L"project-large-icons-compact.png");SetWindowTextW(search,L"needle");check(ListView_GetItemCount(list)==1,"notes search finds nested item");
         ListView_SetItemState(list,0,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);
         const auto nested=Project::load(projectFolder).items[2];
         command(manager,38);auto edit=ListView_GetEditControl(list);check(edit!=nullptr,"quick rename opens a native editor on the filtered row");

@@ -384,7 +384,7 @@ HMENU canvasContextMenu(int contextOwner,int copyOwner){
         HMENU stages=CreatePopupMenu();for(auto entry:std::initializer_list<std::pair<int,const wchar_t*>>{{143,L"단계 삽입…"},{144,L"단계 제거…"},{146,L"두 단계 합치기…"},{145,L"드래그로 단계 연결"},{148,L"단계·연결 표 편집…"},{149,L"화살표 길이…"},{147,L"선택한 연결 제거"}})AppendMenuW(stages,MF_STRING,entry.first,entry.second);
         AppendMenuW(menu,MF_POPUP,(UINT_PTR)stages,L"단계·연결");add(125,L"자동 정렬");add(126,L"촉매 순환 배치");add(169,L"분기 추가…");add(168,L"화살표 중앙 X…");
     }else if(plot(contextOwner)){
-        add(plotManagerCommand,L"그래프 관리…");add(137,L"축 설정…");add(plotAnnotationsCommand,L"TS·이름 위치…");add(addEnergyGapCommand,L"에너지 갭 추가…");add(energyGapStyleCommand,L"에너지 갭 글꼴·색상…");
+        add(plotManagerCommand,L"그래프 관리…");add(137,L"축 설정…");add(plotAnnotationsCommand,L"TS·이름 위치…");add(addEnergyGapCommand,L"에너지 갭…");
     }else if(!selection.empty()){
         add(121,L"선택 항목 편집…");add(165,L"크기 조정…");
         const bool chemical=std::any_of(selection.begin(),selection.end(),[](int id){return doc.atom(id)||doc.bond(id);});

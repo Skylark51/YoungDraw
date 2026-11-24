@@ -150,7 +150,7 @@ bool arrangeCircularMerge(Reaction& r,const Style& style){
 int mechanismArrowType(const Reaction& r,size_t edge){return edge<r.arrowTypes.size()&&r.arrowTypes[edge]>=0?r.arrowTypes[edge]:r.arrowType;}
 void setMechanismArrowType(Reaction& r,size_t edge,int type){
     const size_t count=r.explicitConnections()?r.links.size():r.slots.empty()?0:r.slots.size()-(r.cyclic?0:1);
-    if(edge>=count||type<0||type>1)throw std::runtime_error("화살표를 선택하세요.");
+    if(edge>=count||type<0||type>2)throw std::runtime_error("화살표를 선택하세요.");
     r.arrowTypes.resize(count,-1);r.arrowTypes[edge]=type;
 }
 void arrangeCycleBranches(Reaction& r,const Style& style){
@@ -468,7 +468,7 @@ Reaction mechanismGraphData(const Reaction& original,const MechanismRows& rows){
         int a=from?states[from]:-1,b=states[to];if(a==b)throw std::runtime_error("같은 구조로 연결할 수 없습니다.");
         if(std::any_of(result.links.begin(),result.links.end(),[&](const MechanismLink& l){return l.from==a&&l.to==b;}))throw std::runtime_error("중복 연결을 제거하세요.");
         MechanismLink l{a,b,{}};int old=row[1].empty()?-1:integer(row[1],1,int(base.links.size()))-1;
-        if(old>=0){if(!usedEdges.insert(old).second)throw std::runtime_error("복제한 새 화살표의 번호는 비워 두세요.");l.members=base.links[size_t(old)].members;l.bend=base.links[size_t(old)].bend;}
+        if(old>=0){if(!usedEdges.insert(old).second)throw std::runtime_error("복제한 새 화살표의 번호는 비워 두세요.");l.members=base.links[size_t(old)].members;l.name=base.links[size_t(old)].name;l.bend=base.links[size_t(old)].bend;}
         if(row.size()==7)l.bend=row[6].empty()?0:decimal(row[6],2);
         result.links.push_back(l);result.arrowTypes.push_back(old>=0?mechanismArrowType(base,size_t(old)):-1);result.above.push_back(row[4]);result.below.push_back(row[5]);if(result.links.size()>100)throw std::runtime_error("화살표 연결은 최대 100개입니다.");if(old>=0){edgeMap[old]=int(result.links.size()-1);if(std::find(base.hiddenArrows.begin(),base.hiddenArrows.end(),old)!=base.hiddenArrows.end())result.hiddenArrows.push_back(int(result.links.size()-1));}
         if(old>=0)for(auto mark:base.crosses)if(mark.index==old){mark.index=int(result.links.size()-1);result.crosses.push_back(mark);}

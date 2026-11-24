@@ -27,6 +27,8 @@ LRESULT CALLBACK dispatchProcedure(HWND h,UINT message,WPARAM wp,LPARAM lp){if(m
 LRESULT CALLBACK observe(int code,WPARAM wp,LPARAM lp){if(code>=0&&dispatcher){const auto& message=*reinterpret_cast<CWPRETSTRUCT*>(lp);if(message.message==WM_CREATE||message.message==WM_SETTEXT){wchar_t type[32]{};GetClassNameW(message.hwnd,type,32);if(message.message==WM_CREATE||!_wcsicmp(type,L"Button"))PostMessageW(dispatcher,attachMessage,reinterpret_cast<WPARAM>(message.hwnd),0);}}return CallNextHookEx(hook,code,wp,lp);}
 }
 std::wstring labelHelp(const std::wstring& source){std::wstring label;for(auto c:source)if(c!=L'&')label+=c;auto match=[&](const wchar_t* key){return label.find(key)!=std::wstring::npos;};
+    if(label==L"열(경로) 추가")return L"빈 에너지 경로 열을 추가합니다. 새 열에 바로 입력하고 표 실행 취소로 복원할 수 있습니다.";
+    if(label==L"열(경로) 삭제")return L"선택한 경로 열을 삭제합니다. 최소 한 경로는 유지하며 표 실행 취소로 복원합니다.";
     if(label==L"ΔE"||label==L"ΔG")return L"Y축 제목을 "+label+L" 표기로 바꿉니다. 에너지 수치는 변환하지 않습니다. 제목을 직접 입력하면 해당 문구를 사용합니다.";
     if(label==L"ΔE / (단위)")return L"축 제목과 단위를 나눗셈으로 표시합니다. 예: ΔE / (kcal mol⁻¹), IUPAC 표기입니다. 에너지 수치는 바뀌지 않습니다.";
     if(label==L"ΔE (단위)")return L"축 제목 뒤에 단위를 괄호로 표시합니다. 예: ΔE (kcal mol⁻¹). 에너지 수치는 바뀌지 않습니다.";
@@ -73,6 +75,8 @@ std::wstring buttonHelpText(HWND button){auto root=GetAncestor(button,GA_ROOT);a
     }
     if(type==L"YoungDrawAnimationPreview"){const std::map<int,std::wstring> meanings={{101,L"애니메이션을 재생하거나 일시 정지합니다."},{102,L"첫 프레임부터 애니메이션을 다시 재생합니다."},{103,L"이전 구조 단계로 이동합니다."},{104,L"다음 구조 단계로 이동합니다."},{105,L"프레임 속도와 단계별 정지 시간을 설정합니다."},{106,L"각 단계의 구조명·단계명·에너지 자막을 표로 편집합니다."},{107,L"현재 단계의 구조를 다른 구조·이미지로 교체합니다."},{108,L"현재 애니메이션을 GIF 파일로 저장합니다."},{109,L"애니메이션 미리보기를 닫습니다."},{112,L"출력 크기·배경·반복과 애니메이션 출력 설정을 조정합니다."},{113,L"새 구조 단계를 애니메이션에 추가합니다."},{114,L"현재 애니메이션 단계를 삭제합니다."},{115,L"각 단계 사이의 전환 시간과 정지 시간을 따로 설정합니다."},{116,L"두 구조 사이에 중간 프레임을 설계하여 결합 변화를 조정합니다."}};auto found=meanings.find(id);if(found!=meanings.end())return found->second;}
     if(type==L"YoungDrawPlotManager"){
+        if(id==4410)return L"미리보기를 전체 보기로 되돌립니다. 문서의 크기나 위치는 바뀌지 않습니다.";
+        if(id==4411||id==4412)return L"그래프 미리보기를 확대하거나 축소합니다. 미리보기 위에서 휠로도 조절하고 우클릭 드래그로 이동할 수 있습니다.";
         if(id==4406)return L"한 편집 화면에서 X축·Y축의 축선, 제목, 상태 이름, 범위·눈금과 단위를 아이콘으로 선택합니다. 축을 바꿔도 입력값이 유지되며 한 번에 적용하거나 취소할 수 있습니다.";
         if(id==4405)return L"두 인접 준위 사이의 일반 연결을 광여기 물결 화살표로 바꿉니다. hν와 화살촉은 낮은 준위에서 높은 준위로의 전이를 나타냅니다.";
         if(id==4404)return L"그래프 상태 이름·에너지 숫자 크기와 데이터 표 화면의 글자 크기를 각각 바꿉니다.";

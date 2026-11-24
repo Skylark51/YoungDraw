@@ -157,22 +157,22 @@ struct Manager {
     void rememberWidths(){DWORD widths[]={DWORD(leftWidth),DWORD(rightWidth)};HKEY key{};if(RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\ProjectManager",0,nullptr,0,KEY_WRITE,nullptr,&key,nullptr)==ERROR_SUCCESS){RegSetValueExW(key,L"PaneWidths",0,REG_BINARY,reinterpret_cast<BYTE*>(widths),sizeof(widths));RegCloseKey(key);}}
     void layout(){
         RECT r;GetClientRect(window,&r);int w=r.right,h=r.bottom;
-        int left=std::clamp(leftWidth,120,std::max(120,w/3));
-        int side=std::clamp(rightWidth,180,std::max(180,w/2));
+        const bool compact=h<600;
+        int left=std::clamp(leftWidth,120,std::max(120,compact?w/4:w/3));
+        int side=compact?180:std::clamp(rightWidth,180,std::max(180,w/2));
         int x=left+22,px=std::max(x+180,w-side-10);side=w-px-10;
         auto place=[&](int id,int xx,int yy,int ww,int hh){MoveWindow(GetDlgItem(window,id),xx,yy,std::max(1,ww),std::max(1,hh),TRUE);};
-        const bool compact=h<600;
-        const int tileHeight=46,rowPitch=compact?46:48;
+        const int tileHeight=compact?46:72,rowPitch=tileHeight+2,actionsTop=compact?52:84;
         const int leftTile=left/3;
         place(1,10,10,left-44,24);place(16,left-30,4,40,tileHeight);
-        for(int i=0;i<6;++i)place(10+i,10+(i%3)*leftTile,52+(i/3)*rowPitch,leftTile,tileHeight);
-        const int projectsTop=52+2*rowPitch;
+        for(int i=0;i<6;++i)place(10+i,10+(i%3)*leftTile,actionsTop+(i/3)*rowPitch,leftTile,tileHeight);
+        const int projectsTop=actionsTop+2*rowPitch;
         MoveWindow(projects,10,projectsTop,left,std::max(1,h-projectsTop-34),TRUE);
         place(3,x,10,std::max(1,px-x-10),24);
         const int actionIds[]={20,21,22,23,24,25,26,27,29,30,31,17,18};
         const int centerWidth=px-x-10;
-        const int cols=std::max(1,centerWidth/55),rows=(13+cols-1)/cols;
-        const int tileWidth=std::clamp(centerWidth/cols,55,72);
+        const int cols=std::max(1,centerWidth/(compact?55:76)),rows=(13+cols-1)/cols;
+        const int tileWidth=std::max(1,centerWidth/cols);
         for(int i=0;i<13;++i)place(actionIds[i],x+(i%cols)*tileWidth,38+(i/cols)*rowPitch,tileWidth,tileHeight);
         const int sy=40+rows*rowPitch;place(46,x,sy,px-x-10,22);
         const int searchTop=sy+(compact?0:24);
@@ -181,16 +181,16 @@ struct Manager {
         int top=searchTop+62;MoveWindow(items,x,top,std::max(1,px-x-10),std::max(1,h-top-34),TRUE);
         ListView_SetColumnWidth(items,0,std::max(90,px-x-115));ListView_SetColumnWidth(items,1,90);
         leftGrip={left+10,projectsTop,x,h-34};rightGrip={px-9,52,px,h-34};
-        constexpr int previewTile=44;
+        const int previewTile=std::max(36,std::min(68,side/4));
         for(int i=32;i<=35;++i)place(i,px+(i-32)*previewTile,4,previewTile,tileHeight);
-        preview={px,54,w-10,std::max(110,h/2)};
-        place(2,px,preview.bottom+8,side,24);MoveWindow(note,px,preview.bottom+36,std::max(1,side),std::max(1,h-int(preview.bottom)-118),TRUE);
-        place(28,px,h-78,56,tileHeight);place(36,px+62,h-66,side-62,24);
+        preview={px,tileHeight+12,w-10,std::max(tileHeight+68,h/2)};
+        place(2,px,preview.bottom+8,side,24);MoveWindow(note,px,preview.bottom+36,std::max(1,side),std::max(1,h-int(preview.bottom)-36-tileHeight-44),TRUE);
+        place(28,px,h-tileHeight-32,72,tileHeight);place(36,px+78,h-tileHeight-10,side-78,24);
         MoveWindow(hint,10,h-26,std::max(1,w-20),22,TRUE);
         for(int id:{1,3,16,40,41,42,43,2,28,36,44,45,46})ShowWindow(GetDlgItem(window,id),expanded?SW_HIDE:SW_SHOW);
         ShowWindow(GetDlgItem(window,46),expanded||compact?SW_HIDE:SW_SHOW);
         for(int id=10;id<=31;++id)if(GetDlgItem(window,id))ShowWindow(GetDlgItem(window,id),expanded?SW_HIDE:SW_SHOW);
-        if(expanded){preview={10,54,w-10,h-10};for(int i=32;i<=35;++i)place(i,10+(i-32)*previewTile,4,previewTile,tileHeight);}
+        if(expanded){preview={10,tileHeight+12,w-10,h-10};for(int i=32;i<=35;++i)place(i,10+(i-32)*previewTile,4,previewTile,tileHeight);}
         InvalidateRect(window,nullptr,TRUE);
     }
     void saveNote(){
@@ -393,16 +393,16 @@ struct Manager {
                 L"새 구조",L"파일 추가",L"문서 추가",L"열기",L"이름·노트",L"삭제",L"위로",L"아래로",L"노트 저장",
                 L"새 폴더",L"상위 폴더",L"이동",L"크게 보기",L"확대",L"축소",L"초기화"};
             const wchar_t* caption=draw.CtlID==32&&expanded?L"목록 보기":captions[draw.CtlID-10];
-            constexpr int side=25;
-            const int x=(area.left+area.right-side)/2,y=area.top+1;
+            const int side=std::min(38,int(draw.rcItem.bottom-draw.rcItem.top)-19);
+            const int x=(area.left+area.right-side)/2,y=area.top+4;
             RECT square{x,y,x+side,y+side};
             const bool primary=!disabled&&(draw.CtlID==14||draw.CtlID==23);
             {
                 Gdiplus::Graphics g(dc);g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-                appearance::rounded(g,{float(x),float(y),float(side),float(side)},6,
+                appearance::rounded(g,{float(area.left+1),float(area.top+1),float(area.right-area.left-2),float(area.bottom-area.top-2)},10,
                     active?palette.hover:primary?palette.accent:palette.raised);
                 ui::drawLabel(g,caption,{float(area.left),float(square.bottom+1),float(area.right-area.left),float(area.bottom-square.bottom-1)},
-                    11.f,disabled?palette.muted:palette.text,false,true);
+                    11.f,disabled?palette.muted:primary&&!active?palette.onAccent:palette.text,false,true);
             }
             SetTextColor(dc,color(disabled?palette.muted:primary&&!active?palette.onAccent:palette.text));
             SelectObject(dc,iconFont);
@@ -422,7 +422,7 @@ struct Manager {
                 self->panelBrush=CreateSolidBrush(color(palette.panel));
                 self->raisedBrush=CreateSolidBrush(color(palette.raised));
                 self->font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
-                self->iconFont=CreateFontW(-18,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe MDL2 Assets");
+                self->iconFont=CreateFontW(-28,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe MDL2 Assets");
                 DWORD widths[2]{},bytes=sizeof(widths);if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\YoungDraw\\ProjectManager",L"PaneWidths",RRF_RT_REG_BINARY,nullptr,widths,&bytes)==ERROR_SUCCESS&&bytes==sizeof(widths)){self->leftWidth=int(widths[0]);self->rightWidth=int(widths[1]);}
                 self->control(L"STATIC",L"내 프로젝트",1,0);self->control(L"BUTTON",L"검색…",16,WS_TABSTOP|BS_OWNERDRAW);self->control(L"STATIC",L"노트 · 자동 저장",2,0);
                 self->heading=self->control(L"STATIC",L"",3,SS_ENDELLIPSIS);
@@ -439,17 +439,24 @@ struct Manager {
                 self->breadcrumb=self->control(L"STATIC",L"",45,SS_ENDELLIPSIS);
                 self->projects=self->control(L"LISTBOX",L"",40,WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|WS_TABSTOP);
                 SendMessageW(self->projects,LB_SETITEMHEIGHT,0,24);
-                self->items=self->control(WC_LISTVIEWW,L"",41,LVS_REPORT|LVS_SHOWSELALWAYS|LVS_EDITLABELS|WS_TABSTOP);
-                self->images=ImageList_Create(20,20,ILC_COLOR32|ILC_MASK,2,0);
-                for(auto stock:{SIID_FOLDER,SIID_DOCNOASSOC}){SHSTOCKICONINFO icon{sizeof(icon)};if(SUCCEEDED(SHGetStockIconInfo(stock,SHGSI_ICON|SHGSI_SMALLICON,&icon))){ImageList_AddIcon(self->images,icon.hIcon);DestroyIcon(icon.hIcon);}}
-                ListView_SetImageList(self->items,self->images,LVSIL_SMALL);
+                self->items=self->control(WC_LISTVIEWW,L"",41,LVS_ICON|LVS_AUTOARRANGE|LVS_SHOWSELALWAYS|LVS_EDITLABELS|WS_TABSTOP);
+                self->images=ImageList_Create(48,48,ILC_COLOR24,2,0);
+                auto addIcon=[&](HICON icon,int replace=-1){
+                    BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=48;info.bmiHeader.biHeight=-48;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=24;
+                    void* pixels=nullptr;auto dc=CreateCompatibleDC(nullptr);auto bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,&pixels,nullptr,0);auto previous=SelectObject(dc,bitmap);
+                    RECT box{0,0,48,48};FillRect(dc,&box,self->panelBrush);DrawIconEx(dc,0,0,icon,48,48,0,nullptr,DI_NORMAL);SelectObject(dc,previous);DeleteDC(dc);
+                    if(replace<0)ImageList_Add(self->images,bitmap,nullptr);else ImageList_Replace(self->images,replace,bitmap,nullptr);DeleteObject(bitmap);
+                };
+                for(auto stock:{SIID_FOLDER,SIID_DOCNOASSOC}){SHSTOCKICONINFO icon{sizeof(icon)};if(SUCCEEDED(SHGetStockIconInfo(stock,SHGSI_ICON|SHGSI_LARGEICON,&icon))){addIcon(icon.hIcon);DestroyIcon(icon.hIcon);}}
+                if(auto brand=static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(101),IMAGE_ICON,48,48,0))){addIcon(brand,1);DestroyIcon(brand);}
+                ListView_SetImageList(self->items,self->images,LVSIL_NORMAL);ListView_SetIconSpacing(self->items,112,108);
                 SetWindowSubclass(self->items,itemListProc,1,0);
                 ListView_SetBkColor(self->items,color(palette.panel));
                 ListView_SetTextBkColor(self->items,color(palette.panel));
                 ListView_SetTextColor(self->items,color(palette.text));
                 ListView_SetInsertMarkColor(self->items,color(palette.accent));
                 ListView_SetExtendedListViewStyle(self->items,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_INFOTIP);
-                LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=260;col.pszText=const_cast<wchar_t*>(L"이름 · 드래그로 순서 변경");ListView_InsertColumn(self->items,0,&col);col.cx=90;col.pszText=const_cast<wchar_t*>(L"형식");ListView_InsertColumn(self->items,1,&col);
+                LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=260;col.pszText=const_cast<wchar_t*>(L"파일");ListView_InsertColumn(self->items,0,&col);col.cx=90;col.pszText=const_cast<wchar_t*>(L"형식");ListView_InsertColumn(self->items,1,&col);
                 self->note=self->control(L"EDIT",L"",42,WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_TABSTOP);SendMessageW(self->note,EM_SETLIMITTEXT,1024*1024,0);
                 self->hint=self->control(L"STATIC",L"다른 PC의 프로젝트: 폴더 전체를 옮긴 뒤 불러오기에서 project.ydproject 선택",43,SS_ENDELLIPSIS);
                 DragAcceptFiles(h,TRUE);self->layout();self->load();ui::attachWindowHelp(h);return 0;}

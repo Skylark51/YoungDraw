@@ -13,7 +13,8 @@ namespace {
 int phase=0,tick=0,drawCalls=0;std::string failure;
 void check(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
 void command(HWND window,int id){SendMessageW(window,WM_COMMAND,MAKEWPARAM(id,BN_CLICKED),0);}
-void select(HWND editor,int row){SendDlgItemMessageW(editor,20,LB_SETCURSEL,row,0);SendMessageW(editor,WM_COMMAND,MAKEWPARAM(20,LBN_SELCHANGE),0);}
+int stageCount(HWND list){int count=0;for(int i=0;i<int(SendMessageW(list,LB_GETCOUNT,0,0));++i)if(int(SendMessageW(list,LB_GETITEMDATA,i,0))>0)++count;return count;}
+void select(HWND editor,int row){auto list=GetDlgItem(editor,20);for(int i=0;i<int(SendMessageW(list,LB_GETCOUNT,0,0));++i)if(int(SendMessageW(list,LB_GETITEMDATA,i,0))==row+1){row=i;break;}SendDlgItemMessageW(editor,20,LB_SETCURSEL,row,0);SendMessageW(editor,WM_COMMAND,MAKEWPARAM(20,LBN_SELCHANGE),0);}
 RECT childRect(HWND editor,int id){RECT r{};GetWindowRect(GetDlgItem(editor,id),&r);MapWindowPoints(nullptr,editor,(POINT*)&r,2);return r;}
 // Render our test window directly: no desktop capture or user-app interaction.
 struct Picture {
@@ -32,6 +33,10 @@ void CALLBACK fillMetadata(HWND editor,UINT,UINT_PTR timer,DWORD){
     const wchar_t* values[]={L"Branch point",L"-7.5",L"New intermediate",L"-12.8",L"TS-branch",L"18.4"};
     for(int i=0;i<6;i++)SetDlgItemTextW(form,100+i,values[i]);PostMessageW(form,WM_COMMAND,IDOK,0);
 }
+void CALLBACK chooseEnergy(HWND editor,UINT,UINT_PTR timer,DWORD){
+    HWND form=nullptr;while((form=FindWindowExW(nullptr,form,L"YoungDrawForm",L"에너지 표기·단위")))if(GetWindow(form,GW_OWNER)==editor)break;if(!form)return;KillTimer(editor,timer);std::cerr<<"Energy dialog found\n";
+    SendDlgItemMessageW(form,20002,BM_CLICK,0,0);std::cerr<<"Energy preset clicked\n";SetDlgItemTextW(form,101,L"eV");PostMessageW(form,WM_COMMAND,IDOK,0);std::cerr<<"Energy apply posted\n";
+}
 void addBranch(HWND editor){SetTimer(editor,2,20,fillMetadata);command(editor,33);}
 void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
     HWND editor=nullptr;while((editor=FindWindowExW(nullptr,editor,L"YoungDrawMechanismEditor",nullptr))){DWORD pid=0;GetWindowThreadProcessId(editor,&pid);if(pid==GetCurrentProcessId()&&GetWindow(editor,GW_OWNER)==owner)break;}
@@ -39,16 +44,32 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
     // Stop this timer before entering a nested metadata dialog.
     KillTimer(owner,timer);
     try{
+        std::cerr<<"Mechanism UI phase "<<phase<<" tick "<<tick<<"\n";
         auto list=GetDlgItem(editor,20);
         for(int id:{30,31,32,33,34,35,40,41,42,43,44,45,60,61,62,63,64,65,66,70,71,72,IDOK,IDCANCEL})check(ui::hasButtonHelp(GetDlgItem(editor,id)),"all mechanism buttons have descriptive tooltip registration");
         check(childRect(editor,60).left>childRect(editor,22).right,"mechanism tools occupy their own right sidebar");
         command(editor,71);check(IsWindowVisible(GetDlgItem(editor,34))&&!IsWindowVisible(GetDlgItem(editor,60)),"layout tab groups its controls");command(editor,72);check(IsWindowVisible(GetDlgItem(editor,40)),"view tab groups preview controls");command(editor,70);
+        if(phase==8){
+            check(IsWindowVisible(GetDlgItem(editor,67))&&childRect(editor,67).right<childRect(editor,22).left,"energy notation is an icon on the left sidebar");
+            std::cerr<<"Opening energy settings\n";SetTimer(editor,905,10,chooseEnergy);command(editor,67);KillTimer(editor,905);std::cerr<<"Energy settings returned\n";
+            select(editor,0);Picture beforePan(editor);const auto beforeBox=beforePan.selectedBox(editor);const int x=(beforeBox.left+beforeBox.right)/2,y=(beforeBox.top+beforeBox.bottom)/2;
+            SendMessageW(editor,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(x,y));SendMessageW(editor,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(x+24,y+18));SendMessageW(editor,WM_RBUTTONUP,0,MAKELPARAM(x+24,y+18));
+            Picture afterPan(editor);const auto afterBox=afterPan.selectedBox(editor);check(std::abs(afterBox.left-beforeBox.left-24)<=1&&std::abs(afterBox.top-beforeBox.top-18)<=1,"right drag pans the mechanism view without moving its structure");
+            PostMessageW(editor,WM_COMMAND,IDOK,0);return;
+        }
+        if(phase==9){
+            const int connection=int(SendMessageW(list,LB_GETCOUNT,0,0))-2; // The final branch connection precedes its target structure.
+            SendMessageW(list,LB_SETCURSEL,connection,0);SendMessageW(editor,WM_COMMAND,MAKEWPARAM(20,LBN_SELCHANGE),0);
+            check(IsWindowEnabled(GetDlgItem(editor,60))&&IsWindowVisible(GetDlgItem(editor,87)),"selected TS supports optional structure entry and a branch name");
+            SetDlgItemTextW(editor,87,L"Test branch");SendDlgItemMessageW(editor,15,CB_SETCURSEL,2,0);SendMessageW(editor,WM_COMMAND,MAKEWPARAM(15,CBN_SELCHANGE),0);
+            command(editor,60);PostMessageW(editor,WM_COMMAND,IDOK,0);return;
+        }
         if(phase==2){
             check(!IsWindowEnabled(GetDlgItem(editor,33)),"cycle branch action starts disabled");
             Picture picture(editor);auto pluses=picture.pluses(editor);
             check(pluses.size()==3,"cycle exposes only its three supported stage plus buttons, no TS plus");
             SetTimer(editor,2,20,fillMetadata);SendMessageW(editor,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(pluses[0].x,pluses[0].y));
-            check(SendMessageW(list,LB_GETCOUNT,0,0)==4,"clicking actual cycle plus adds a stage without invalid errors");
+            check(stageCount(list)==4,"clicking actual cycle plus adds a stage without invalid errors");
             check(IsWindowEnabled(GetDlgItem(editor,33)),"selected cycle stage enables external branching");
             PostMessageW(editor,WM_COMMAND,IDOK,0);return;
         }
@@ -64,7 +85,7 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
             check(!IsWindowEnabled(GetDlgItem(editor,33)),"selecting a TS connection never enables branching");
             SendDlgItemMessageW(editor,15,CB_SETCURSEL,1,0);SendMessageW(editor,WM_COMMAND,MAKEWPARAM(15,CBN_SELCHANGE),0);
             if(phase==5){select(editor,0);check(IsWindowEnabled(GetDlgItem(editor,33)),"cycle stage supports external branches");addBranch(editor);
-                check(SendMessageW(list,LB_GETCOUNT,0,0)==4,"cycle branch adds a single external intermediate");
+                check(stageCount(list)==4,"cycle branch adds a single external intermediate");
                 SendDlgItemMessageW(editor,64,BM_SETCHECK,BST_UNCHECKED,0);command(editor,64);
                 RECT outer{};GetWindowRect(editor,&outer);Gdiplus::Bitmap full(outer.right-outer.left,outer.bottom-outer.top,PixelFormat32bppARGB);{Gdiplus::Graphics graphics(&full);auto dc=graphics.GetHDC();SendMessageW(editor,WM_PRINT,(WPARAM)dc,PRF_CLIENT|PRF_CHILDREN|PRF_ERASEBKGND);graphics.ReleaseHDC(dc);}
                 CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};full.Save(L"mechanism-editor-ring-branch.png",&png);
@@ -102,23 +123,23 @@ void CALLBACK drive(HWND owner,UINT,UINT_PTR timer,DWORD){
             PostMessageW(editor,WM_COMMAND,IDCANCEL,0);return;
         }
         if(tick==0){
-            check(SendMessageW(list,LB_GETCOUNT,0,0)==3,"draft initially lists all three stages");
+            check(stageCount(list)==3,"draft initially lists all three stages");
             check(!IsWindowEnabled(GetDlgItem(editor,60))&&!IsWindowEnabled(GetDlgItem(editor,33)),"drawing and branching require a selected frame");
             Picture picture(editor);check(picture.pluses(editor).size()==4,"linear mechanism exposes stage additions but no TS plus");
             select(editor,0);addBranch(editor);
-            check(SendMessageW(list,LB_GETCOUNT,0,0)==4,"first intermediate can branch in the editor");
+            check(stageCount(list)==4,"first intermediate can branch in the editor");
             if(phase==1){PostMessageW(editor,WM_COMMAND,IDCANCEL,0);return;}
             SendDlgItemMessageW(editor,17,TBM_SETPOS,TRUE,220);SendMessageW(editor,WM_HSCROLL,TB_LINEUP,(LPARAM)GetDlgItem(editor,17));SendMessageW(editor,WM_HSCROLL,TB_ENDTRACK,(LPARAM)GetDlgItem(editor,17));
             SetDlgItemTextW(editor,13,L"eV");SendMessageW(editor,WM_COMMAND,MAKEWPARAM(13,CBN_EDITCHANGE),0);
             command(editor,42);command(editor,43);command(editor,40);command(editor,40);
             select(editor,3);PostMessageW(editor,WM_KEYDOWN,VK_DELETE,0);tick=1;SetTimer(owner,1,20,drive);return;
         }
-        check(SendMessageW(list,LB_GETCOUNT,0,0)==3,"Delete removes just the selected stage");command(editor,42);
-        check(SendMessageW(list,LB_GETCOUNT,0,0)==4,"local undo restores a removed stage");
+        check(stageCount(list)==3,"Delete removes just the selected stage");command(editor,42);
+        check(stageCount(list)==4,"local undo restores a removed stage");
         PostMessageW(editor,WM_COMMAND,IDOK,0);
     }catch(const std::exception& e){failure=e.what();PostMessageW(editor,WM_CLOSE,0,0);}
 }
-std::optional<Document> run(HWND owner,const Document& source,const MechanismEditorCallbacks& callbacks={}){tick=0;SetTimer(owner,1,20,drive);auto result=mechanismEditor(owner,source,source.reactions[0].id,&source,callbacks);check(failure.empty(),failure.c_str());return result;}
+std::optional<Document> run(HWND owner,const Document& source,const MechanismEditorCallbacks& callbacks={}){tick=0;SetTimer(owner,1,20,drive);std::cerr<<"Entering mechanism run "<<phase<<"\n";auto result=mechanismEditor(owner,source,source.reactions[0].id,&source,callbacks);std::cerr<<"Finished mechanism run "<<phase<<"\n";check(failure.empty(),failure.c_str());return result;}
 }
 int main(){
     ULONG_PTR token=0;GdiplusStartupInput start;GdiplusStartup(&token,&start,nullptr);OleInitialize(nullptr);
@@ -132,6 +153,11 @@ int main(){
         check(r.slots[0].energy=="-7.5"&&r.slots.back().label=="New intermediate"&&r.slots.back().energy=="-12.8"&&r.above.back()=="TS-branch"&&r.below.back()=="18.4","branch point, new intermediate and TS names and energies survive apply");
         auto scene=makeScene(*applied);for(const auto& label:{"Branch point","-7.5","New intermediate","-12.8","TS-branch","18.4"})check(std::any_of(scene.items.begin(),scene.items.end(),[&](const auto& item){return item.text==label;}),"branch point and TS names/energies are visibly rendered");
         check(r.arrowLength==220&&r.unit=="eV","slider and unit settings survive apply");check(toNative(source)==before,"editor never mutates its source document");
+        phase=8;auto energy=run(owner,source);check(energy&&energy->reactions.front().energySymbol=="ΔG"&&energy->reactions.front().unit=="eV"&&energy->reactions.front().slots.front().energy==source.reactions.front().slots.front().energy,"delta notation and panning preserve mechanism energy data");
+        for(const auto& saved:{fromNative(toNative(*energy)),fromCdxml(toCdxml(*energy))})check(saved.reactions.front().energySymbol=="ΔG","mechanism delta notation persists");
+        auto branchSource=source;addMechanismBranch(branchSource.reactions.front(),0);MechanismEditorCallbacks tsCallbacks;tsCallbacks.editStructure=[](const Document& current,HWND)->std::optional<Document>{check(current.atoms.empty(),"a new TS structure starts empty");Document fragment;fragment.addAtom({0,0},8);return fragment;};
+        phase=9;auto ts=run(owner,branchSource,tsCallbacks);check(ts&&ts->reactions.front().links.back().name=="Test branch"&&mechanismArrowType(ts->reactions.front(),ts->reactions.front().links.size()-1)==2&&!ts->reactions.front().links.back().members.empty(),"TS structure, branch name and reverse direction apply together");
+        for(const auto& saved:{fromNative(toNative(*ts)),fromCdxml(toCdxml(*ts))})check(!saved.reactions.front().links.back().members.empty(),"optional TS structures survive both formats");
         phase=1;auto cancelled=run(owner,source);check(!cancelled&&toNative(source)==before,"Cancel discards all draft mutations");
         auto cycle=source;cycle.reactions[0].cyclic=true;phase=2;auto cycled=run(owner,cycle);
         check(cycled&&cycled->reactions[0].cyclic&&!cycled->reactions[0].explicitConnections()&&cycled->reactions[0].slots.size()==4,"cycle plus preserves cyclic representation and closing arrow");
