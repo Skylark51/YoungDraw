@@ -259,10 +259,26 @@ void editPlotAxes(int id,int initialTab){
     const auto x=managedAxisFields(before,id,true),y=managedAxisFields(before,id,false);
     auto fields=x.fields;
     for(auto field:y.fields){if(field.choiceUpdate)field.choiceUpdate->field+=x.fields.size();fields.push_back(std::move(field));}
-    auto tabs=x.tabs;
-    for(auto tab:y.tabs){for(auto& index:tab.second)index+=x.fields.size();tabs.push_back(std::move(tab));}
-    const wchar_t* names[]={L"X 축선",L"X 제목",L"X 이름",L"Y 축선",L"Y 제목",L"Y 눈금",L"Y 단위"};
-    for(size_t i=0;i<tabs.size();++i)tabs[i].first=names[i];
+    // Keep the field identities and transaction shared while grouping everything by axis.
+    ui::FormTabStyle style{{242,243},0,nullptr,true};
+    std::vector<std::pair<std::wstring,std::vector<size_t>>> tabs={
+        {L"X축",{4,6,7,8,9,3,0,5,1,2}},
+        {L"Y축",{4,9,10,17,11,8,6,7,5,18,3,0,1,2,12,13,15,14,16}}
+    };
+    for(auto& index:tabs[1].second)index+=x.fields.size();
+    fields[x.fields.size()+9].quickChoices={{0,L"직접"},{1,L"ΔE"},{2,L"ΔG"}};
+    fields[x.fields.size()+9].buttonsOnly=true;
+    fields[x.fields.size()+17].buttonsOnly=true;
+    fields[x.fields.size()+17].quickChoices={{0,L"ΔE / (단위)"},{1,L"ΔE (단위)"}};
+    const wchar_t* shortLabels[]={L"선 굵기",L"화살촉 길이",L"화살촉 너비",L"축 길이",L"축 제목",L"글자색",L"제목 크기"};
+    for(size_t i=0;i<7;++i){fields[i].label=shortLabels[i];fields[x.fields.size()+i].label=shortLabels[i];}
+    fields[7].label=L"상태 이름 배치";fields[8].label=L"이름 크기";fields[9].label=L"X축 표시";
+    fields[x.fields.size()+7].label=L"제목 간격";
+    fields[x.fields.size()+12].label=L"최솟값";fields[x.fields.size()+13].label=L"최댓값";
+    fields[x.fields.size()+14].label=L"눈금 간격";fields[x.fields.size()+15].label=L"눈금·숫자 표시";
+    fields[x.fields.size()+16].label=L"눈금 글자 크기";
+    fields[x.fields.size()+17].label=L"제목의 단위 표기";
+    fields[x.fields.size()+18].label=L"Y축 표시";
     auto update=[&](const std::vector<std::string>& values)->std::wstring{
         const auto middle=values.begin()+x.fields.size();
         auto candidate=before;
@@ -272,7 +288,8 @@ void editPlotAxes(int id,int initialTab){
         return error;
     };
     static int lastTab=0;
-    const auto result=ui::form(win,L"축 관리",fields,update,tabs,{},124,{{242,213,240,243,246,131,241},initialTab<0?lastTab:initialTab,&lastTab});
+    style.initial=initialTab<0?lastTab:initialTab;style.remember=&lastTab;
+    const auto result=ui::form(win,L"축 관리",fields,update,tabs,{},124,style);
     if(result){if(toNative(doc)!=toNative(before)){history.checkpoint(before);changed();}}
     else{doc=before;redraw();}
 }

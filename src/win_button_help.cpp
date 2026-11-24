@@ -28,6 +28,9 @@ LRESULT CALLBACK observe(int code,WPARAM wp,LPARAM lp){if(code>=0&&dispatcher){c
 }
 std::wstring labelHelp(const std::wstring& source){std::wstring label;for(auto c:source)if(c!=L'&')label+=c;auto match=[&](const wchar_t* key){return label.find(key)!=std::wstring::npos;};
     if(label==L"ΔE"||label==L"ΔG")return L"Y축 제목을 "+label+L" 표기로 바꿉니다. 에너지 수치는 변환하지 않습니다. 제목을 직접 입력하면 해당 문구를 사용합니다.";
+    if(label==L"ΔE / (단위)")return L"축 제목과 단위를 나눗셈으로 표시합니다. 예: ΔE / (kcal mol⁻¹), IUPAC 표기입니다. 에너지 수치는 바뀌지 않습니다.";
+    if(label==L"ΔE (단위)")return L"축 제목 뒤에 단위를 괄호로 표시합니다. 예: ΔE (kcal mol⁻¹). 에너지 수치는 바뀌지 않습니다.";
+    if(label==L"직접")return L"에너지 표기를 직접 입력한 축 제목으로 설정합니다. 옆 제목 칸에서 원하는 문구를 입력하세요.";
     if(label==L"표시 중"||label==L"숨김 상태")return L"클릭하여 이 축을 표시하거나 숨깁니다. 굵기와 화살촉 설정은 유지됩니다.";
     if(label==L"..."||label==L"…")return L"색상 선택창을 열어 옆 항목의 색을 바꿉니다.";
     if(match(L"빠른 이름 변경"))return L"목록에서 선택한 항목의 이름만 바로 바꿉니다. Ctrl+F2로도 실행할 수 있습니다. 이름과 노트는 F2로 함께 편집합니다.";

@@ -14,6 +14,9 @@
 #include <commctrl.h>
 #include <windowsx.h>
 #include <uxtheme.h>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 
 namespace yd::editor {
 HWND plotManagerWindow=nullptr;
@@ -24,14 +27,14 @@ constexpr int axesManager=4406;
 int tableFontPoints=12;
 struct Card{int action,icon;const wchar_t* label;const wchar_t* detail;int slot=-1;};
 const std::vector<std::vector<Card>> pages={
-    {{131,131,L"데이터 표",L"상태·에너지 입력"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상태에서 분기",L"분기점 선택·에너지 입력"}},
-    {{137,137,L"그래프 설정",L"제목·크기·표시"},{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"},{241,241,L"데이터 값 크기",L"에너지 숫자",4},{axesManager,242,L"축 관리",L"X·Y축 선·제목·눈금·단위",5},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치",7}},
+    {{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{axesManager,242,L"축 관리",L"X축·Y축 통합 설정"},{131,131,L"데이터 표",L"상태·에너지·행·열 편집"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상태에서 분기",L"분기점 선택·에너지 입력"}},
+    {{137,137,L"그래프 설정",L"제목·크기·표시"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"},{241,241,L"데이터 값 크기",L"에너지 숫자"},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치"}},
     {{139,139,L"반응 이름·화살표",L"이름 배치·줄·위치"},{136,136,L"화살표 자석 배치",L"캔버스에서 두 점 선택"},{plotAnnotationsCommand,236,L"TS·이름 위치",L"생략·갭·라벨 위치"},{addEnergyGapCommand,237,L"에너지 갭 추가",L"캔버스에 지시선 배치"},{energyGapStyleCommand,energyGapStyleCommand,L"갭 글꼴·색상",L"글꼴·크기·굵게·기울임"},{151,151,L"스핀 교차점",L"교차 에너지·라벨"},{photoExcitation,4405,L"광여기 hν",L"빛에 의한 준위 전이"}},
     {{editStructure,186,L"구조 그리기·편집",L"선택한 위·아래 영역"},{pasteStructure,123,L"구조 붙여넣기",L"클립보드에서 삽입"},{fileStructure,124,L"구조 파일 삽입",L"CDXML·이미지 파일"},{sizeStructure,165,L"구조 크기",L"선택 구조 확대·축소"},{removeStructure,144,L"구조 제거",L"선택 영역만 비우기"},{structureBorder,4305,L"사각형 테두리",L"표시·색상·여백·굵기"}},
     {{244,244,L"곡선 굵기",L"경로 선 굵기"},{245,245,L"그림 선 굵기",L"선택 후 + / - 조절"},{plotWaveWidthCommand,250,L"물결 관리",L"물결 굵기·곡선 간격"}}
 };
 struct Manager{
-    HWND window=nullptr;int owner=0,page=0;bool busy=false;
+    HWND window=nullptr;int owner=0,page=0;bool busy=false,axesEditing=false;
     struct View {double scale;Vec origin;};
     struct LegendDrag {Vec start,offset;View view;};
     struct AnnotationFrame {yd::Rect bounds;Vec plotPosition;};
@@ -89,18 +92,62 @@ struct Manager{
         if(original.series.empty()){EnergySeries path;path.name="Path 1";for(auto& state:original.states)path.values.push_back(state.energy);original.series.push_back(path);}
         std::vector<std::wstring> columns={L"단계명"};for(auto& path:original.series)columns.push_back(ui::wide(path.name));
         auto rows=dataRows(original);
-        grid=ui::embeddedTable(window,columns,rows,[this,last=rows](const ui::Table& data) mutable ->std::wstring{
-            if(data==last)return {};
-            try{auto* current=graph();if(!current)return L"그래프가 없습니다.";if(doc.isLocked(owner))return L"그래프 잠금을 해제하세요.";
-                auto revised=energyGridData(*current,data);Document before=doc;auto old=*current;relocatePlot(old,revised);*graph()=std::move(revised);
-                if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}last=dataRows(*graph());return {};
-            }catch(const std::exception& e){return ui::wide(e.what());}
-        },[](size_t column,const std::string& value)->std::wstring{return column==0||validEnergyGridValue(value)?L"":L"에너지를 숫자로 입력하세요. 빈칸은 생략됩니다.";},[this](HWND,size_t column)->std::optional<std::wstring>{
+        std::vector<size_t> sourceColumns;for(size_t i=0;i<columns.size();++i)sourceColumns.push_back(i);
+        grid=ui::embeddedTable(window,columns,rows,{},[](size_t column,const std::string& value)->std::wstring{return column==0||validEnergyGridValue(value)?L"":L"에너지를 숫자로 입력하세요. 빈칸은 생략됩니다.";},[this](HWND,size_t column)->std::optional<std::wstring>{
             if(!column||!graph())return {};auto* p=graph();if(column>p->series.size())return {};
             ui::InlineDialogHost host(window,[this](HWND child){mount(child);});
             auto result=ui::form(window,L"경로 이름 변경",{{L"경로 이름",p->series[column-1].name,false,{},false,4,true}});if(!result)return {};
-            if(!graph()||doc.isLocked(owner))return {};Document before=doc;graph()->series[column-1].name=result->front();if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}return ui::wide(result->front());
-        },[this](){return graph()?dataRows(*graph()):ui::Table{};});
+            if(!graph()||doc.isLocked(owner))return {};return ui::wide(result->front());
+        },[this](){return graph()?dataRows(*graph()):ui::Table{};},
+        [this,versions=std::map<size_t,EnergyPlot>{{0,*p}},last=rows,lastSources=sourceColumns,lastTitles=columns,lastRevision=size_t(0)](const ui::Table& data,const std::vector<size_t>& sources,const std::vector<std::wstring>& titles,const ui::TableHistory& tableHistory) mutable ->std::wstring{
+            for(auto i=versions.begin();i!=versions.end();)if(std::find(tableHistory.retained.begin(),tableHistory.retained.end(),i->first)==tableHistory.retained.end())i=versions.erase(i);else ++i;
+            if(data==last&&sources==lastSources&&titles==lastTitles&&tableHistory.revision==lastRevision)return {};
+            try{
+                auto* current=graph();if(!current)return L"그래프가 없습니다.";if(doc.isLocked(owner))return L"그래프 잠금을 해제하세요.";
+                auto base=*current;
+                const auto saved=versions.find(tableHistory.revision);
+                if(saved!=versions.end()){
+                    const auto& restored=saved->second;
+                    base.states=restored.states;base.series=restored.series;base.crossings=restored.crossings;
+                    base.width=restored.width;
+                }else if(sources!=lastSources){
+                    std::vector<size_t> paths;
+                    for(size_t i=1;i<sources.size();++i){
+                        const auto found=std::find(lastSources.begin()+1,lastSources.end(),sources[i]);
+                        if(found==lastSources.end())throw std::runtime_error("열을 복원할 수 없습니다. 표 실행 취소를 사용하세요.");
+                        paths.push_back(size_t(found-lastSources.begin()-1));
+                    }
+                    // Select from the current graph so renamed/reordered rows,
+                    // attached structures and exact surviving energies stay together.
+                    base=selectEnergyPaths(base,paths);
+                }
+                auto cells=data;
+                const auto displayed=dataRows(base);
+                // Use the same exact-label-first row mapping as energyGridData,
+                // including rows shifted by deletion or renamed in place.
+                std::vector<int> sourceRows(cells.size(),-1);std::set<size_t> usedRows;
+                for(size_t row=0;row<cells.size();++row)for(size_t old=0;old<displayed.size();++old)
+                    if(!usedRows.count(old)&&cells[row][0]==displayed[old][0]){sourceRows[row]=int(old);usedRows.insert(old);break;}
+                for(size_t row=0;row<cells.size();++row)if(sourceRows[row]<0&&row<displayed.size()&&!usedRows.count(row)){sourceRows[row]=int(row);usedRows.insert(row);}
+                for(size_t row=0;row<cells.size();++row){
+                    if(sourceRows[row]<0||cells[row].size()!=base.series.size()+1)continue;
+                    const size_t old=size_t(sourceRows[row]);
+                    for(size_t path=0;path<base.series.size();++path){
+                        if(!base.series[path].hasValue(old)||cells[row][path+1]!=displayed[old][path+1])continue;
+                        std::ostringstream exact;exact.imbue(std::locale::classic());exact<<std::setprecision(std::numeric_limits<double>::max_digits10)<<base.series[path].values[old];
+                        cells[row][path+1]=energyCellText(base.series[path],old,exact.str());
+                    }
+                }
+                // Renaming a header must not parse the rounded display cells or
+                // change the stored energy precision and state metadata.
+                auto revised=saved!=versions.end()||data==displayed?base:energyGridData(base,cells);
+                for(size_t i=0;i<revised.series.size();++i)revised.series[i].name=ui::utf8(titles.at(i+1));
+                versions[tableHistory.revision]=revised;
+                Document before=doc;const auto old=*current;relocatePlot(old,revised);*graph()=std::move(revised);
+                if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}
+                last=dataRows(*graph());lastSources=sources;lastTitles=titles;lastRevision=tableHistory.revision;return {};
+            }catch(const std::exception& error){return ui::wide(error.what());}
+        });
         if(!grid)throw std::runtime_error("데이터 표를 열 수 없습니다.");
         if(tableFontPoints!=12)ui::setEmbeddedTableFontSize(grid,tableFontPoints);
         panel=131;layout();SetFocus(GetDlgItem(grid,10));ui::attachWindowHelp(window);
@@ -403,7 +450,7 @@ struct Manager{
         const auto& scene=currentScene();const auto view=fitPreview(scene);
         const auto point=(cursor-view.origin)*(1/view.scale);const double pad=5/view.scale;
         if(auto axis=plotAxisTitleAt(scene,point,pad)){
-            selectPage(1);axisInitialTab=axis->xAxis?1:4;
+            selectPage(0);axisInitialTab=axis->xAxis?0:1;
             SendMessageW(window,WM_COMMAND,axesManager,0);return;
         }
         int action=0,row=-1,column=1;
@@ -444,7 +491,7 @@ struct Manager{
         RECT client{};GetClientRect(window,&client);const int width=client.right,height=client.bottom;
         const bool expanded=panelVisible()||subpane;
         const bool showForm=form&&expanded&&!subpane;
-        const int panelTop=std::max(180,height-460);
+        const int panelTop=axesEditing?std::min(std::max(180,height-460),height-431):std::max(180,height-460);
         const int gap=10;
         preview={20.f,88.f,float(width-40),float(panelTop-110)};
         const int tabWidth=(width-40-4*6)/5;
@@ -572,7 +619,10 @@ struct Manager{
         if(!graph())throw std::runtime_error("편집할 그래프가 없습니다.");if(doc.isLocked(owner))throw std::runtime_error("그래프 잠금을 해제한 뒤 편집하세요.");
         selection={owner};
         if(action==137){plotSettings(owner,true);return;}
-        if(action==axesManager){const int tab=axisInitialTab;axisInitialTab=-1;editPlotAxes(owner,tab);return;}
+        if(action==axesManager){
+            struct AxisLayout {Manager& manager;explicit AxisLayout(Manager& m):manager(m){manager.axesEditing=true;}~AxisLayout(){manager.axesEditing=false;manager.layout();}} layoutGuard(*this);
+            const int tab=axisInitialTab;axisInitialTab=-1;editPlotAxes(owner,tab);return;
+        }
         if(action==verticalBranch){openVerticalBranch();return;}
         if(action==photoExcitation){editPlotPhotoExcitation(owner);return;}
         if(action==139){openStages();return;}
@@ -593,7 +643,7 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_NCCREATE){self=static_cast<Manager*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);self->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}
     if(!self)return DefWindowProcW(h,message,wp,lp);
     switch(message){
-    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"데이터·경로",L"축·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i=0;i<5;i++)self->button(tabFirst+i,tabs[i]);self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");self->button(distributeStages,L"자동 균등 배치");self->button(dataFont,L"글자 크기");
+    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"그래프·축·데이터",L"모양·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i=0;i<5;i++)self->button(tabFirst+i,tabs[i]);self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");self->button(distributeStages,L"자동 균등 배치");self->button(dataFont,L"글자 크기");
         auto path=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
             0,0,170,180,h,reinterpret_cast<HMENU>(INT_PTR(pathControl)),nullptr,nullptr);
         SendMessageW(path,WM_SETFONT,(WPARAM)self->font,TRUE);ui::themeCombo(path);
@@ -667,7 +717,7 @@ void closePlotManager(){if(plotManagerWindow)DestroyWindow(plotManagerWindow);}
 void openPlotAxesManager(int id,int detail){
     managePlot(id);
     auto* manager=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));
-    if(!manager||manager->owner!=id||!manager->selectPage(1))return;
+    if(!manager||manager->owner!=id||!manager->selectPage(0))return;
     manager->axisInitialTab=detail;
     SendMessageW(plotManagerWindow,WM_COMMAND,axesManager,0);
 }

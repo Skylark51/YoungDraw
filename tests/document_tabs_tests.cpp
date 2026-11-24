@@ -750,6 +750,13 @@ static int unifiedAxisMode=0,unifiedAxisWidth=0;
 static bool unifiedAxisDriven=false;
 static std::string unifiedAxisFailure;
 static void chooseAxisNotationByMouse(HWND combo,int index){
+    if(!IsWindowVisible(combo)){
+        const auto button=GetDlgItem(GetParent(combo),20000+(GetDlgCtrlID(combo)-100)*32+index);
+        check(button&&IsWindowVisible(button),"energy notation preset is available as a visible button");
+        RECT bounds{};GetClientRect(button,&bounds);const auto at=MAKELPARAM(bounds.right/2,bounds.bottom/2);
+        SendMessageW(button,WM_LBUTTONDOWN,MK_LBUTTON,at);SendMessageW(button,WM_LBUTTONUP,0,at);
+        check(SendMessageW(combo,CB_GETCURSEL,0,0)==index,"mouse click selects the energy notation preset");return;
+    }
     SendMessageW(combo,CB_SHOWDROPDOWN,TRUE,0);
     COMBOBOXINFO info{sizeof(info)};
     check(GetComboBoxInfo(combo,&info)!=FALSE&&IsWindowVisible(info.hwndList),"native energy notation dropdown is visible");
@@ -770,7 +777,7 @@ static void CALLBACK driveProjectAxis(HWND parent,UINT,UINT_PTR timer,DWORD){
     const auto dialog=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"축 관리");
     if(!dialog)return;KillTimer(parent,timer);
     try{
-        const auto tabs=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);RECT rect{};TabCtrl_GetItemRect(tabs,4,&rect);
+        const auto tabs=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);RECT rect{};TabCtrl_GetItemRect(tabs,1,&rect);
         auto at=MAKELPARAM((rect.left+rect.right)/2,(rect.top+rect.bottom)/2);
         SendMessageW(tabs,WM_LBUTTONDOWN,MK_LBUTTON,at);SendMessageW(tabs,WM_LBUTTONUP,0,at);
         chooseAxisNotationByMouse(GetDlgItem(dialog,119),projectAxisNotation);
@@ -808,17 +815,17 @@ static void CALLBACK driveAxisQuick(HWND parent,UINT,UINT_PTR timer,DWORD){
     if(!dialog)return;KillTimer(parent,timer);axisQuickDriven=true;
     try{
         auto tabs=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);
-        check(TabCtrl_GetCurSel(tabs)==(axisQuickCase==3?1:4),"axis title access opens its matching detail directly and remembers the last detail");
+        check(TabCtrl_GetCurSel(tabs)==(axisQuickCase==3?0:1),"axis title access opens its matching axis directly and remembers the last axis");
         if(axisQuickCase==1){
             for(int choice:{1,2}){
-                auto button=GetDlgItem(dialog,20000+19*32+choice-1);check(button&&IsWindowVisible(button),"one-click Delta buttons are visible beside energy notation");
+                auto button=GetDlgItem(dialog,20000+19*32+choice);check(button&&IsWindowVisible(button),"one-click Delta buttons are visible beside energy notation");
                 RECT rect{};GetClientRect(button,&rect);const auto at=MAKELPARAM(rect.right/2,rect.bottom/2);
                 SendMessageW(button,WM_LBUTTONDOWN,MK_LBUTTON,at);SendMessageW(button,WM_LBUTTONUP,0,at);
                 check(doc.plots.front().yLabel==(choice==1?"ΔE":"ΔG")&&SendDlgItemMessageW(dialog,119,CB_GETCURSEL,0,0)==choice,"one Delta button click updates the axis and selected notation");
             }
             SetDlgItemTextW(dialog,114,L"Relative energy");
             check(doc.plots.front().yLabel=="Relative energy"&&SendDlgItemMessageW(dialog,119,CB_GETCURSEL,0,0)==0,"typing a custom title leaves Delta preset mode and preserves the typed title");
-            SendDlgItemMessageW(dialog,20000+19*32+1,BM_CLICK,0,0);
+            SendDlgItemMessageW(dialog,20000+19*32+2,BM_CLICK,0,0);
         }
         if(axisQuickCase==2){check(SendDlgItemMessageW(dialog,119,CB_GETCURSEL,0,0)==2,"reopening shows the actual stored Delta notation instead of a keep-current placeholder");captureAxesManager(L"axis-quick-title.png");}
         PostMessageW(GetDlgItem(dialog,axisQuickCase==1?IDOK:IDCANCEL),BM_CLICK,0,0);
@@ -884,13 +891,13 @@ static void captureAxesManager(const std::wstring& name){
     check(image.Save(name.c_str(),&png)==Ok,"save unified axis manager evidence");
 }
 static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
-    const auto dialog=FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"축 관리");
+    const auto dialog=plotManagerWindow?FindWindowExW(plotManagerWindow,nullptr,L"YoungDrawForm",L"축 관리"):FindWindowW(L"YoungDrawForm",L"축 관리");
     if(!dialog)return;KillTimer(parent,timer);unifiedAxisDriven=true;
     try{
     const auto tabs=FindWindowExW(dialog,nullptr,WC_TABCONTROLW,nullptr);
-    check(tabs&&TabCtrl_GetItemCount(tabs)==7,"one axis editor contains all seven X and Y detail tabs");
-    const int icons[]={242,213,240,243,246,131,241};
-    const int firstField[]={109,104,107,128,114,122,120};
+    check(tabs&&TabCtrl_GetItemCount(tabs)==2,"axis manager groups all settings into X and Y screens");
+    const int icons[]={242,243};
+    const int firstField[]={104,114};
     auto choose=[&](int index){
         RECT rect{},client{};TabCtrl_GetItemRect(tabs,index,&rect);GetClientRect(tabs,&client);
         check(rect.left>=0&&rect.right<=client.right&&rect.bottom<=client.bottom,"every axis detail icon fits without horizontal scrolling");
@@ -907,13 +914,19 @@ static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
         },reinterpret_cast<LPARAM>(dialog));
     };
     choose(0);SetDlgItemTextW(dialog,100,L"3.5");SetDlgItemTextW(dialog,101,L"12");
-    choose(3);SetDlgItemTextW(dialog,110,L"4.5");SetDlgItemTextW(dialog,111,L"18");
+    choose(1);SetDlgItemTextW(dialog,110,L"4.5");SetDlgItemTextW(dialog,111,L"18");
     check(doc.plots.front().xAxisWidth==3.5&&doc.plots.front().yAxisWidth==4.5,"both axes preview together without applying or closing between them");
-    choose(4);SetDlgItemTextW(dialog,117,L"44");
-    choose(5);SetDlgItemTextW(dialog,122,L"-50");SetDlgItemTextW(dialog,123,L"70");SetDlgItemTextW(dialog,124,L"20");
+    SetDlgItemTextW(dialog,117,L"44");
+    SetDlgItemTextW(dialog,122,L"-50");SetDlgItemTextW(dialog,123,L"70");SetDlgItemTextW(dialog,124,L"20");
     choose(0);wchar_t retained[32]{};GetDlgItemTextW(dialog,100,retained,32);
     check(std::wstring(retained)==L"3.5","switching X and Y icons retains pending input");
-    choose(4);
+    choose(1);
+    for(int parenthetical:{1,0}){
+        auto button=GetDlgItem(dialog,20000+27*32+parenthetical);
+        check(button&&IsWindowVisible(button)&&ui::hasButtonHelp(button),"unit notation is a visible button with an explanatory tooltip");
+        SendMessageW(button,BM_CLICK,0,0);
+        check(doc.plots.front().yUnitParenthetical==(parenthetical!=0),"unit notation button updates the preview without changing the energy data");
+    }
     for(int top:{0,1})for(int notation:{1,2}){
         SendDlgItemMessageW(dialog,118,CB_SETCURSEL,top,0);
         SendMessageW(dialog,WM_COMMAND,MAKEWPARAM(118,CBN_SELCHANGE),reinterpret_cast<LPARAM>(GetDlgItem(dialog,118)));
@@ -928,9 +941,9 @@ static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
         const auto& canvas=sceneForPaint(true);
         check(std::any_of(canvas.items.begin(),canvas.items.end(),[&](const auto& item){return item.type==Primitive::Text&&item.owner==doc.plots.front().id&&item.text.find(symbol)!=std::string::npos&&item.rotation==(top?0:-90);}),"actual cached canvas scene reflects mouse-selected Delta energy");
     }
-    for(int tab=0;tab<7;++tab){choose(tab);if(unifiedAxisMode==1)captureAxesManager(L"unified-axes-"+std::to_wstring(unifiedAxisWidth)+L"-"+std::to_wstring(tab)+L".png");}
+    for(int tab=0;tab<2;++tab){choose(tab);if(unifiedAxisMode==1)captureAxesManager(L"unified-axes-"+std::to_wstring(unifiedAxisWidth)+L"-"+std::to_wstring(tab)+L".png");}
     if(unifiedAxisMode==2){
-        choose(4);SetDlgItemTextW(dialog,116,L"2");
+        choose(1);SetDlgItemTextW(dialog,116,L"2");
         check(!IsWindowEnabled(GetDlgItem(dialog,IDOK)),"invalid Y font prevents committing both axis edits");
         choose(0);check(doc.plots.front().xAxisWidth==3.5,"invalid Y entry does not discard the valid combined preview");
     }
@@ -943,7 +956,7 @@ static void unifiedAxisChecks(HWND hwnd){
     managePlot(selection.front(),true);const auto manager=plotManagerWindow;
     for(int width:{900,1280}){
         SetWindowPos(manager,nullptr,0,0,width,width==900?640:900,SWP_NOZORDER|SWP_NOACTIVATE);
-        SendMessageW(manager,WM_COMMAND,4001,0);unifiedAxisWidth=width;
+        SendMessageW(manager,WM_COMMAND,4000,0);unifiedAxisWidth=width;
         captureAxesManager(L"unified-axes-"+std::to_wstring(width)+L"-entry.png");
         for(int mode:{0,1,2}){
             history.clear();dirty=false;unifiedAxisMode=mode;unifiedAxisDriven=false;unifiedAxisFailure.clear();
@@ -959,11 +972,56 @@ static void unifiedAxisChecks(HWND hwnd){
         }
     }
     SendMessageW(manager,WM_COMMAND,IDCANCEL,0);check(!plotManagerWindow,"unified axis manager closes normally");
+    unifiedAxisMode=0;unifiedAxisDriven=false;unifiedAxisFailure.clear();
+    SetTimer(hwnd,908,10,driveUnifiedAxes);editPlotAxes(selection.front(),0);KillTimer(hwnd,908);
+    check(unifiedAxisDriven&&unifiedAxisFailure.empty(),"standalone axis editor also exposes both compact axis screens");
+    check(toNative(doc)==original&&!history.undo(doc),"standalone axis cancellation restores every setting");
+}
+static void graphTableStructureChecks(){
+    doc=coordinateDemo();doc.plots.front().series.front().values.back()=.987654321012345;doc.plots.front().states.back().energy=.987654321012345;
+    auto alternate=doc.plots.front().series.front();alternate.name="Comparison";doc.plots.front().series.push_back(alternate);
+    doc.plots.front().states.back().labelOffset={12,9};const auto attached=doc.plots.front().states.back().below;
+    check(!attached.empty(),"column regression includes a real attached structure");
+    history.clear();selection={doc.plots.front().id};changed();
+    managePlot(selection.front(),false);auto manager=plotManagerWindow;SendMessageW(manager,WM_COMMAND,131,0);
+    const auto grid=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);const auto list=GetDlgItem(grid,10);
+    check(grid&&GetDlgItem(grid,29),"graph data table exposes column deletion");
+    auto enter=[&](int row,int column,const wchar_t* text){
+        ui::selectEmbeddedTableCell(grid,row,column);SendMessageW(list,WM_KEYDOWN,VK_F2,0);
+        const auto input=FindWindowExW(list,nullptr,L"EDIT",nullptr);check(input!=nullptr,"structure regression edits a real table cell");
+        SetWindowTextW(input,text);check(ui::commitEmbeddedTable(grid),"structure regression commits a valid table cell");
+    };
+    ui::selectEmbeddedTableCell(grid,1,0);SendMessageW(grid,WM_COMMAND,21,0);
+    enter(3,0,L"Renamed product");enter(0,1,L"0.123456789012345");
+    const auto edited=toNative(doc);const auto exact=doc.plots.front().series.front().values[0];
+    check(exact==.123456789012345,"typed energy retains its full precision before column deletion");
+    ui::selectEmbeddedTableCell(grid,0,2);SendMessageW(grid,WM_COMMAND,29,0);
+    auto checkSurvivor=[&](){const auto& graph=doc.plots.front();
+        check(graph.series.size()==1&&graph.series.front().values[0]==exact,"deleting another path preserves recently edited energy precision");
+        check(graph.series.front().values.back()==.987654321012345,"row deletion and renaming preserve unrelated energy precision");
+        check(graph.states.size()==4&&graph.states.back().label=="Renamed product"&&graph.states.back().below==attached&&graph.states.back().labelOffset.x==12,
+            "row deletion and renaming followed by column deletion preserve the surviving state's structure and annotations");
+    };
+    checkSurvivor();SendMessageW(grid,WM_COMMAND,27,0);
+    check(toNative(doc)==edited&&doc.plots.front().series.front().values[0]==exact,"table undo restores the exact graph before column deletion");
+    SendMessageW(grid,WM_COMMAND,27,0);check(doc.plots.front().series.front().values[0]==0,"table undo restores the earlier exact energy");
+    SendMessageW(grid,WM_COMMAND,28,0);SendMessageW(grid,WM_COMMAND,28,0);checkSurvivor();
+    ui::selectEmbeddedTableCell(grid,0,1);SendMessageW(grid,WM_COMMAND,29,0);checkSurvivor();
+    SendMessageW(manager,WM_COMMAND,104,0);
+    check(toNative(doc)==edited&&doc.plots.front().series.front().values[0]==exact,"global undo restores the exact graph after table redo");
+    closePlotManager();history.clear();
 }
 static void graphManagerChecks(HWND hwnd){
     graphPreviewAccessChecks(hwnd);
+    graphTableStructureChecks();
     doc=coordinateDemo();history.clear();selection={doc.plots[0].id};dirty=false;const int owner=selection[0];
     const auto before=toNative(doc);managePlot(owner,false);auto manager=plotManagerWindow;check(manager&&IsWindow(manager)&&toNative(doc)==before,"graph manager opens without modifying the selected graph");
+    RECT typeCard{},axesEntry{},dataEntry{};
+    GetWindowRect(GetDlgItem(manager,changePlotStyleCommand),&typeCard);
+    GetWindowRect(GetDlgItem(manager,4406),&axesEntry);GetWindowRect(GetDlgItem(manager,131),&dataEntry);
+    check(typeCard.top==axesEntry.top&&axesEntry.top==dataEntry.top&&typeCard.left<axesEntry.left&&axesEntry.left<dataEntry.left,
+        "graph manager starts with graph type, axes and data table in that order");
+    captureAxesManager(L"graph-manager-entry.png");
     SendMessageW(manager,WM_COMMAND,4002,0);
     for(bool remove:{false,true}){
         removePhoto=remove;photoFormSeen=false;
@@ -1079,11 +1137,7 @@ static void graphManagerChecks(HWND hwnd){
     formAction=20;formDriven=false;SetTimer(hwnd,901,10,driveForm);
     SendMessageW(manager,WM_COMMAND,137,0);KillTimer(hwnd,901);
     check(formDriven&&toNative(doc)==before,"axis settings open and cancel inside the manager");
-    RECT legendCard{},axesCard{},valueCard{};
-    GetWindowRect(GetDlgItem(manager,plotLegendCommand),&legendCard);
-    GetWindowRect(GetDlgItem(manager,4406),&axesCard);
-    GetWindowRect(GetDlgItem(manager,241),&valueCard);
-    check(axesCard.top==valueCard.top&&valueCard.left<axesCard.left&&axesCard.left<legendCard.left&&legendCard.top==axesCard.top,"unified axes occupy the former X slot while data values and legend keep their slots");
+    check((GetWindowLongPtrW(GetDlgItem(manager,4406),GWL_STYLE)&WS_VISIBLE)==0&&IsWindow(GetDlgItem(manager,plotLegendCommand)),"appearance tools leave axis management on the first page");
     SendMessageW(manager,WM_COMMAND,plotLegendCommand,0);
     auto form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
     check(form&&GetParent(form)==manager,"legend opens in the graph manager");
