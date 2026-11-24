@@ -24,7 +24,7 @@ bool stepPlotAppearance(int id,int action,int steps);
 void editPlotAppearance(int id,int field);
 bool adjustSelectedPlotWeight(bool increase);
 void editPlotCrossings(int id);
-void editPlotAnnotations(int id);
+void editPlotAnnotations(int id,int state=-1);
 void editPlotPhotoExcitation(int id);
 std::optional<std::pair<int,size_t>> plotStateAt(Vec at); // Canvas coordinates.
 void setPlotTransitionState(int id,size_t index,bool enabled);
@@ -33,7 +33,8 @@ void compressPlotEnergyInterval(int id,size_t index);
 struct PendingEnergyGap {int owner,from,to,path;std::string label;EnergyGapStyle style;};
 extern std::optional<PendingEnergyGap> pendingEnergyGap;
 void addEnergyGap(int id);
-void editEnergyGapStyle(int id);
+void editEnergyGapStyle(int id,int state=-1);
+void manageEnergyGaps(int id,int state=-1);
 bool placeEnergyGap(Vec at);
 void snapPlotStages(int id);
 void editPlotColors(int id);

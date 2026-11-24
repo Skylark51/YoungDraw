@@ -24,17 +24,25 @@ namespace {
 constexpr int tabFirst=4000,slotControl=4200,sideControl=4201,panelBack=4400,pathControl=4401,verticalBranch=4402,distributeStages=4403,dataFont=4404,photoExcitation=4405;
 constexpr int editStructure=4300,pasteStructure=4301,fileStructure=4302,sizeStructure=4303,removeStructure=4304,structureBorder=4305;
 constexpr int axesManager=4406;
+constexpr int previewFit=4410,previewIn=4411,previewOut=4412;
+constexpr int pageOrder[]={0,2,1,3,4};
+LRESULT CALLBACK managerButtonProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR){
+    if(msg==WM_MOUSEMOVE&&!GetPropW(h,L"YoungDrawHover")){SetPropW(h,L"YoungDrawHover",reinterpret_cast<HANDLE>(1));TRACKMOUSEEVENT track{sizeof(track),TME_LEAVE,h,0};TrackMouseEvent(&track);InvalidateRect(h,nullptr,FALSE);}
+    if(msg==WM_MOUSELEAVE){RemovePropW(h,L"YoungDrawHover");InvalidateRect(h,nullptr,FALSE);}
+    if(msg==WM_NCDESTROY)RemovePropW(h,L"YoungDrawHover");
+    return DefSubclassProc(h,msg,wp,lp);
+}
 int tableFontPoints=12;
 struct Card{int action,icon;const wchar_t* label;const wchar_t* detail;int slot=-1;};
 const std::vector<std::vector<Card>> pages={
     {{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{axesManager,242,L"축 관리",L"X축·Y축 통합 설정"},{131,131,L"데이터 표",L"상태·에너지·행·열 편집"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상태에서 분기",L"분기점 선택·에너지 입력"}},
     {{137,137,L"그래프 설정",L"제목·크기·표시"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"},{241,241,L"데이터 값 크기",L"에너지 숫자"},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치"}},
-    {{139,139,L"반응 이름·화살표",L"이름 배치·줄·위치"},{136,136,L"화살표 자석 배치",L"캔버스에서 두 점 선택"},{plotAnnotationsCommand,236,L"TS·이름 위치",L"생략·갭·라벨 위치"},{addEnergyGapCommand,237,L"에너지 갭 추가",L"캔버스에 지시선 배치"},{energyGapStyleCommand,energyGapStyleCommand,L"갭 글꼴·색상",L"글꼴·크기·굵게·기울임"},{151,151,L"스핀 교차점",L"교차 에너지·라벨"},{photoExcitation,4405,L"광여기 hν",L"빛에 의한 준위 전이"}},
+    {{139,139,L"반응 이름·화살표",L"이름·위치·자석 배치"},{plotAnnotationsCommand,236,L"TS·이름 위치",L"미리보기에서 상태 클릭"},{addEnergyGapCommand,237,L"에너지 갭",L"추가·배치·글꼴·색상"},{151,151,L"스핀 교차점",L"교차 에너지·라벨"},{photoExcitation,4405,L"광여기 hν",L"빛에 의한 준위 전이"}},
     {{editStructure,186,L"구조 그리기·편집",L"선택한 위·아래 영역"},{pasteStructure,123,L"구조 붙여넣기",L"클립보드에서 삽입"},{fileStructure,124,L"구조 파일 삽입",L"CDXML·이미지 파일"},{sizeStructure,165,L"구조 크기",L"선택 구조 확대·축소"},{removeStructure,144,L"구조 제거",L"선택 영역만 비우기"},{structureBorder,4305,L"사각형 테두리",L"표시·색상·여백·굵기"}},
     {{244,244,L"곡선 굵기",L"경로 선 굵기"},{245,245,L"그림 선 굵기",L"선택 후 + / - 조절"},{plotWaveWidthCommand,250,L"물결 관리",L"물결 굵기·곡선 간격"}}
 };
 struct Manager{
-    HWND window=nullptr;int owner=0,page=0;bool busy=false,axesEditing=false;
+    HWND window=nullptr;int owner=0,page=0;bool busy=false;
     struct View {double scale;Vec origin;};
     struct LegendDrag {Vec start,offset;View view;};
     struct AnnotationFrame {yd::Rect bounds;Vec plotPosition;};
@@ -47,11 +55,15 @@ struct Manager{
     std::optional<EnergyPlot> draft;
     std::optional<LegendDrag> legendDrag;
     std::optional<AnnotationFrame> annotationFrame;
+    std::optional<AnnotationFrame> transientFrame;
+    double previewZoom=1;Vec previewPan;std::optional<Vec> panStart;Vec panBefore;bool panMoved=false;
+    int previewWheel=0;bool panRight=false;
+    int annotationIndex=-1,gapIndex=-1;
     int weightAction=0,wheelAction=0,wheelDelta=0;std::optional<Scene> cachedScene;
     HFONT font=nullptr;ui::DialogColors colors;std::vector<HWND> cards;RectF preview;
     ~Manager(){if(font)DeleteObject(font);}
     EnergyPlot* graph(){return plot(owner);}
-    HWND button(int id,const wchar_t* label){auto h=CreateWindowExW(0,L"BUTTON",label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,1,1,window,(HMENU)INT_PTR(id),GetModuleHandleW(nullptr),nullptr);SetWindowTheme(h,L"",L"");SendMessageW(h,WM_SETFONT,(WPARAM)font,TRUE);return h;}
+    HWND button(int id,const wchar_t* label){auto h=CreateWindowExW(0,L"BUTTON",label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,1,1,window,(HMENU)INT_PTR(id),GetModuleHandleW(nullptr),nullptr);SetWindowTheme(h,L"",L"");SetWindowSubclass(h,managerButtonProc,1,0);SendMessageW(h,WM_SETFONT,(WPARAM)font,TRUE);return h;}
     void targets(){
         auto combo=GetDlgItem(window,slotControl);int selected=targetContainer==owner?int(targetSlot):int(SendMessageW(combo,CB_GETCURSEL,0,0));SendMessageW(combo,CB_RESETCONTENT,0,0);
         if(auto* p=graph())for(size_t i=0;i<p->states.size();i++){auto label=std::to_wstring(i+1)+L" · "+ui::wide(p->states[i].label);SendMessageW(combo,CB_ADDSTRING,0,(LPARAM)label.c_str());}
@@ -73,7 +85,9 @@ struct Manager{
             ~OwnerGuard(){if(enabled&&IsWindow(owner))EnableWindow(owner,TRUE);}
         } guard(win);
         ui::InlineDialogHost host(window,[this](HWND child){mount(child);});
-        act(action);
+        const auto previous=transientFrame;if(graph())transientFrame=AnnotationFrame{currentScene().bounds,graph()->p};
+        try{act(action);}catch(...){transientFrame=previous;throw;}
+        transientFrame=previous;InvalidateRect(window,nullptr,FALSE);
     }
     static ui::Table dataRows(const EnergyPlot& graph){
         ui::Table rows;
@@ -114,12 +128,15 @@ struct Manager{
                     std::vector<size_t> paths;
                     for(size_t i=1;i<sources.size();++i){
                         const auto found=std::find(lastSources.begin()+1,lastSources.end(),sources[i]);
-                        if(found==lastSources.end())throw std::runtime_error("열을 복원할 수 없습니다. 표 실행 취소를 사용하세요.");
-                        paths.push_back(size_t(found-lastSources.begin()-1));
+                        if(found!=lastSources.end())paths.push_back(size_t(found-lastSources.begin()-1));
                     }
                     // Select from the current graph so renamed/reordered rows,
                     // attached structures and exact surviving energies stay together.
                     base=selectEnergyPaths(base,paths);
+                    for(size_t i=1;i<sources.size();++i)if(std::find(lastSources.begin()+1,lastSources.end(),sources[i])==lastSources.end()){
+                        EnergySeries path;path.name=ui::utf8(titles.at(i));path.values.assign(base.states.size(),0);path.present.assign(base.states.size(),false);
+                        const char* colors[]={"#167d9a","#b44758","#27854a","#7a52a1"};path.color=colors[base.series.size()%4];base.series.push_back(std::move(path));
+                    }
                 }
                 auto cells=data;
                 const auto displayed=dataRows(base);
@@ -233,6 +250,7 @@ struct Manager{
 
     using PlotEdit=std::function<void(EnergyPlot&,const std::vector<std::string>&)>;
     void openForm(int action,const wchar_t* title,const std::vector<ui::Field>& fields,const PlotEdit& edit){
+        annotationFrame=AnnotationFrame{currentScene().bounds,graph()->p};
         auto update=[this,edit,action](const std::vector<std::string>& values,bool apply)->std::wstring{
             try{
                 auto* p=graph();
@@ -346,6 +364,7 @@ struct Manager{
         const size_t count=p.series.size();
         if(add&&count>=100)throw std::runtime_error("경로는 최대 100개입니다.");
         EnergySeries path=count?p.series.at(index):basePath(p);
+        if(p.curveWidth>0)path.width=p.curveWidth/(p.inkScale*(p.thinLines?.5:1.));
         if(add){
             path=EnergySeries{};
             path.name="Path "+std::to_string(std::max(size_t(1),count)+1);
@@ -363,6 +382,11 @@ struct Manager{
         },[add,index,count](EnergyPlot& target,const auto& values){
             if(target.series.size()!=count)throw std::runtime_error("경로 목록이 변경되었습니다. 이 편집을 닫고 다시 여세요.");
             if(target.series.empty())target.series.push_back(basePath(target));
+            if(target.curveWidth>0){
+                const double width=target.curveWidth/(target.inkScale*(target.thinLines?.5:1.));
+                for(auto& existing:target.series)existing.width=width;
+                target.curveWidth=0;
+            }
             if(add){
                 auto extra=basePath(target);
                 extra.present=target.series.front().present;
@@ -370,7 +394,7 @@ struct Manager{
             }
             auto& series=add?target.series.back():target.series.at(index);
             series.name=values[0];series.color=colorValue(values[1]);
-            series.dash=std::stoi(values[2]);series.width=numeric(values[3],.1,10);
+            series.dash=std::stoi(values[2]);series.width=numeric(values[3],.1,100);
             series.marker=std::stoi(values[4]);series.markerSize=numeric(values[5],.1,20);
             if(series.dash<0||series.dash>2||series.marker<0||series.marker>4)
                 throw std::runtime_error("선 종류와 표식을 선택하세요.");
@@ -396,18 +420,30 @@ struct Manager{
     View fitPreview(const Scene& scene) const {
         if(legendDrag)return legendDrag->view;
         auto b=scene.bounds;
-        if(panel==139&&panelVisible()&&annotationFrame){
-            // Moving a reaction caption must not pan or zoom the unchanged axes.
+        const auto* frame=annotationFrame&&panelVisible()&&(panel==139||form)?&*annotationFrame:transientFrame?&*transientFrame:nullptr;
+        if(frame){
+            // Keep setting changes visible without automatically refitting the view.
             // Retain world bounds so explicit window resizes still fit correctly.
-            b=annotationFrame->bounds;
+            b=frame->bounds;
             if(const auto* p=plot(owner)){
-                const auto delta=p->p-annotationFrame->plotPosition;
+                const auto delta=p->p-frame->plotPosition;
                 b.x+=delta.x;b.y+=delta.y;
             }
         }
-        const double scale=std::max(.01,std::min((preview.Width-32)/std::max(1.,b.w),(preview.Height-32)/std::max(1.,b.h)));
-        return {scale,{preview.X+(preview.Width-b.w*scale)/2-b.x*scale,
-            preview.Y+(preview.Height-b.h*scale)/2-b.y*scale}};
+        const double scale=std::max(.01,std::min((preview.Width-32)/std::max(1.,b.w),(preview.Height-32)/std::max(1.,b.h)))*previewZoom;
+        return {scale,{preview.X+(preview.Width-b.w*scale)/2-b.x*scale+previewPan.x,
+            preview.Y+(preview.Height-b.h*scale)/2-b.y*scale+previewPan.y}};
+    }
+    void zoomPreview(double factor,Vec cursor){
+        if(!graph())return;endLegendDrag();panStart.reset();
+        const auto& sc=currentScene();const auto before=fitPreview(sc);const auto point=(cursor-before.origin)*(1/before.scale);
+        previewZoom=std::clamp(previewZoom*factor,.5,8.);const auto after=fitPreview(sc);
+        previewPan=previewPan+cursor-(point*after.scale+after.origin);InvalidateRect(window,nullptr,FALSE);
+    }
+    bool previewCommand(int action){
+        if(action==previewFit){previewZoom=1;previewPan={};previewWheel=0;endLegendDrag();if(graph()){const AnnotationFrame frame{currentScene().bounds,graph()->p};if(annotationFrame)annotationFrame=frame;if(transientFrame)transientFrame=frame;}InvalidateRect(window,nullptr,FALSE);return true;}
+        if(action!=previewIn&&action!=previewOut)return false;
+        zoomPreview(action==previewIn?1.25:.8,{preview.X+preview.Width/2,preview.Y+preview.Height/2});return true;
     }
 
     bool startLegendDrag(Vec cursor){
@@ -445,10 +481,11 @@ struct Manager{
         InvalidateRect(window,nullptr,FALSE);
     }
 
-    void editPreview(Vec cursor){
-        if(busy||subpane||panelVisible()||!graph()||!preview.Contains(float(cursor.x),float(cursor.y)))return;
+    void editPreview(Vec cursor,bool annotationOnly=false){
+        if(busy||subpane||form||!graph()||!preview.Contains(float(cursor.x),float(cursor.y))||!flushGrid())return;
         const auto& scene=currentScene();const auto view=fitPreview(scene);
         const auto point=(cursor-view.origin)*(1/view.scale);const double pad=5/view.scale;
+        for(const auto& gap:scene.gapCaptions)if(gap.owner==owner&&point.x>=gap.bounds.x-pad&&point.x<=gap.bounds.x+gap.bounds.w+pad&&point.y>=gap.bounds.y-pad&&point.y<=gap.bounds.y+gap.bounds.h+pad){gapIndex=int(gap.index);SendMessageW(window,WM_COMMAND,addEnergyGapCommand,0);return;}
         if(auto axis=plotAxisTitleAt(scene,point,pad)){
             selectPage(0);axisInitialTab=axis->xAxis?0:1;
             SendMessageW(window,WM_COMMAND,axesManager,0);return;
@@ -461,11 +498,11 @@ struct Manager{
             if(point.x<at.x-pad||point.x>at.x+width+pad||point.y<at.y-pad||point.y>at.y+item.fontSize*1.3+pad)continue;
             if(item.textRole==4)action=137;
             else if(item.textRole==7)action=plotLegendCommand;
-            else if(item.textRole==6||item.textRole==8){action=131;row=item.textIndex;column=item.textRole==6?1:2;}
+            else if(item.textRole==6||item.textRole==8){action=annotationOnly&&item.textRole==6?plotAnnotationsCommand:131;row=item.textIndex;column=item.textRole==6?1:2;if(action==plotAnnotationsCommand)annotationIndex=row;}
             else if(item.textRole==12){action=139;row=item.textIndex;}
             if(action)break;
         }
-        if(!action){
+        if(!action&&!annotationOnly){
             auto found=scene.plotSnapPoints.find(owner);double best=12;
             if(found!=scene.plotSnapPoints.end())for(const auto& snap:found->second){
                 const double distance=(snap.p*view.scale+view.origin-cursor).length();
@@ -473,6 +510,7 @@ struct Manager{
             }
         }
         if(!action)return;
+        if(annotationOnly&&action!=plotAnnotationsCommand&&action!=139)return;
         selectPage(action==139?2:action==131?0:1);
         SendMessageW(window,WM_COMMAND,action,0);
         if(!grid||row<0)return;
@@ -486,37 +524,59 @@ struct Manager{
         // Reuse the grid's existing cell-selection and script-editing path.
         SendMessageW(list,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(std::clamp(cell.left+5,46L,std::max(46L,client.right-5)),cell.top+5));
     }
+    void previewDown(Vec cursor,bool right=false){
+        if(!preview.Contains(float(cursor.x),float(cursor.y)))return;
+        if(!right&&snapPlot==owner&&!busy&&!subpane){
+            const auto& sc=currentScene();const auto view=fitPreview(sc);std::optional<PlotSnapPoint> hit;double distance=16;
+            const auto points=sc.plotSnapPoints.find(owner);if(points!=sc.plotSnapPoints.end())for(auto point:points->second){const double d=(point.p*view.scale+view.origin-cursor).length();if(d<distance){distance=d;hit=point;}}
+            if(!hit)return;if(!snapStart){snapStart=hit;notice=L"첫 점을 고정했습니다. 두 번째 점을 클릭하세요. Esc: 취소";}
+            else{auto label=snapLabel;label.start=std::min(snapStart->percent,hit->percent);label.end=std::max(snapStart->percent,hit->percent);if(label.end-label.start<1)return;history.checkpoint(doc);if(snapStage<0)graph()->stages.push_back(label);else graph()->stages.at(size_t(snapStage))=label;snapPlot=0;snapStart.reset();changed();notice=L"선택한 두 준위에 반응 이름·화살표를 배치했습니다.";}
+            InvalidateRect(window,nullptr,FALSE);return;
+        }
+        if(!right&&startLegendDrag(cursor))return;
+        panStart=cursor;panBefore=previewPan;panMoved=false;panRight=right;SetCapture(window);
+    }
+    void previewMove(Vec cursor){
+        if(legendDrag){moveLegend(cursor);return;}if(!panStart)return;
+        const auto delta=cursor-*panStart;if(delta.length()>3)panMoved=true;
+        if(panMoved){previewPan=panBefore+delta;InvalidateRect(window,nullptr,FALSE);}
+    }
+    void previewUp(Vec cursor){
+        if(legendDrag){endLegendDrag();return;}if(!panStart)return;const bool click=!panMoved&&!panRight;panStart.reset();if(GetCapture()==window)ReleaseCapture();if(click)editPreview(cursor,true);
+    }
 
     void layout(){
         RECT client{};GetClientRect(window,&client);const int width=client.right,height=client.bottom;
         const bool expanded=panelVisible()||subpane;
         const bool showForm=form&&expanded&&!subpane;
-        const int panelTop=axesEditing?std::min(std::max(180,height-460),height-431):std::max(180,height-460);
-        const int gap=10;
-        preview={20.f,88.f,float(width-40),float(panelTop-110)};
-        const int tabWidth=(width-40-4*6)/5;
+        const int editorWidth=std::clamp(int(width*.47),560,720),editorLeft=width-editorWidth-20;
+        const int panelTop=64,gap=10;
+        preview={20.f,96.f,float(editorLeft-40),float(std::max(80,height-156))};
+        const int tabWidth=(editorWidth-4*6)/5;
         auto batch=BeginDeferWindowPos(48);
         auto place=[&](HWND h,int x,int y,int w,int ht,bool visible=true){batch=DeferWindowPos(batch,h,nullptr,x,y,w,ht,SWP_NOZORDER|SWP_NOACTIVATE|(visible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));};
         for(int i=0;i<5;i++){
-            auto tab=GetDlgItem(window,tabFirst+i);
-            place(tab,20+i*(tabWidth+6),panelTop,tabWidth,34);
+            auto tab=GetDlgItem(window,tabFirst+pageOrder[i]);
+            place(tab,editorLeft+i*(tabWidth+6),panelTop,tabWidth,34);
             EnableWindow(tab,!subpane);
         }
-        place(GetDlgItem(window,slotControl),20,panelTop+46,width-192,28,page==3&&!expanded);place(GetDlgItem(window,sideControl),width-162,panelTop+46,142,28,page==3&&!expanded);
-        const int start=panelTop+(page==3?84:46),columns=4,cardWidth=(width-40-(columns-1)*gap)/columns;
-        for(auto& category:pages)for(auto& card:category){auto h=GetDlgItem(window,card.action);auto found=std::find_if(pages[size_t(page)].begin(),pages[size_t(page)].end(),[&](const Card& c){return c.action==card.action;});bool show=found!=pages[size_t(page)].end()&&!expanded;int i=show?(card.slot>=0?card.slot:int(found-pages[size_t(page)].begin())):0;place(h,20+(i%columns)*(cardWidth+gap),start+(i/columns)*100,cardWidth,90,show);}
+        place(GetDlgItem(window,slotControl),editorLeft,panelTop+46,editorWidth-152,28,page==3&&!expanded);place(GetDlgItem(window,sideControl),width-162,panelTop+46,142,28,page==3&&!expanded);
+        const int start=panelTop+(page==3?84:46),columns=3,cardWidth=(editorWidth-(columns-1)*gap)/columns;
+        for(auto& category:pages)for(auto& card:category){auto h=GetDlgItem(window,card.action);auto found=std::find_if(pages[size_t(page)].begin(),pages[size_t(page)].end(),[&](const Card& c){return c.action==card.action;});bool show=found!=pages[size_t(page)].end()&&!expanded;int i=show?(card.slot>=0?card.slot:int(found-pages[size_t(page)].begin())):0;place(h,editorLeft+(i%columns)*(cardWidth+gap),start+(i/columns)*100,cardWidth,90,show);}
+        place(GetDlgItem(window,136),editorLeft,panelTop+44,140,26,grid&&panel==139&&expanded&&!subpane);
         place(GetDlgItem(window,distributeStages),width-188,panelTop+37,168,26,grid&&panel==139&&expanded&&!subpane);
         place(GetDlgItem(window,dataFont),width-188,panelTop+37,168,26,grid&&panel==131&&expanded&&!subpane);
         if(grid){
             const int gridTop=panel==139||panel==131?64:44;
-            place(grid,20,panelTop+gridTop,width-40,height-panelTop-gridTop-56,expanded&&!subpane);
+            place(grid,editorLeft,panelTop+gridTop,editorWidth,height-panelTop-gridTop-56,expanded&&!subpane);
         }
-        if(form)place(form,20,panelTop+44,width-40,height-panelTop-100,showForm);
-        if(subpane)place(subpane,20,panelTop+43,width-40,height-panelTop-51);
+        if(form)place(form,editorLeft,panelTop+44,editorWidth,height-panelTop-100,showForm);
+        if(subpane)place(subpane,editorLeft,panelTop+43,editorWidth,height-panelTop-51);
         place(GetDlgItem(window,pathControl),width-190,panelTop+44,170,190,showForm&&panel==133&&graph()&&graph()->series.size()>1);
-        place(GetDlgItem(window,104),20,height-46,104,30,!subpane);place(GetDlgItem(window,105),132,height-46,104,30,!subpane);
-        place(GetDlgItem(window,panelBack),width-244,height-46,112,30,expanded&&!showForm&&!subpane);
+        place(GetDlgItem(window,104),editorLeft,height-46,86,30,!subpane);place(GetDlgItem(window,105),editorLeft+92,height-46,86,30,!subpane);
+        place(GetDlgItem(window,panelBack),width-236,height-46,104,30,expanded&&!showForm&&!subpane);
         place(GetDlgItem(window,IDCANCEL),width-124,height-46,104,30,!subpane);
+        place(GetDlgItem(window,previewOut),20,height-46,32,30);place(GetDlgItem(window,previewIn),58,height-46,32,30);place(GetDlgItem(window,previewFit),96,height-46,104,30);
         EndDeferWindowPos(batch);InvalidateRect(window,nullptr,FALSE);
     }
     bool selectPage(int selected){
@@ -532,6 +592,8 @@ struct Manager{
         if(!subpane&&page==4)stepPlotAppearance(owner,weightAction,increase?1:-1);
     }
     void wheel(POINT cursor,int delta){
+        auto local=cursor;ScreenToClient(window,&local);
+        if(preview.Contains(float(local.x),float(local.y))){previewWheel+=delta;const int steps=previewWheel/WHEEL_DELTA;previewWheel%=WHEEL_DELTA;if(steps)zoomPreview(std::pow(1.2,steps),{double(local.x),double(local.y)});return;}
         if(busy||panelVisible())return;
         for(const auto& card:pages[size_t(page)]){
             RECT bounds{};GetWindowRect(GetDlgItem(window,card.action),&bounds);
@@ -539,13 +601,14 @@ struct Manager{
             if(wheelAction!=card.action){wheelAction=card.action;wheelDelta=0;}
             wheelDelta+=delta;
             const int steps=wheelDelta/WHEEL_DELTA;wheelDelta%=WHEEL_DELTA;
-            if(card.action!=242&&card.action!=243)stepPlotAppearance(owner,card.action,steps);
+            if(card.action!=242&&card.action!=243&&card.action!=244)stepPlotAppearance(owner,card.action,steps);
             return;
         }
         wheelAction=0;
     }
     std::wstring value(int id){auto* p=graph();if(!p)return L"그래프 없음";
         if(id==plotFontCommand)return ui::wide(p->fontFamily);
+        if(id==244)return L"경로별 설정";
         double n=0;bool numeric=true,percent=false;
         switch(id){case 240:n=p->stateFontSize;break;case 241:n=p->valueFontSize;break;case 242:if(!p->showXAxis)return L"숨김";n=p->xAxisWidth;break;case 243:if(!p->showYAxis)return L"숨김";n=p->yAxisWidth;break;case 244:n=p->curveWidth;break;case 245:n=p->structureInkScale*100;percent=true;break;case 246:n=p->yTitleGap;break;case plotWaveWidthCommand:n=p->waveWidth;break;case plotWaveGapCommand:n=p->waveGap;break;default:numeric=false;}
         if(!numeric)return {};if((id==plotWaveGapCommand&&n<0)||(id!=plotWaveGapCommand&&n==0))return L"자동";
@@ -562,7 +625,9 @@ struct Manager{
         const bool active=(tab&&int(item.CtlID)-tabFirst==page)||(!tab&&int(item.CtlID)==weightAction);
         const bool keyboardFocus=(item.itemState&ODS_FOCUS)&&!(item.itemState&ODS_NOFOCUSRECT);
         const bool pressed=(item.itemState&ODS_SELECTED)!=0;
-        const auto color=active||keyboardFocus||pressed?palette.accent:palette.text;
+        const bool hovered=GetPropW(item.hwndItem,L"YoungDrawHover")!=nullptr;
+        const auto color=tab&&active?palette.onAccent:active||keyboardFocus||pressed?palette.accent:palette.text;
+        if(tab||item.CtlID==previewFit||item.CtlID==previewIn||item.CtlID==previewOut)appearance::rounded(g,{1,1,box.Width-2,box.Height-2},11,tab&&active?palette.accent:hovered||keyboardFocus?palette.hover:palette.raised);
         const Card* card=nullptr;for(auto& entry:pages[size_t(page)])if(entry.action==int(item.CtlID))card=&entry;
         if(card){
             const float left=(box.Width-36)/2;
@@ -580,12 +645,12 @@ struct Manager{
             for(float x:{6.f,12.f,18.f}){g.DrawLine(&pen,x,9.f,x,17.f);}
             g.DrawLine(&pen,6.f,13.f,18.f,13.f);
             ui::drawLabel(g,L"자동 균등 배치",{box.Height+7,0,box.Width-box.Height-7,box.Height},13.f,color,true,false);
-        }else{wchar_t label[128]{};GetWindowTextW(item.hwndItem,label,128);ui::drawLabel(g,label,box,13.f,color,active,true);}
+        }else{wchar_t label[128]{};GetWindowTextW(item.hwndItem,label,128);ui::drawLabel(g,label,box,tab?12.f:13.f,color,active,true);}
     }
     void paint(HDC dc){
         Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);const auto& palette=appearance::palette();RECT client{};GetClientRect(window,&client);SolidBrush background(palette.panel);g.FillRectangle(&background,0,0,client.right,client.bottom);
         text(g,L"그래프 관리",20,16,21,palette.text,true);
-        text(g,panelVisible()&&panel==plotLegendCommand?L"미리보기 · 범례를 끌어 위치 이동":L"더블클릭: 축 제목·이름·값·범례·경로의 상태 점 편집",preview.X,68,12,palette.muted,true);appearance::rounded(g,preview,8,Color(255,255,255,255));
+        ui::drawLabel(g,panelVisible()&&panel==plotLegendCommand?L"미리보기 · 범례를 끌어 위치 이동":L"휠: 확대·축소 · 드래그: 이동 · 주석 클릭: 편집",{preview.X,64,preview.Width,26},11,palette.muted,false,false);appearance::rounded(g,preview,10,Color(255,255,255,255));
         if(graph())try{
             const auto& sc=currentScene();
             const auto view=fitPreview(sc);
@@ -594,18 +659,13 @@ struct Manager{
             g.TranslateTransform(float(view.origin.x),float(view.origin.y));
             g.ScaleTransform(float(view.scale),float(view.scale));
             render(g,sc);
+            if(snapPlot==owner){Pen marker(palette.accent,1.5f/float(view.scale));const auto points=sc.plotSnapPoints.find(owner);if(points!=sc.plotSnapPoints.end())for(const auto& point:points->second){const float r=4.f/float(view.scale);g.DrawEllipse(&marker,float(point.p.x)-r,float(point.p.y)-r,r*2,r*2);}}
             g.Restore(saved);
         }catch(const std::exception&){text(g,L"미리보기를 표시할 수 없습니다.",preview.X+16,preview.Y+24,12,palette.muted);}
         else text(g,L"그래프가 삭제되었습니다. 창을 닫고 다시 선택하세요.",preview.X+12,preview.Y+24,12,palette.muted);
-        if(!subpane&&panelVisible()&&panel==139){
-            RECT tabs{};
-            GetWindowRect(GetDlgItem(window,tabFirst),&tabs);
-            POINT at{tabs.left,tabs.top};
-            ScreenToClient(window,&at);
-            text(g,L"이름 0: 가운데 / 1: 아래  ·  범위 기준 0: 축 / 1: 물질 중앙",20,float(at.y+42),13,palette.text,true);
-        }
-        if(!notice.empty()&&!subpane)text(g,notice,20,float(client.bottom-73),13,palette.accent);
-        else if(!subpane&&!panelVisible()&&page!=2)text(g,page==4?L"크기·굵기 위에서 휠로 조절 · Ctrl+Z: 실행 취소":page==1?L"크기·간격 위에서 휠로 조절할 수 있습니다.":page==3?L"상태와 위·아래 영역을 고른 뒤 구조를 그리거나 편집하세요.":L"데이터 표는 하단 패널에서 입력하고 그래프에 즉시 반영합니다.",20,float(client.bottom-70),11,palette.muted);
+        const float editorLeft=preview.X+preview.Width+20;
+        if(!notice.empty()&&!subpane)ui::drawLabel(g,notice,{editorLeft,float(client.bottom-82),float(client.right)-editorLeft-20,32},12,palette.accent,false,false);
+        else if(!subpane&&!panelVisible())text(g,page==4?L"경로별 굵기를 선택해 조절 · Ctrl+Z: 실행 취소":L"도구를 선택하거나 미리보기의 주석을 클릭하세요.",editorLeft,float(client.bottom-70),11,palette.muted);
     }
     void act(int action){
         if(action==distributeStages){if(grid&&panel==139)ui::distributeEmbeddedStages(grid);return;}
@@ -619,12 +679,13 @@ struct Manager{
         if(!graph())throw std::runtime_error("편집할 그래프가 없습니다.");if(doc.isLocked(owner))throw std::runtime_error("그래프 잠금을 해제한 뒤 편집하세요.");
         selection={owner};
         if(action==137){plotSettings(owner,true);return;}
-        if(action==axesManager){
-            struct AxisLayout {Manager& manager;explicit AxisLayout(Manager& m):manager(m){manager.axesEditing=true;}~AxisLayout(){manager.axesEditing=false;manager.layout();}} layoutGuard(*this);
-            const int tab=axisInitialTab;axisInitialTab=-1;editPlotAxes(owner,tab);return;
-        }
+        if(action==axesManager){const int tab=axisInitialTab;axisInitialTab=-1;editPlotAxes(owner,tab);return;}
         if(action==verticalBranch){openVerticalBranch();return;}
         if(action==photoExcitation){editPlotPhotoExcitation(owner);return;}
+        if(action==136){snapPlotStages(owner);if(snapPlot)notice=L"미리보기에서 화살표 양끝의 준위 점을 클릭하세요. Esc: 취소";return;}
+        if(action==plotAnnotationsCommand){const int index=annotationIndex;annotationIndex=-1;editPlotAnnotations(owner,index);return;}
+        if(action==energyGapStyleCommand){editEnergyGapStyle(owner);return;}
+        if(action==addEnergyGapCommand){const int index=gapIndex;gapIndex=-1;manageEnergyGaps(owner,index);return;}
         if(action==139){openStages();return;}
         if(action==plotLegendCommand){openLegend();return;}
         if(action==132||action==133){openSeries(action==132);return;}
@@ -643,7 +704,7 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_NCCREATE){self=static_cast<Manager*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);self->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}
     if(!self)return DefWindowProcW(h,message,wp,lp);
     switch(message){
-    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"그래프·축·데이터",L"모양·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i=0;i<5;i++)self->button(tabFirst+i,tabs[i]);self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");self->button(distributeStages,L"자동 균등 배치");self->button(dataFont,L"글자 크기");
+    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"그래프·축·데이터",L"모양·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i:pageOrder)self->button(tabFirst+i,tabs[i]);self->button(previewOut,L"−");self->button(previewIn,L"+");self->button(previewFit,L"전체 보기");self->button(136,L"자석 배치");self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");self->button(distributeStages,L"자동 균등 배치");self->button(dataFont,L"글자 크기");
         auto path=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
             0,0,170,180,h,reinterpret_cast<HMENU>(INT_PTR(pathControl)),nullptr,nullptr);
         SendMessageW(path,WM_SETFONT,(WPARAM)self->font,TRUE);ui::themeCombo(path);
@@ -656,12 +717,13 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     case WM_PAINT:{PAINTSTRUCT paint;auto dc=BeginPaint(h,&paint);RECT r{};GetClientRect(h,&r);auto buffer=CreateCompatibleDC(dc);auto bitmap=CreateCompatibleBitmap(dc,std::max(1L,r.right),std::max(1L,r.bottom));auto old=SelectObject(buffer,bitmap);self->paint(buffer);BitBlt(dc,0,0,r.right,r.bottom,buffer,0,0,SRCCOPY);SelectObject(buffer,old);DeleteObject(bitmap);DeleteDC(buffer);EndPaint(h,&paint);return 0;}
     case WM_DRAWITEM:self->draw(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
     case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:return self->colors.control(message,reinterpret_cast<HDC>(wp));
-    case WM_LBUTTONDOWN:try{self->startLegendDrag({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});}catch(const std::exception&){}return 0;
+    case WM_LBUTTONDOWN:case WM_RBUTTONDOWN:try{self->previewDown({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))},message==WM_RBUTTONDOWN);}catch(const std::exception&){}return 0;
     case WM_LBUTTONDBLCLK:try{self->editPreview({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});}catch(const std::exception& error){self->notice=ui::wide(error.what());InvalidateRect(h,nullptr,FALSE);}return 0;
-    case WM_MOUSEMOVE:if(self->legendDrag)self->moveLegend({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;
-    case WM_LBUTTONUP:self->endLegendDrag();return 0;
-    case WM_CAPTURECHANGED:self->endLegendDrag();return 0;
+    case WM_MOUSEMOVE:self->previewMove({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;
+    case WM_LBUTTONUP:case WM_RBUTTONUP:try{self->previewUp({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});}catch(const std::exception& error){self->notice=ui::wide(error.what());InvalidateRect(h,nullptr,FALSE);}return 0;
+    case WM_CAPTURECHANGED:self->panStart.reset();self->endLegendDrag();return 0;
     case WM_COMMAND:{int action=LOWORD(wp);
+        if(self->previewCommand(action))return 0;
         if(self->subpane||self->busy)return 0;
         if(action==pathControl){
             const auto index=SendDlgItemMessageW(h,pathControl,CB_GETCURSEL,0,0);
@@ -676,7 +738,7 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         self->busy=true;self->notice.clear();
         try{self->runTool(action);}catch(const std::exception& error){self->notice=ui::wide(error.what());InvalidateRect(h,nullptr,FALSE);}
         self->busy=false;
-        if((action==136&&snapPlot)||(action==addEnergyGapCommand&&pendingEnergyGap)){
+        if(action==addEnergyGapCommand&&pendingEnergyGap){
             DestroyWindow(h);SetForegroundWindow(win);SetFocus(win);
         }else if(!GetFocus()&&IsWindowVisible(h))SetFocus(GetDlgItem(h,tabFirst+self->page));
         return 0;}
@@ -692,7 +754,7 @@ void managePlot(int id,bool visible){
     if(!plot(id))throw std::runtime_error("관리할 그래프를 선택하세요.");
     if(plotManagerWindow){
         auto* manager=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));
-        if(manager->owner!=id){if(!manager->flushGrid())return;manager->clearPanel();}
+        if(manager->owner!=id){if(!manager->flushGrid())return;manager->clearPanel();manager->previewZoom=1;manager->previewPan={};}
         manager->owner=id;manager->targets();manager->layout();
         if(visible){
             if(IsIconic(plotManagerWindow))ShowWindow(plotManagerWindow,SW_RESTORE);
@@ -702,7 +764,7 @@ void managePlot(int id,bool visible){
         return;
     }
     WNDCLASSW wc{};wc.lpfnWndProc=managerProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawPlotManager";wc.style=CS_DBLCLKS;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
-    auto* state=new Manager;state->owner=id;auto rect=ui::ownedWindowRect(win,1120,780);
+    auto* state=new Manager;state->owner=id;MONITORINFO monitor{sizeof(monitor)};GetMonitorInfoW(MonitorFromWindow(win,MONITOR_DEFAULTTONEAREST),&monitor);auto rect=ui::ownedWindowRect(win,std::max(900L,std::min(1520L,monitor.rcWork.right-monitor.rcWork.left-40)),std::max(640L,std::min(960L,monitor.rcWork.bottom-monitor.rcWork.top-40)));
     auto h=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"그래프 관리",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,win,nullptr,wc.hInstance,state);
     if(!h){delete state;throw std::runtime_error("그래프 관리 창을 열 수 없습니다.");}plotManagerWindow=h;if(visible){ShowWindow(h,SW_SHOW);UpdateWindow(h);}
 }
@@ -721,6 +783,9 @@ void openPlotAxesManager(int id,int detail){
     manager->axisInitialTab=detail;
     SendMessageW(plotManagerWindow,WM_COMMAND,axesManager,0);
 }
+std::optional<PlotManagerPreview> plotManagerPreview(){
+    if(!plotManagerWindow)return {};auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(!m||!m->graph())return {};const auto view=m->fitPreview(m->currentScene());return PlotManagerPreview{{m->preview.X,m->preview.Y,m->preview.Width,m->preview.Height},view.scale,view.origin};
+}
 void refreshPlotManager(){if(plotManagerWindow){auto* m=reinterpret_cast<Manager*>(GetWindowLongPtrW(plotManagerWindow,GWLP_USERDATA));if(m)m->cachedScene.reset();InvalidateRect(plotManagerWindow,nullptr,FALSE);if(m)for(auto card:m->cards)InvalidateRect(card,nullptr,FALSE);}}
 bool handlePlotManagerMessage(MSG& message){
     const auto window=plotManagerWindow;
@@ -734,9 +799,11 @@ bool handlePlotManagerMessage(MSG& message){
     }
     if(message.message==WM_KEYDOWN){
         const auto k=message.wParam;
+        if(k==VK_ESCAPE&&snapPlot==manager->owner){snapPlot=0;snapStart.reset();manager->notice.clear();InvalidateRect(window,nullptr,FALSE);return true;}
         if(!manager->subpane&&!manager->busy&&(GetKeyState(VK_CONTROL)&0x8000)){
             if(k==VK_TAB||(k>='1'&&k<='5')){
-                const int next=k==VK_TAB?(manager->page+((GetKeyState(VK_SHIFT)&0x8000)?4:1))%5:int(k-'1');
+                const int index=int(std::find(std::begin(pageOrder),std::end(pageOrder),manager->page)-std::begin(pageOrder));
+                const int next=pageOrder[k==VK_TAB?(index+((GetKeyState(VK_SHIFT)&0x8000)?4:1))%5:int(k-'1')];
                 if(manager->selectPage(next))SetFocus(GetDlgItem(window,tabFirst+manager->page));return true;
             }
             if(k==VK_RETURN&&!inGrid&&!inForm){manager->selectPage(0);SendMessageW(window,WM_COMMAND,131,0);return true;}

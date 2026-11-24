@@ -1,5 +1,6 @@
 #pragma once
 #include "win_editor.h"
+#include "scene.h"
 namespace yd::editor {
 extern HWND plotManagerWindow;
 void managePlot(int id,bool visible=true);
@@ -8,4 +9,6 @@ void openPlotAxesManager(int id,int detail=-1);
 void closePlotManager();
 void refreshPlotManager();
 bool handlePlotManagerMessage(MSG& message);
+struct PlotManagerPreview {yd::Rect viewport;double scale;Vec origin;};
+std::optional<PlotManagerPreview> plotManagerPreview();
 }

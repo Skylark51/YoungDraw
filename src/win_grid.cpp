@@ -10,12 +10,12 @@
 namespace ui {
 namespace {
 constexpr UINT CommitFocus=WM_APP+41;
-constexpr int DeleteColumns=29,ClearCells=30,SelectRow=31,SelectColumn=32,SelectAll=33;
+constexpr int DeleteColumns=29,ClearCells=30,SelectRow=31,SelectColumn=32,SelectAll=33,AddColumn=34;
 struct Grid {
     DialogColors colors;
     struct Snapshot {Table rows;std::vector<std::wstring> columns;std::vector<size_t> sourceColumns;int row,col,anchorRow,anchorCol;size_t revision;};
     std::vector<Snapshot> undo,redo;
-    size_t revision=0,nextRevision=1;
+    size_t revision=0,nextRevision=1,nextColumn=0;
     bool dragging=false;
     Table rows,original; std::vector<std::wstring> columns; TablePreview preview;std::wstring hint;
     TableCellError cellError;
@@ -26,7 +26,7 @@ struct Grid {
     std::vector<std::wstring> originalColumns;
     std::set<std::pair<int,int>> invalidCells;
     HWND win=nullptr,list=nullptr,edit=nullptr,error=nullptr,apply=nullptr; HFONT font=nullptr,italicFont=nullptr,interfaceFont=nullptr;
-    int row=0,col=0,anchorRow=0,anchorCol=0,scriptColumn=-1,linePixels=20;
+    int row=0,col=0,anchorRow=0,anchorCol=0,scriptColumn=-1,linePixels=20,listWidth=-1;
     HIMAGELIST rowHeight=nullptr;
     bool embedded=false,reactionStages=false,selectingRows=false;
     bool done=false,ok=false,loading=false,composing=false,scripts=false,stages=false;
@@ -100,12 +100,17 @@ void refresh(Grid& g){
     }
     SendMessageW(g.list,WM_SETREDRAW,TRUE,0);InvalidateRect(g.list,nullptr,FALSE);g.loading=false;
 }
+int defaultColumnWidth(const Grid& g){
+    RECT bounds{};GetClientRect(g.list,&bounds);
+    const int available=g.embedded?bounds.right-45-GetSystemMetrics(SM_CXVSCROLL):870;
+    return std::max(120,available/int(g.columns.size()));
+}
 void refreshColumns(Grid& g){
     while(ListView_DeleteColumn(g.list,0)){}
     constexpr int reactionWidths[]={35,140,80,80,57,57,73,69,61,61,62,84};
     for(size_t c=0;c<=g.columns.size();++c){
         LVCOLUMNW column{};column.mask=LVCF_TEXT|LVCF_WIDTH;
-        column.cx=g.reactionStages?reactionWidths[c]:(c?std::max(120,870/int(g.columns.size())):45);
+        column.cx=g.reactionStages?reactionWidths[c]:(c?defaultColumnWidth(g):45);
         auto name=c?g.columns[c-1]:L"행";column.pszText=name.data();ListView_InsertColumn(g.list,int(c),&column);
     }
 }
@@ -186,6 +191,14 @@ void deleteColumns(Grid& g){
     g.sourceColumns.erase(g.sourceColumns.begin()+first,g.sourceColumns.begin()+last+1);
     refreshColumns(g);refresh(g);selectCell(g,g.row,std::min(first,int(g.columns.size())-1));validate(g);
 }
+void editCell(Grid& g,bool replace=false);
+void addColumn(Grid& g){
+    commit(g);if(!g.structurePreview||!validate(g))return;
+    checkpoint(g);size_t number=g.columns.size();std::wstring name;
+    do{name=L"Path "+std::to_wstring(number++);}while(std::find(g.columns.begin(),g.columns.end(),name)!=g.columns.end());
+    g.columns.push_back(name);g.sourceColumns.push_back(g.nextColumn++);for(auto& row:g.rows)row.push_back("");
+    refreshColumns(g);refresh(g);validate(g);selectCell(g,0,int(g.columns.size())-1);editCell(g);
+}
 std::wstring clipboard(Grid& g){
     std::wstring data;if(!OpenClipboard(g.win))return data;HANDLE h=GetClipboardData(CF_UNICODETEXT);
     if(h){auto p=static_cast<const wchar_t*>(GlobalLock(h));if(p){data=p;GlobalUnlock(h);}}CloseClipboard();return data;
@@ -253,7 +266,6 @@ void duplicate(Grid& g){
     auto base=row[0];int suffix=2;do{row[0]=base+" ("+std::to_string(suffix++)+")";}while(names.count(row[0]));
     int target=g.row+1;g.rows.insert(g.rows.begin()+target,row);refresh(g);validate(g);selectCell(g,target,0);
 }
-void editCell(Grid& g,bool replace=false);
 void moveCell(Grid& g,WPARAM key,bool shift){
     int r=g.row,c=g.col;commit(g);
     if(key==VK_TAB){
@@ -346,6 +358,7 @@ void contextMenu(Grid& g,LPARAM position){
     AppendMenuW(menu,cellFlags,ClearCells,L"선택 셀 비우기\tDelete");
     AppendMenuW(menu,cellFlags,21,g.stages||g.reactionStages?L"선택 단계 삭제":L"선택 행 삭제");
     if(g.structurePreview){
+        AppendMenuW(menu,MF_STRING,AddColumn,L"열(경로) 추가");
         const int first=std::max(1,std::min(g.col,g.anchorCol)),last=std::max(g.col,g.anchorCol);
         const bool allowed=last>=first&&int(g.columns.size())-(last-first+1)>=2;
         AppendMenuW(menu,MF_STRING|(allowed?0:MF_GRAYED),DeleteColumns,L"선택 열(경로) 삭제");
@@ -478,6 +491,7 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         g=static_cast<Grid*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);g->win=hwnd;if(g->scriptColumn<0)g->scriptColumn=g->stages?1:0;SetWindowLongPtrW(hwnd,GWLP_USERDATA,(LONG_PTR)g);
         if(g->originalColumns.empty())g->originalColumns=g->columns;
         if(g->sourceColumns.empty())for(size_t c=0;c<g->columns.size();++c)g->sourceColumns.push_back(c);
+        g->nextColumn=*std::max_element(g->sourceColumns.begin(),g->sourceColumns.end())+1;
         g->font=CreateFontW(-16,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ui::interfaceFont());
         g->list=CreateWindowExW(g->embedded?0:WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,16,16,940,450,hwnd,(HMENU)10,nullptr,nullptr);
         SendMessageW(g->list,WM_SETFONT,(WPARAM)g->font,TRUE);ListView_SetExtendedListViewStyle(g->list,LVS_EX_GRIDLINES|LVS_EX_DOUBLEBUFFER);
@@ -488,32 +502,31 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         ListView_SetTextColor(g->list,colorRef(g->colors.palette.text));
         SetWindowSubclass(g->list,listProc,1,(DWORD_PTR)g);
         constexpr int reactionWidths[]={35,140,80,80,57,57,73,69,61,61,62,84};
-        for(size_t c=0;c<=g->columns.size();c++){LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=g->reactionStages?reactionWidths[c]:(c?std::max(120,870/int(g->columns.size())):45);auto name=c?g->columns[c-1]:L"행";col.pszText=name.data();ListView_InsertColumn(g->list,int(c),&col);}
+        for(size_t c=0;c<=g->columns.size();c++){LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=g->reactionStages?reactionWidths[c]:(c?defaultColumnWidth(*g):45);auto name=c?g->columns[c-1]:L"행";col.pszText=name.data();ListView_InsertColumn(g->list,int(c),&col);}
         g->error=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,16,480,940,48,hwnd,nullptr,nullptr,nullptr);SendMessageW(g->error,WM_SETFONT,(WPARAM)g->font,TRUE);
         const wchar_t* labels[]={g->stages||g->reactionStages?L"단계 추가":L"행 추가",g->stages||g->reactionStages?L"단계 삭제":L"행 삭제",L"적용",L"취소",g->stages||g->reactionStages?L"단계 복제":L"행 복제"};const int positions[]={16,356,526,696,186};
         for(int i=0;i<5;i++){HWND b=CreateWindowW(L"BUTTON",labels[i],WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,positions[i],540,155,34,hwnd,(HMENU)(INT_PTR)(20+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);if(i==2)g->apply=b;}
         if(g->scripts)for(int i=0;i<2;i++){HWND b=CreateWindowW(L"BUTTON",i?L"x²":L"x₂",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,860+i*50,540,46,34,hwnd,(HMENU)(INT_PTR)(25+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}
         for(int i=0;i<2;i++){HWND b=CreateWindowW(L"BUTTON",g->embedded?(i?L"표 다시 실행":L"표 실행 취소"):(i?L"다시 실행 (Ctrl+Shift+Z)":L"되돌리기 (Ctrl+Z)"),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,16+i*240,580,230,28,hwnd,(HMENU)(INT_PTR)(27+i),nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}
         if(g->structurePreview){HWND b=CreateWindowW(L"BUTTON",L"열(경로) 삭제",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,496,580,180,28,hwnd,(HMENU)(INT_PTR)DeleteColumns,nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}
+        if(g->structurePreview){HWND b=CreateWindowW(L"BUTTON",L"열(경로) 추가",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,496,540,180,28,hwnd,(HMENU)(INT_PTR)AddColumn,nullptr,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)g->font,TRUE);}
         refresh(*g);validate(*g);return 0;
     }
     if(!g)return DefWindowProcW(hwnd,msg,wp,lp);
-    if(msg==WM_SIZE&&g->embedded){
-        RECT r{};GetClientRect(hwnd,&r);int w=r.right,h=r.bottom;
-        MoveWindow(g->list,0,0,w,std::max(60,h-100),TRUE);
-        if(g->reactionStages){
-            int remaining=w-GetSystemMetrics(SM_CXVSCROLL);
-            for(int c=0;c<=int(g->columns.size());++c)if(c!=1)remaining-=ListView_GetColumnWidth(g->list,c);
-            ListView_SetColumnWidth(g->list,1,std::max(152,remaining));
-        }
-        MoveWindow(g->error,0,std::max(60,h-96),w,44,TRUE);
-        const int stageIds[]={20,24,21,27,28,25,26},dataIds[]={20,24,21,DeleteColumns,27,28},plainIds[]={20,24,21,27,28};
-        const int* ids=g->reactionStages?stageIds:g->structurePreview?dataIds:plainIds;
-        const int count=g->reactionStages?7:g->structurePreview?6:5;
-        const int bw=std::max(70,(w-(count-1)*6)/count);
-        for(int i=0;i<count;i++)MoveWindow(GetDlgItem(hwnd,ids[i]),i*(bw+6),h-38,bw,30,TRUE);
-        ShowWindow(GetDlgItem(hwnd,22),SW_HIDE);ShowWindow(GetDlgItem(hwnd,23),SW_HIDE);
-        if(!g->reactionStages)for(int i=25;i<=26;i++)ShowWindow(GetDlgItem(hwnd,i),SW_HIDE);
+    if(msg==WM_SIZE){
+        RECT r{};GetClientRect(hwnd,&r);const int margin=g->embedded?0:16,w=r.right-2*margin,h=r.bottom;
+        std::vector<int> ids=g->reactionStages?std::vector<int>{20,24,21,27,28,25,26}:g->structurePreview?std::vector<int>{20,24,21,AddColumn,DeleteColumns,27,28}:std::vector<int>{20,24,21,27,28};
+        if(!g->embedded&&g->scripts){ids.push_back(25);ids.push_back(26);}
+        const int columns=4,gap=8,bh=32,rows=(int(ids.size())+(g->embedded?0:2)+columns-1)/columns;
+        const int toolbar=h-(rows*(bh+gap))-8,bw=(w-(columns-1)*gap)/columns;
+        MoveWindow(g->list,margin,margin,w,std::max(60,toolbar-margin-56),TRUE);
+        if(g->embedded&&!g->reactionStages&&g->listWidth!=w)for(size_t c=1;c<=g->columns.size();++c)ListView_SetColumnWidth(g->list,int(c),defaultColumnWidth(*g));
+        g->listWidth=w;
+        if(g->reactionStages){int remaining=w-GetSystemMetrics(SM_CXVSCROLL);for(int c=0;c<=int(g->columns.size());++c)if(c!=1)remaining-=ListView_GetColumnWidth(g->list,c);ListView_SetColumnWidth(g->list,1,std::max(152,remaining));}
+        MoveWindow(g->error,margin,toolbar-50,w,44,TRUE);
+        for(size_t i=0;i<ids.size();++i)MoveWindow(GetDlgItem(hwnd,ids[i]),margin+int(i%columns)*(bw+gap),toolbar+int(i/columns)*(bh+gap),bw,bh,TRUE);
+        for(int i=22;i<=23;++i){ShowWindow(GetDlgItem(hwnd,i),g->embedded?SW_HIDE:SW_SHOWNA);if(!g->embedded)MoveWindow(GetDlgItem(hwnd,i),margin+(i-20)*(bw+gap),toolbar+(rows-1)*(bh+gap),bw,bh,TRUE);}
+        if(g->embedded&&!g->reactionStages)for(int i=25;i<=26;i++)ShowWindow(GetDlgItem(hwnd,i),SW_HIDE);
         sizeEditor(*g);return 0;
     }
     if(msg==WM_NCDESTROY&&g->embedded){SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);DeleteObject(g->font);DeleteObject(g->italicFont);if(g->interfaceFont)DeleteObject(g->interfaceFont);delete g;return DefWindowProcW(hwnd,msg,wp,lp);}
@@ -553,6 +566,7 @@ LRESULT CALLBACK gridProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
     }
     if(msg==WM_CONTEXTMENU&&((HWND)wp==g->list||(HWND)wp==ListView_GetHeader(g->list))){contextMenu(*g,lp);return 0;}
     if(msg==WM_COMMAND){int id=LOWORD(wp);
+        if(id==AddColumn){addColumn(*g);return 0;}
         if(id==DeleteColumns){deleteColumns(*g);return 0;}
         if(id==ClearCells){clearCells(*g);return 0;}
         if(id==SelectRow){selectRow(*g,g->row);return 0;}

@@ -10,6 +10,18 @@ using namespace yd;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 int main(){try{
     {
+        auto d=mechanismDemo();auto& r=d.reactions.front();addMechanismBranch(r,0);r.links.back().name="Branch A";r.energySymbol="ΔG";optimizeMechanism(d,{r.id});
+        const size_t edge=r.links.size()-1;const int from=r.links[edge].from,to=r.links[edge].to;
+        auto tip=[&](){for(const auto& item:makeScene(d).items)if(item.owner==r.id&&item.reactionArrow==int(edge)&&item.type==Primitive::Polygon)return item.points.front();throw std::runtime_error("connection has an arrowhead");};
+        const auto forward=tip();setMechanismArrowType(r,edge,2);const auto reverse=tip();
+        check((reverse-reactionSlot(r,size_t(from))).length()<(forward-reactionSlot(r,size_t(from))).length(),"reverse arrow points toward its source frame");
+        check(r.links[edge].from==from&&r.links[edge].to==to&&r.links[edge].members.empty(),"reversing a TS preserves topology and permits an empty TS structure");
+        for(const auto& restored:{fromNative(toNative(d)),fromCdxml(toCdxml(d))}){
+            const auto& saved=restored.reactions.front();check(saved.links[edge].name=="Branch A"&&saved.energySymbol=="ΔG"&&mechanismArrowType(saved,edge)==2,"branch names, delta notation and reverse arrows survive both formats");
+            const auto scene=makeScene(restored);check(std::any_of(scene.items.begin(),scene.items.end(),[](const auto& item){return item.type==Primitive::Text&&item.text=="Branch A";}),"branch name is rendered beside its connection");
+        }
+    }
+    {
         auto d=mechanismDemo();auto& r=d.reactions[0];setMechanismArrowType(r,0,1);
         auto heads=[&](const Document& doc,int edge){int n=0;for(const auto& item:makeScene(doc).items)if(item.owner==doc.reactions[0].id&&item.reactionArrow==edge&&item.type==Primitive::Polygon)++n;return n;};
         check(heads(d,0)==2&&heads(d,1)==1,"equilibrium applies to one connection only");
