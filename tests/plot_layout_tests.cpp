@@ -15,6 +15,49 @@ static Rect bounds(const Primitive& text){Vec p=text.points[0];double w=measure(
 static bool overlaps(Rect a,Rect b){return a.x<b.x+b.w-0.01&&a.x+a.w>b.x+0.01&&a.y<b.y+b.h-0.01&&a.y+a.h>b.y+0.01;}
 static EnergyPlot sample(){EnergyPlot p;p.id=1;p.p={30,90};p.width=760;p.height=400;p.states={{"R",0,{},{}},{"TS1",37.2,{},{}},{"I",17.7,{},{}},{"TS2",27.3,{},{}},{"P",-9.9,{},{}}};p.series={{"Path 1","#167d9a",{0,37.2,17.7,27.3,-9.9},0,2},{"Path 2","#b44758",{0,37.2,17.7,27.3,-9.9},1,2}};return p;}
 int main(){try{
+    for(bool above:{false,true}){
+        Document d;auto graph=sample();d.plots={graph};d.nextId=2;
+        Document fragment;int a=fragment.addAtom({410,280},7),b=fragment.addAtom({440,280},8);fragment.addBond(a,b);
+        Object image;image.id=fragment.nextId++;image.kind=ObjectKind::Image;image.points={{450,250},{480,290}};
+        image.imageHex="89504e470d0a1a0a";fragment.objects.push_back(image);
+        replaceSlotStructure(d,fragment,graph.id,0,above,true);
+        const auto members=above?d.plots[0].states[0].above:d.plots[0].states[0].below;
+        auto initial=makeScene(d.subset(members)).bounds;
+        check((Vec{initial.x+initial.w/2,initial.y+initial.h/2}-plotAnchor(d.plots[0],0,above)).length()<1e-6,
+              "first structure is centered in an empty graph insertion region");
+        scaleStructures(d,members,1.6);d.translate(members,{143,-91});d.translate({graph.id},{27,38});
+        replaceSlotStructure(d,fragment,graph.id,1,!above);
+        const auto other=toNative(structureInSlot(d,graph.id,1,!above));
+#ifdef TEST_CDXML
+        d=fromCdxml(toCdxml(d));
+#endif
+        auto edited=structureInSlot(d,graph.id,0,above);
+        const auto originalPosition=edited.atoms[0].p;
+        edited.atoms[0].label="NHCH2CH3";
+        int extension=edited.addAtom(edited.atoms[1].p+Vec{110,24},16);
+        edited.addBond(edited.atoms[1].id,extension);
+        // Asymmetric growth must not shift the unchanged skeleton or the image.
+        replaceSlotStructure(d,edited,graph.id,0,above,true);
+        const auto restored=structureInSlot(d,graph.id,0,above);
+        check(restored.atoms.size()==edited.atoms.size()&&restored.bonds.size()==edited.bonds.size()&&
+              restored.atoms[0].label==edited.atoms[0].label,"structure changes are applied to the chosen graph region");
+        for(size_t i=0;i<edited.atoms.size();++i)
+            check((restored.atoms[i].p-edited.atoms[i].p).length()<1e-6&&restored.atoms[i].drawingScale==edited.atoms[i].drawingScale,
+                  "editing moved and scaled graph structures preserves every atom position and scale");
+        check((restored.atoms[0].p-originalPosition).length()<1e-6&&restored.objects.size()==1&&
+              restored.objects[0].imageHex==edited.objects[0].imageHex,"local editing preserves the existing skeleton and image data");
+        for(size_t i=0;i<edited.objects[0].points.size();++i)
+            check((restored.objects[0].points[i]-edited.objects[0].points[i]).length()<1e-6,
+                  "local editing preserves moved image placement and dimensions");
+        check(toNative(structureInSlot(d,graph.id,1,!above))==other&&
+              (d.plots[0].p-graph.p-Vec{27,38}).length()<1e-6&&d.plots[0].width==graph.width&&
+              d.plots[0].series[0].values==graph.series[0].values,
+              "local structure edits leave other regions, graph geometry and energy data unchanged");
+        replaceSlotStructure(d,fragment,graph.id,0,above);
+        const auto replacement=makeScene(structureInSlot(d,graph.id,0,above)).bounds;
+        check(Vec{replacement.x+replacement.w/2,replacement.y+replacement.h/2}.length()<1e-6,
+              "fresh imported replacements still center in their graph region");
+    }
     {
         Document d;auto graph=sample();d.plots={graph};d.nextId=2;
         Document fragment;fragment.ring({0,0},6);fragment.atoms[0].element=8;

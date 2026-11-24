@@ -239,7 +239,8 @@ Vec plotAnchor(const EnergyPlot& p,size_t index,bool above);
 void optimizeMechanism(Document& d,const std::vector<int>& selection={},bool cyclic=false);
 void fillSlot(Document& d,const Document& fragment,int container,size_t index,bool above=false);
 Document structureInSlot(const Document& d,int container,size_t index,bool above=false);
-void replaceSlotStructure(Document& d,const Document& fragment,int container,size_t index,bool above=false);
+// Preserve slot-relative coordinates returned by structureInSlot when applying edits.
+void replaceSlotStructure(Document& d,const Document& fragment,int container,size_t index,bool above=false,bool preservePlacement=false);
 int collapsePhenyl(Document& d,const std::vector<int>& selection);
 int arrangeImportedMechanism(Document& d,const std::vector<int>& selection={},bool preserveLayout=false,bool fromStructures=false);
 void addMechanismBranch(Reaction& r,size_t source);
