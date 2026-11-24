@@ -59,7 +59,7 @@ void editTheme(HWND hwnd,int close){
  command(184);
  KillTimer(hwnd,998);check(formSeen&&customPreview,"custom theme editor previews actual entered colors");
 }
-RectF hit(int id){for(const auto& h:hits)if(h.id==id)return h.box;throw std::runtime_error("missing sidebar tool");}
+RectF hit(int id){for(const auto& h:hits)if(h.id==id)return h.box;throw std::runtime_error("missing tool "+std::to_string(id)+" at width "+std::to_string(ww));}
 void snapshot(HWND hwnd){
  HDC dc=GetDC(hwnd);paint(dc);ReleaseDC(hwnd,dc);
  CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
@@ -75,7 +75,7 @@ int main(){std::cerr<<std::unitbuf;std::cout<<std::unitbuf;
  int result=0;HWND testWindow=nullptr;
  try{
   WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawPolishTest";RegisterClassW(&wc);
-  auto hwnd=CreateWindowW(wc.lpszClassName,L"Editor",WS_OVERLAPPEDWINDOW,0,0,1440,940,nullptr,nullptr,wc.hInstance,nullptr);
+  auto hwnd=CreateWindowW(wc.lpszClassName,L"Editor",WS_OVERLAPPEDWINDOW,0,0,1040,760,nullptr,nullptr,wc.hInstance,nullptr);
   check(hwnd!=nullptr,"create isolated editor");testWindow=hwnd;
   doc={};const int a=doc.addAtom({0,0}),b=doc.addAtom({30,0}),c=doc.addAtom({60,0}),d=doc.addAtom({90,0});
   doc.addBond(a,b);doc.addBond(b,c);doc.addBond(c,d);selection={a,b};
@@ -110,6 +110,7 @@ int main(){std::cerr<<std::unitbuf;std::cout<<std::unitbuf;
   snapshot(hwnd);
   check(hit(201).X==hit(202).X&&hit(202).X==hit(203).X,"single double triple bonds share a column");
   check(hit(204).X==hit(205).X,"wedge and hash share a column");
+  scrollTools({double(ww)/2,30},10000);snapshot(hwnd);
   check(hit(184).X>hit(copyPngCommand).X&&hit(184).Y==hit(copyPngCommand).Y,"theme icon follows image copy in the same toolbar row");
   for(int removed:{206,219,interactionToolCommand})check(std::none_of(hits.begin(),hits.end(),[&](const Hit& h){return h.id==removed;}),"redundant tools are absent from the sidebar");
   check(beginToolHold(218,{20,20})&&finishToolHold({20,20})&&tool==Orbital,"short orbital press selects drawing");
