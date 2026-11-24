@@ -56,7 +56,7 @@ void CALLBACK themeDriver(HWND owner,UINT,UINT_PTR timer,DWORD){try{
 void editTheme(HWND hwnd,int close){
  phase=0;formSeen=customPreview=false;themeClose=close;
  SetTimer(hwnd,998,10,themeDriver);
- appearance::picker(hwnd,[](){refreshAppearance();});
+ command(184);
  KillTimer(hwnd,998);check(formSeen&&customPreview,"custom theme editor previews actual entered colors");
 }
 RectF hit(int id){for(const auto& h:hits)if(h.id==id)return h.box;throw std::runtime_error("missing sidebar tool");}
