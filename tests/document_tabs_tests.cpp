@@ -605,7 +605,7 @@ static void annotationPreviewChecks(HWND){
     const Document original=doc;const auto before=toNative(doc);
     const auto originalAxes=makeScene(doc,measure).plotAxes.at(owner);
     managePlot(owner);const auto manager=plotManagerWindow;
-    SendMessageW(manager,WM_COMMAND,4002,0);
+    SendMessageW(manager,WM_COMMAND,4000,0);
     auto axisPixels=[&](const wchar_t* filename){
         RECT client{},tab{};GetClientRect(manager,&client);GetWindowRect(GetDlgItem(manager,4000),&tab);
         MapWindowPoints(nullptr,manager,reinterpret_cast<POINT*>(&tab),2);
@@ -745,6 +745,16 @@ static void graphPreviewAccessChecks(HWND hwnd){
     formBefore=before;formAction=20;formDriven=false;SetTimer(hwnd,901,10,driveForm);
     preview=makeScene(doc.subset({owner}),measure);doubleClick(preview,textPosition(preview,4,-1));KillTimer(hwnd,901);
     check(formDriven&&toNative(doc)==before,"title double-click opens the existing settings route and cancellation restores the model");
+    SendMessageW(manager,WM_COMMAND,4002,0);
+    preview=makeScene(doc.subset({owner}),measure);doubleClick(preview,textPosition(preview,12,0));
+    activeCell(0,1);
+    auto stages=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
+    check(GetWindowLongPtrW(stages,GWL_STYLE)&WS_VISIBLE,"preview reaction names open their visible editor on the first page");
+    SendMessageW(manager,WM_COMMAND,4400,0);SendMessageW(manager,WM_COMMAND,4002,0);
+    openPlotManagerTool(owner,139);
+    stages=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
+    check((GetWindowLongPtrW(stages,GWL_STYLE)&WS_VISIBLE)&&toNative(doc)==before,
+          "external reaction name commands select the first page without changing data");
     closePlotManager();history.clear();
 }
 static int unifiedAxisMode=0,unifiedAxisWidth=0;
@@ -1021,7 +1031,7 @@ static void graphPreviewUxChecks(HWND hwnd){
     const auto pathForm=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);check(pathForm!=nullptr,"path styles open for legacy shared widths");SetDlgItemTextW(pathForm,103,L"7.5");SendMessageW(pathForm,WM_COMMAND,IDOK,0);
     check(doc.plots.front().curveWidth==0&&doc.plots.front().series[0].width==7.5&&doc.plots.front().series[1].width==4,"path style replaces a legacy override while preserving other paths' visible widths");SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==legacy,"legacy width migration undoes exactly");doc.plots.front().curveWidth=0;changed();history.clear();
     auto click=[&](Vec at){const auto view=*plotManagerPreview();const auto point=at*view.scale+view.origin;SendMessageW(manager,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(int(point.x),int(point.y)));SendMessageW(manager,WM_LBUTTONUP,0,MAKELPARAM(int(point.x),int(point.y)));};
-    SendMessageW(manager,WM_COMMAND,4002,0);SendMessageW(manager,WM_COMMAND,139,0);check(IsWindowVisible(GetDlgItem(manager,136)),"reaction editor includes magnet placement");previewUxDriven=false;SetTimer(hwnd,914,10,drivePreviewMagnet);SendMessageW(manager,WM_COMMAND,136,0);KillTimer(hwnd,914);check(previewUxDriven&&snapPlot==doc.plots.front().id,"magnet placement stays in the graph manager");
+    SendMessageW(manager,WM_COMMAND,4000,0);SendMessageW(manager,WM_COMMAND,139,0);check(IsWindowVisible(GetDlgItem(manager,136)),"reaction editor includes magnet placement");previewUxDriven=false;SetTimer(hwnd,914,10,drivePreviewMagnet);SendMessageW(manager,WM_COMMAND,136,0);KillTimer(hwnd,914);check(previewUxDriven&&snapPlot==doc.plots.front().id,"magnet placement stays in the graph manager");
     const auto magnets=makeScene(doc.subset({doc.plots.front().id}),measure).plotSnapPoints.at(doc.plots.front().id);click(magnets.front().p);check(snapStart&&toNative(doc)==before,"first preview magnet click is nonmutating");click(magnets.back().p);check(!snapPlot&&doc.plots.front().stages.back().label=="Preview reaction","second preview magnet click places its reaction arrow");SendMessageW(manager,WM_COMMAND,104,0);check(toNative(doc)==before,"preview magnet placement undoes in one step");
     auto sc=makeScene(doc.subset({doc.plots.front().id}),measure);check(!sc.gapCaptions.empty(),"gap preview contains a caption target");const auto gap=sc.gapCaptions.front().bounds;
     drive(1,[&]{click({gap.x+gap.w/2,gap.y+gap.h/2});});check(toNative(doc)==before,"cancelling a directly clicked gap restores its geometry and style");
@@ -1077,6 +1087,12 @@ static void graphManagerChecks(HWND hwnd){
     GetWindowRect(GetDlgItem(manager,4406),&axesEntry);GetWindowRect(GetDlgItem(manager,131),&dataEntry);
     check(typeCard.top==axesEntry.top&&axesEntry.top==dataEntry.top&&typeCard.left<axesEntry.left&&axesEntry.left<dataEntry.left,
         "graph manager starts with graph type, axes and data table in that order");
+    RECT reactionEntry{},pathEntry{};
+    GetWindowRect(GetDlgItem(manager,139),&reactionEntry);GetWindowRect(GetDlgItem(manager,132),&pathEntry);
+    check((GetWindowLongPtrW(GetDlgItem(manager,139),GWL_STYLE)&WS_VISIBLE)&&
+          reactionEntry.left==typeCard.left&&reactionEntry.top>typeCard.top&&
+          pathEntry.top==reactionEntry.top&&pathEntry.left>reactionEntry.left,
+          "reaction names and arrows occupy the fourth icon, immediately before add path");
     captureAxesManager(L"graph-manager-entry.png");
     SendMessageW(manager,WM_COMMAND,4002,0);
     for(bool remove:{false,true}){
@@ -1142,7 +1158,8 @@ static void graphManagerChecks(HWND hwnd){
           doc.plots.front().stateFontSize==17&&doc.plots.front().valueFontSize==21,
           "data table sets its screen font and the two graph font sizes independently");
     check(history.undo(doc)&&toNative(doc)==before,"graph font settings apply with one undo step");
-    for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={131,plotFontCommand,139,4300,plotWaveWidthCommand};check(GetDlgItem(manager,expected[page])!=nullptr,"each manager category exposes its icon tools");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
+    SendMessageW(manager,WM_COMMAND,4400,0);
+    for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={139,plotFontCommand,plotAnnotationsCommand,4300,plotWaveWidthCommand};check(GetWindowLongPtrW(GetDlgItem(manager,expected[page]),GWL_STYLE)&WS_VISIBLE,"each manager category exposes its icon tools");check(bool(GetWindowLongPtrW(GetDlgItem(manager,139),GWL_STYLE)&WS_VISIBLE)==(page==0),"reaction names and arrows belong only to graph, axes and data");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
     check(GetDlgItem(manager,131)==originalButton,"tab changes reuse controls instead of recreating them");
     SendMessageW(manager,WM_COMMAND,4000,0);
     SendMessageW(manager,WM_COMMAND,4402,0);
@@ -1246,10 +1263,10 @@ static void graphManagerChecks(HWND hwnd){
     SendMessageW(manager,WM_COMMAND,104,0);
     check(toNative(doc)==before,"legend changes each undo in one operation");
 
-    SendMessageW(manager,WM_COMMAND,4002,0);
+    SendMessageW(manager,WM_COMMAND,4000,0);
     SendMessageW(manager,WM_COMMAND,139,0);
     auto stages=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedGrid",nullptr);
-    check(stages&&toNative(doc)==before,"reaction name and arrows open in the manager without changing data");
+    check(stages&&(GetWindowLongPtrW(stages,GWL_STYLE)&WS_VISIBLE)&&toNative(doc)==before,"reaction name and arrows open on the first page without changing data");
     const auto labels=GetDlgItem(stages,10);
     SendMessageW(labels,WM_KEYDOWN,VK_F2,0);
     auto label=FindWindowExW(labels,nullptr,L"EDIT",nullptr);
@@ -1257,6 +1274,11 @@ static void graphManagerChecks(HWND hwnd){
     SetWindowTextW(label,L"Reactant updated");
     SendMessageW(labels,WM_KEYDOWN,VK_RETURN,0);
     check(!doc.plots.front().stages.empty()&&doc.plots.front().stages[0].label=="Reactant updated","reaction labels apply immediately on cell commit");
+    SendMessageW(manager,WM_COMMAND,4002,0);
+    check(!(GetWindowLongPtrW(stages,GWL_STYLE)&WS_VISIBLE),"reaction editor hides when leaving graph, axes and data");
+    SendMessageW(manager,WM_COMMAND,4000,0);
+    check((GetWindowLongPtrW(stages,GWL_STYLE)&WS_VISIBLE)&&doc.plots.front().stages[0].label=="Reactant updated",
+          "returning to graph, axes and data restores the reaction editor and its edits");
     SendMessageW(manager,WM_COMMAND,104,0);
     check(toNative(doc)==before,"reaction label edits undo through the manager");
 
@@ -1457,7 +1479,7 @@ static void graphManagerChecks(HWND hwnd){
     SendDlgItemMessageW(legendPanel,100,CB_SETCURSEL,1,0);
     SendMessageW(legendPanel,WM_COMMAND,MAKEWPARAM(100,CBN_SELCHANGE),0);
     capture();check(snapshot.Save(L"graph-manager-legend.png",&png,nullptr)==Ok,"capture legend controls and visible graph");
-    SendMessageW(manager,WM_COMMAND,4002,0);SendMessageW(manager,WM_COMMAND,139,0);
+    SendMessageW(manager,WM_COMMAND,4000,0);SendMessageW(manager,WM_COMMAND,139,0);
     const auto arrowCount=doc.plots.front().stages.empty()?defaultMechanismStages().size():doc.plots.front().stages.size();
     SendMessageW(manager,WM_COMMAND,4403,0);
     const auto& arranged=doc.plots.front().stages;

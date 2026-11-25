@@ -362,6 +362,37 @@ int main(){try{
         state.breakHigh=0;std::ofstream("energy-wave-peak-preview.svg")<<toSvg(makeScene(profile));
     }
     {
+        Document collision;auto graph=newEnergyPlot(0,true);graph.id=collision.nextId++;graph.height=600;graph.showYTicks=true;graph.showValues=false;
+        graph.yMin=-100;graph.yMax=25;graph.yTickStep=25;graph.tickFontSize=12;graph.yTitleGap=20;graph.yColor="#6543a1";
+        graph.states[2].energy=-90;graph.series[0].values={0,20,-90};graph.series[0].color="#168c7a";
+        graph.states[1].breakAfter=true;graph.states[1].breakScale=.1;graph.states[1].breakLow=-55;graph.states[1].breakHigh=-45;collision.plots={graph};
+        auto ticks=[&](const Scene& scene){std::vector<Primitive> out;for(const auto& item:scene.items)if(item.owner==graph.id&&item.type==Primitive::Text&&item.textRole==0&&item.color==graph.yColor)out.push_back(item);return out;};
+        auto titleRight=[&](const Scene& scene){double right=-1e20;for(const auto& item:scene.items)if(item.owner==graph.id&&item.textRole==plotYAxisTitleTextRole&&item.rotation==-90)right=std::max(right,item.points[0].x+item.fontSize*1.3+std::max(0.,item.textStrokeWidth/2));return right;};
+        auto geometry=[&](const Scene& before,const Scene& after){
+            const auto& a=before.plotAxes.at(graph.id);const auto& b=after.plotAxes.at(graph.id);
+            check((a.origin-b.origin).length()<1e-8&&(a.xEnd-b.xEnd).length()<1e-8&&(a.yEnd-b.yEnd).length()<1e-8,"wave label clearance preserves both axes");
+            const auto& old=before.plotSnapPoints.at(graph.id);const auto& now=after.plotSnapPoints.at(graph.id);check(old.size()==now.size(),"wave clearance preserves all data anchors");
+            for(size_t i=0;i<old.size();++i)check((old[i].p-now[i].p).length()<1e-8,"wave clearance preserves energy level positions");
+        };
+        for(int style=0;style<3;++style){auto& g=collision.plots[0];g.showYAxis=g.showYTicks=true;g.thinLines=style!=1;g.inkScale=style?3:1;g.series[0].width=style==1?10:2.4;g.waveWidth=style==2?20:0;g.yAxisWidth=style==2?2:0;
+            g.states[1].breakStyle=0;const auto slash=makeScene(collision);const auto oldTicks=ticks(slash);
+            g.states[1].breakStyle=1;const auto wave=makeScene(collision);const auto labels=ticks(wave);geometry(slash,wave);
+            double waveLeft=1e20,tickLeft=1e20;size_t marks=0;
+            for(const auto& item:wave.items)if(item.owner==graph.id&&item.type==Primitive::Bezier&&item.color=="#000000"){++marks;for(auto point:item.points)waveLeft=std::min(waveLeft,point.x-item.width/2);}
+            check(marks==4&&labels.size()==6&&oldTicks.size()==labels.size(),"wave retains all regular ticks, including -50 beside the break");
+            bool nearBreak=false;
+            for(size_t i=0;i<labels.size();++i){const auto& label=labels[i];const double pad=std::max(0.,label.textStrokeWidth/2),width=label.text.size()*label.fontSize*(label.face&1?.62:.56);
+                check(label.text==oldTicks[i].text&&std::abs(label.points[0].y-oldTicks[i].points[0].y)<1e-8,"wave clearance preserves tick values and vertical placement");
+                check(waveLeft-label.points[0].x-width-pad>=4-1e-8,"tick text ink clears the complete wave stroke at every weight");
+                tickLeft=std::min(tickLeft,label.points[0].x-pad);nearBreak|=label.text=="-50";
+            }
+            check(nearBreak&&tickLeft-titleRight(wave)>=g.yTitleGap-1e-8,"rotated Y caption clears the shifted tick column and its text ink");
+            g.showYTicks=false;const auto noTicks=makeScene(collision);check(waveLeft-titleRight(noTicks)>=g.yTitleGap-1e-8,"Y caption clears the wave even without tick labels");
+            g.showYTicks=true;g.showYAxis=false;const auto noAxis=makeScene(collision);geometry(wave,noAxis);
+            check(ticks(noAxis).empty()&&std::none_of(noAxis.items.begin(),noAxis.items.end(),[](const auto& item){return item.type==Primitive::Bezier&&item.color=="#000000";}),"hidden Y axis has neither tick labels nor axis waves");
+        }
+    }
+    {
         Document thick;auto g=newEnergyPlot(0,true);g.id=thick.nextId++;g.thinLines=false;g.inkScale=3;g.series[0].width=10;g.showYAxis=false;g.states[1].breakAfter=true;g.states[1].breakStyle=1;g.valueGap=28;thick.plots={g};
         std::vector<Primitive> waves;for(auto item:makeScene(thick).items)if(item.type==Primitive::Bezier&&item.points.size()==4&&std::abs((item.points.back()-item.points.front()).length()-21)<1e-6)waves.push_back(item);
         check(waves.size()==4&&(waves[0].points[0]-waves[2].points[0]).length()>waves[0].width*2+.5,"thick waves have a real stroke-dependent separation");

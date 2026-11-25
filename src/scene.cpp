@@ -937,12 +937,25 @@ Scene makeScene(const Document& d,const Measure& measure){
             const double captionY=stage.captionBelow?y+std::max({4.,font*.25,headLength*.4+2,weight*inkFactor/2+2}):y-layout.height/2;
             plotText(layout.text,{center,captionY},font,plot.xColor,true,12,int(i));
         }
+        auto waveSpacing=[&](double width){return std::clamp(width*inkFactor*.2+1.6,2.4,3.8);};
+        auto waveHalfLength=[&](double width){return std::clamp(12.+width*inkFactor,13.,21.);};
+        auto automaticWaveStroke=[&](double width){return std::clamp(width*inkFactor*.65,.7,2.6);};
+        auto waveStroke=[&](double width){return plot.waveWidth>0?plot.waveWidth:automaticWaveStroke(width);};
+        auto waveClearance=[&](double width){return (plot.waveGap>=0?plot.waveGap:1.)+std::max(0.,waveStroke(width)-automaticWaveStroke(width))*.5;};
+        const bool waveBreak=std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakStyle==1&&(state.breakScale!=1||state.breakOmit>0);});
+        const bool hasAxisWave=plot.showYAxis&&waveBreak&&std::any_of(displayBands.begin(),displayBands.end(),[&](const auto& band){return band.marker&&band.high>=low&&band.low<=high;});
+        const double waveLeft=hasAxisWave?x0-waveHalfLength(yAxisStroke)-waveStroke(yAxisStroke)/2:x0;
+        const double axisInkLeft=x0-std::max(yAxisStroke*inkFactor,plot.yAxisHeadWidth)/2;
+        const double tickInkPad=tickFont*.025*std::max(0.,plot.inkScale-1);
+        // Keep the whole right-aligned column clear of the wave's final stroke
+        // and of added text ink, without moving ticks, axes or energy levels.
+        const double tickRight=hasAxisWave?std::min(x0-10,std::min(axisInkLeft,waveLeft)-4-tickInkPad):x0-10;
         std::vector<double> ticks;for(int i=0;plot.showYAxis&&plot.showYTicks&&i<=axis.intervals;i++)ticks.push_back(axis.firstTick+axis.step*i);
         std::sort(ticks.begin(),ticks.end());ticks.erase(std::unique(ticks.begin(),ticks.end(),[&](double a,double b){return std::abs(a-b)<axis.step*1e-7;}),ticks.end());
         double tickWidth=0;for(double v:ticks)tickWidth=std::max(tickWidth,widthOf(energyTickLabel(v,axis.step),tickFont));
         const double titleGap=plot.yTitleGap>0?plot.yTitleGap:std::max(24.,energyFont*.8);
         const double titleInkPad=energyFont*.025*std::max(0.,plot.inkScale-1);
-        const double axisLeft=std::min(x0-std::max(yAxisStroke*inkFactor,plot.yAxisHeadWidth)/2,ticks.empty()?x0:x0-10-tickWidth);
+        const double axisLeft=std::min({axisInkLeft,waveLeft,ticks.empty()?x0:tickRight-tickWidth-tickInkPad});
         // A rotated subscript extends right of the normal glyphs. Include both
         // script offsets and added text ink before measuring the visible gap.
         double yAxisX=axisLeft-titleGap-energyFont*1.65-titleInkPad;
@@ -964,15 +977,10 @@ Scene makeScene(const Document& d,const Measure& measure){
         for(size_t tick=0;tick<ticks.size();tick++){
             double v=ticks[tick],y=yAt(v);bool endpoint=tick==0||tick+1==ticks.size();
             if(endpoint||(lastLabel-y>=tickHeight+4&&y-topY>=tickHeight+4)){
-                plotText(energyTickLabel(v,axis.step),{x0-10-widthOf(energyTickLabel(v,axis.step),tickFont),y-tickHeight/2},tickFont,plot.yColor);lastLabel=y;
+                plotText(energyTickLabel(v,axis.step),{tickRight-widthOf(energyTickLabel(v,axis.step),tickFont),y-tickHeight/2},tickFont,plot.yColor);lastLabel=y;
             }
             Primitive mark;mark.owner=owner;mark.points={{x0-3*plot.axisScale,y},{x0,y}};mark.width=.5*plot.axisScale;s.items.push_back(mark);
         }
-        auto waveSpacing=[&](double width){return std::clamp(width*inkFactor*.2+1.6,2.4,3.8);};
-        auto waveHalfLength=[&](double width){return std::clamp(12.+width*inkFactor,13.,21.);};
-        auto automaticWaveStroke=[&](double width){return std::clamp(width*inkFactor*.65,.7,2.6);};
-        auto waveStroke=[&](double width){return plot.waveWidth>0?plot.waveWidth:automaticWaveStroke(width);};
-        auto waveClearance=[&](double width){return (plot.waveGap>=0?plot.waveGap:1.)+std::max(0.,waveStroke(width)-automaticWaveStroke(width))*.5;};
         auto wave=[&](Vec center,Vec along,Vec across,double width,const std::string& color){
             const double spacing=waveSpacing(width),length=waveHalfLength(width);
             const double stroke=waveStroke(width)/inkFactor;
@@ -984,7 +992,6 @@ Scene makeScene(const Document& d,const Measure& measure){
         };
         if(plot.showYAxis)for(const auto& band:displayBands)if(band.marker&&band.high>=low&&band.low<=high){
             const double y=(yAt(std::max(low,band.low))+yAt(std::min(high,band.high)))/2;
-            const bool waveBreak=std::any_of(plot.states.begin(),plot.states.end(),[](const auto& state){return state.breakAfter&&state.breakStyle==1&&(state.breakScale!=1||state.breakOmit>0);});
             const double axisHole=std::max(7.,waveSpacing(yAxisStroke)+waveHalfLength(yAxisStroke)*.1875+yAxisStroke*inkFactor*.4+(waveBreak?waveClearance(yAxisStroke):1.));
             // Cut the axis itself instead of masking with a background-colored patch.
             for(size_t k=0,count=s.items.size();k<count;++k){const auto shaft=s.items[k];
@@ -1324,7 +1331,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             if(state.labelPlacement>=3||state.label.empty())continue;
             auto& name=names[i];
             name.text=state.label;
-            if(state.transitionState&&state.above.empty()&&state.below.empty())
+            if(state.transitionState)
                 name.text="["+name.text+"]^{‡}";
             name.x=stateX(i)+state.labelOffset.x;
             for(const auto& run:scriptRuns(name.text))if(run.script==1)name.raised=true;
@@ -1551,7 +1558,7 @@ Scene makeScene(const Document& d,const Measure& measure){
             const size_t path=size_t(state.labelPath);
             if(state.labelPlacement!=4||path>=paths.size()||!visible(paths[path],i)||state.label.empty())continue;
             std::string label=state.label;
-            if(state.transitionState&&state.above.empty()&&state.below.empty())label="["+label+"]^{‡}";
+            if(state.transitionState)label="["+label+"]^{‡}";
             const double x=stateX(i)+state.labelOffset.x;
             double y=pointAt(i,paths[path].values[i]).y+10;
             const auto caption=std::find_if(captions.begin(),captions.end(),[&](const auto& value){
