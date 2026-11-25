@@ -91,7 +91,7 @@ int main(){try{
         replaceSlotStructure(d,larger,graph.id,0,true);picture=makeScene(d,measure);box=frame(picture,"#2874b8");
         check(box->points[1].x-box->points[0].x>movedBox.points[1].x-movedBox.points[0].x,"structure replacement recomputes frame bounds");
         d.plots[0].states[0].transitionState=true;picture=makeScene(d,measure);box=frame(picture,"#2874b8");
-        bool dagger=false;for(const auto& item:picture.items)if(item.type==Primitive::Text&&item.text=="‡"){
+        bool dagger=false;for(const auto& item:picture.items)if(item.type==Primitive::Text&&item.text=="‡"&&item.textRole!=6){
             dagger=true;auto extent=bounds(item);
             check(extent.x>box->points[0].x&&extent.x+extent.w<box->points[1].x&&extent.y>box->points[0].y,
                   "TS brackets and dagger fit inside the rectangular frame");
@@ -760,6 +760,54 @@ int main(){try{
               std::all_of(moved.begin(),moved.end(),[&](const auto& label){
                   return std::abs(label.second-moved.at(0))<1e-8;
               }),"an obstruction shifts the entire X-axis name row together");
+    }
+    for(int attachments:{0,1,2,3})for(int placement:{0,1,2,3,4}){
+        Document d;auto graph=sample();graph.series.resize(1);
+        graph.states[1].transitionState=true;graph.states[1].labelPlacement=placement;
+        d.plots={graph};d.nextId=2;
+        Document fragment;fragment.ring({0,0},6);
+        if(attachments&1)replaceSlotStructure(d,fragment,graph.id,1,true);
+        if(attachments&2)replaceSlotStructure(d,fragment,graph.id,1,false);
+        const auto drawing=makeScene(d,measure);
+        const Primitive *name=nullptr,*dagger=nullptr,*plain=nullptr,*value=nullptr;
+        int structureDaggers=0,nameRuns=0;
+        for(const auto& item:drawing.items)if(item.type==Primitive::Text&&item.owner==graph.id){
+            if(item.textRole==6&&item.textIndex==1){
+                ++nameRuns;if(item.text=="‡")dagger=&item;else name=&item;
+            }
+            if(item.textRole==6&&item.textIndex==0)plain=&item;
+            if(item.textRole==8&&item.textIndex==1)value=&item;
+            if(item.text=="‡"&&item.textRole!=6)++structureDaggers;
+        }
+        check(structureDaggers==int(bool(attachments&1))+int(bool(attachments&2)),
+              "TS decoration remains on each attached structure independently of name placement");
+        if(placement==3)check(nameRuns==0,"hidden TS names stay hidden while structures retain their decoration");
+        else{
+            check(nameRuns==2&&name&&name->text=="[TS1]"&&dagger,
+                  "TS names keep square brackets and a dagger with no, above, below or both structures");
+            check(dagger->fontSize<name->fontSize&&dagger->points[0].y<name->points[0].y,
+                  "TS name dagger remains superscripted when structures are attached");
+            const auto left=bounds(*name),right=bounds(*dagger);
+            const auto& snaps=drawing.plotSnapPoints.at(graph.id);
+            const auto center=std::find_if(snaps.begin(),snaps.end(),[](const auto& snap){
+                return snap.state==1&&snap.path==0&&snap.edge==0;
+            });
+            check(center!=snaps.end()&&std::abs((left.x+right.x+right.w)/2-center->p.x)<1e-6,
+                  "the full decorated TS name stays centered on its state");
+            if(placement==0)check(plain&&std::abs(name->points[0].y-plain->points[0].y)<1e-6,
+                  "attached TS structures preserve the common X-axis name baseline");
+            if(placement==4)check(value&&right.y>=bounds(*value).y+bounds(*value).h+5,
+                  "below-data TS names reserve superscript space after the numeric caption");
+        }
+        d.plots[0].states[1].transitionState=false;
+        int plainNames=0;
+        for(const auto& item:makeScene(d,measure).items)if(item.type==Primitive::Text&&item.owner==graph.id){
+            check(item.text!="‡","disabling TS removes both name and structure daggers");
+            if(item.textRole==6&&item.textIndex==1){
+                check(item.text=="TS1","disabling TS restores the undecorated state name");++plainNames;
+            }
+        }
+        check(plainNames==(placement==3?0:1),"the TS setting preserves the chosen name visibility");
     }
     {
         auto scripted=publicationPlot(sample());scripted.states[0].label="I_{1}";scripted.states[1].label="TS^{+}_{2}";scripted.states[2].label="Fe^{III}";

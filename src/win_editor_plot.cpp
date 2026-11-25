@@ -563,7 +563,7 @@ void setPlotTransitionState(int id,size_t index,bool enabled){
     auto* p=plot(id);if(!p||doc.isLocked(id)||index>=p->states.size())return;
     if(p->states[index].transitionState==enabled)return;
     history.checkpoint(doc);p->states[index].transitionState=enabled;selection={id};changed();
-    status=enabled?L"TS로 지정했습니다. 삽입 구조에 [ ]‡가 표시됩니다. Ctrl+Z: 되돌리기":L"TS 지정을 해제했습니다. 구조는 유지하고 [ ]‡만 숨깁니다. Ctrl+Z: 되돌리기";
+    status=enabled?L"TS로 지정했습니다. 이름과 삽입 구조에 [ ]‡가 표시됩니다. Ctrl+Z: 되돌리기":L"TS 지정을 해제했습니다. 구조는 유지하고 [ ]‡만 숨깁니다. Ctrl+Z: 되돌리기";
 }
 void compressPlotEnergyInterval(int id,size_t index){
     auto* p=plot(id);if(!p||doc.isLocked(id)||index+1>=p->states.size()||p->mode==independentEnergyLevels)return;
@@ -708,7 +708,7 @@ void editPlotAnnotations(int id,int selectedState){
         {L"이름 기준 경로",std::to_string(state.labelPath),false,paths},
         {L"이름 X 이동 (pt, 오른쪽 +)",number(state.labelOffset.x)},
         {L"이름 Y 이동 (pt, 아래 +)",number(state.labelOffset.y)},
-        {L"상태 유형",state.transitionState?"1":"0",false,{L"일반 상태",L"TS · [구조]‡ 표시"}},
+        {L"상태 유형",state.transitionState?"1":"0",false,{L"일반 상태",L"TS · 이름·구조에 [ ]‡ 표시"}},
         {L"다음 상태까지의 생략 표시",state.breakAfter?(state.breakStyle==1?"2":"1"):"0",false,{L"연결",L"슬래시 //",L"물결선 · 큰 에너지 구간 압축"}},
         {L"// 위치 (5~95%, 구간 왼쪽 기준)",number(state.breakPosition*100)},
         {L"에너지 갭의 출발 상태",std::to_string(state.gapFrom+1),false,gapSources},
