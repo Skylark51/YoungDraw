@@ -487,7 +487,7 @@ static void layoutEmbeddedForm(HWND hwnd,Form& f){
         for(size_t slot=0;slot<rows.size();++slot){
             const auto& label=f.fields[rows[slot]].label;
             SIZE size{};GetTextExtentPoint32W(dc,label.c_str(),int(label.size()),&size);
-            auto& width=labelWidths[slot%columns];width=std::max(width,int(size.cx)+9);
+            auto& captionWidth=labelWidths[slot%columns];captionWidth=std::max(captionWidth,int(size.cx)+9);
         }
         SelectObject(dc,oldFont);ReleaseDC(hwnd,dc);
     }
