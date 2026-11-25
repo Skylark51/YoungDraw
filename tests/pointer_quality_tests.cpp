@@ -202,6 +202,19 @@ static void editingRegression(HWND hwnd){
     check(doc.hydrogens(end)==1,"terminal oxygen defaults to OH");history.clear();hotkey('o');check(doc.hydrogens(end)==0&&doc.atom(end)->explicitH==0,"O shortcut toggles OH to bare O");
     auto bare=toNative(doc);check(fromNative(bare).hydrogens(end)==0&&fromCdxml(toCdxml(doc)).hydrogens(end)==0,"bare oxygen survives saving");
     check(history.undo(doc)&&doc.hydrogens(end)==1,"bare oxygen toggle supports undo");command(308);check(doc.hydrogens(end)==0,"oxygen palette toggles OH to O too");command(308);check(doc.hydrogens(end)==1,"repeating oxygen restores automatic H");
+    for(char letter:{'x','X'}){
+        doc={};root=doc.addAtom({0,0});end=doc.addAtom({30,0});doc.addBond(root,end);
+        doc.atom(end)->label="R";doc.atom(end)->labelRuns={{"R","#123456","Arial",14,1}};
+        selection={root};tool=Benzene;hoverAtom=hoverBond=0;history.clear();changed();const auto before=toNative(doc);
+        const auto at=screen(doc.atom(end)->p);SendMessageW(hwnd,WM_MOUSEMOVE,0,MAKELPARAM(int(at.x),int(at.y)));
+        check(hoverAtom==end,"pointer identifies the atom before the X shortcut");SendMessageW(hwnd,WM_CHAR,letter,0);
+        auto expected=fromNative(before);expected.atom(end)->label="X";expected.atom(end)->labelRuns.clear();
+        check(toNative(doc)==toNative(expected)&&tool==Benzene&&selection==std::vector<int>{end},"X labels only the hovered atom without switching drawing tools or changing bonds");
+        check(fromNative(toNative(doc)).atom(end)->label=="X"&&fromCdxml(toCdxml(doc)).atom(end)->label=="X","X substituent labels survive both native and ChemDraw saving");
+        check(history.undo(doc)&&toNative(doc)==before&&!history.undo(doc),"X label replacement is exactly one undo step");
+        hoverAtom=hoverBond=0;const auto unchanged=toNative(doc);SendMessageW(hwnd,WM_CHAR,'x',0);
+        check(tool==Single&&toNative(doc)==unchanged&&!history.undo(doc),"x away from an atom still selects single bonds without editing the selection");
+    }
     doc={};hoverAtom=hoverBond=0;tool=Select;hotkey('a');check(tool==Benzene,"a in blank space selects benzene tool");
     root=doc.addAtom({0,0});mouseDown(screen({0,0})+Vec{14,0});check(doc.atoms.size()==7&&doc.bonds.size()==7,"benzene tool attaches a substituent within expanded atom hit area");
     check(doc.component(root).size()==7,"expanded hit creates one connected phenyl substituent");
