@@ -904,12 +904,27 @@ static void CALLBACK driveUnifiedAxes(HWND parent,UINT,UINT_PTR timer,DWORD){
         const auto at=MAKELPARAM((rect.left+rect.right)/2,(rect.top+rect.bottom)/2);
         SendMessageW(tabs,WM_LBUTTONDOWN,MK_LBUTTON,at);SendMessageW(tabs,WM_LBUTTONUP,0,at);
         check(TabCtrl_GetCurSel(tabs)==index&&IsWindowVisible(GetDlgItem(dialog,firstField[index])),"one icon click directly displays its axis settings");
-        EnumChildWindows(dialog,[](HWND child,LPARAM form)->BOOL{
+        std::vector<RECT> controls;
+        struct LayoutCheck {HWND form;std::vector<RECT>& controls;} layout{dialog,controls};
+        EnumChildWindows(dialog,[](HWND child,LPARAM data)->BOOL{
+            auto& layout=*reinterpret_cast<LayoutCheck*>(data);
+            const auto form=layout.form;
             if(GetParent(child)!=reinterpret_cast<HWND>(form)||!IsWindowVisible(child))return TRUE;
             RECT rect{},bounds{};GetWindowRect(child,&rect);GetClientRect(reinterpret_cast<HWND>(form),&bounds);
             MapWindowPoints(nullptr,reinterpret_cast<HWND>(form),reinterpret_cast<POINT*>(&rect),2);
-            check(rect.left>=0&&rect.top>=0&&rect.right<=bounds.right&&rect.bottom<=bounds.bottom,"visible axis form controls fit their parent at the tested size");return TRUE;
-        },reinterpret_cast<LPARAM>(dialog));
+            check(rect.left>=0&&rect.top>=0&&rect.right<=bounds.right&&rect.bottom<=bounds.bottom,"visible axis form controls fit their parent at the tested size");
+            for(const auto& other:layout.controls){RECT overlap{};check(!IntersectRect(&overlap,&rect,&other),"axis labels, inputs and buttons never overlap");}
+            layout.controls.push_back(rect);
+            wchar_t kind[32]{},text[256]{};GetClassNameW(child,kind,32);GetWindowTextW(child,text,256);
+            if((!_wcsicmp(kind,L"Static")&&rect.top>=57&&rect.bottom<=bounds.bottom-38)||!_wcsicmp(kind,L"Button")){
+                auto dc=GetDC(child);const auto oldFont=SelectObject(dc,reinterpret_cast<HFONT>(SendMessageW(child,WM_GETFONT,0,0)));
+                RECT caption{};DrawTextW(dc,text,-1,&caption,DT_SINGLELINE|DT_CALCRECT|DT_NOPREFIX);
+                SelectObject(dc,oldFont);ReleaseDC(child,dc);
+                if(caption.right>rect.right-rect.left||caption.bottom>rect.bottom-rect.top)
+                    throw std::runtime_error("Axis caption must fit on one line: "+ui::utf8(text));
+            }
+            return TRUE;
+        },reinterpret_cast<LPARAM>(&layout));
     };
     choose(0);SetDlgItemTextW(dialog,100,L"3.5");SetDlgItemTextW(dialog,101,L"12");
     choose(1);SetDlgItemTextW(dialog,110,L"4.5");SetDlgItemTextW(dialog,111,L"18");
@@ -952,7 +967,7 @@ static void unifiedAxisChecks(HWND hwnd){
     doc=coordinateDemo();selection={doc.plots.front().id};history.clear();changed();dirty=false;
     const auto original=toNative(doc);
     managePlot(selection.front(),true);const auto manager=plotManagerWindow;
-    for(int width:{900,1280}){
+    for(int width:{900,1280,1600}){
         SetWindowPos(manager,nullptr,0,0,width,width==900?640:900,SWP_NOZORDER|SWP_NOACTIVATE);
         SendMessageW(manager,WM_COMMAND,4000,0);unifiedAxisWidth=width;
         captureAxesManager(L"unified-axes-"+std::to_wstring(width)+L"-entry.png");
