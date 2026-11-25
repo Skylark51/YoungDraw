@@ -478,7 +478,19 @@ static void layoutEmbeddedForm(HWND hwnd,Form& f){
     if(!f.tabStyle.unified&&width<760&&singleHeight<=bounds.bottom)columns=1;
     const int columnWidth=(width-2*margin-(columns-1)*gap)/columns;
     const bool narrow=width<760&&columns==2;
-    const int labelWidth=narrow?96:f.tabStyle.unified?128:158,buttonWidth=narrow?22:f.tabStyle.unified?26:32,buttonGap=4;
+    const int buttonWidth=narrow?22:f.tabStyle.unified?26:32,buttonGap=4;
+    int labelWidths[2]={narrow?96:f.tabStyle.unified?128:158,narrow?96:f.tabStyle.unified?128:158};
+    if(f.tabStyle.unified){
+        // Reserve the actual caption width in each column, including at the
+        // manager's minimum size, instead of wrapping Korean labels mid-word.
+        auto dc=GetDC(hwnd);const auto oldFont=SelectObject(dc,f.font);
+        for(size_t slot=0;slot<rows.size();++slot){
+            const auto& label=f.fields[rows[slot]].label;
+            SIZE size{};GetTextExtentPoint32W(dc,label.c_str(),int(label.size()),&size);
+            auto& width=labelWidths[slot%columns];width=std::max(width,int(size.cx)+9);
+        }
+        SelectObject(dc,oldFont);ReleaseDC(hwnd,dc);
+    }
     if(f.heading)MoveWindow(f.heading,margin,0,width-2*margin,23,TRUE);
     const int rowCount=int((rows.size()+columns-1)/columns);
     const int rowPitch=f.tabStyle.unified?std::clamp((int(bounds.bottom)-top-43)/std::max(1,rowCount),27,43):37;
@@ -487,6 +499,7 @@ static void layoutEmbeddedForm(HWND hwnd,Form& f){
         const size_t i=rows[slot];
         const auto& row=f.rows[i];
         const auto& field=f.fields[i];
+        const int labelWidth=labelWidths[slot%columns];
         const int x=margin+int(slot%columns)*(columnWidth+gap);
         const int reserve=field.buttonsOnly?0:int(row.size()-2)*(buttonWidth+buttonGap);
         const int inputWidth=columnWidth-labelWidth-reserve;
@@ -626,7 +639,7 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             TabCtrl_SetCurSel(f->tab,std::clamp(f->tabStyle.initial,0,int(f->tabs.size())-1));if(f->tabStyle.remember)*f->tabStyle.remember=TabCtrl_GetCurSel(f->tab);y=52;std::vector<ui::HelpRegion> help;for(size_t i=0;i<f->tabs.size();i++){RECT rect{};if(TabCtrl_GetItemRect(f->tab,int(i),&rect))help.push_back({UINT_PTR(i+1),rect,f->tabs[i].first+L" 설정 항목을 표시합니다. 다른 탭의 입력값은 유지됩니다."});}ui::setRegionHelp(f->tab,help);
         }
         for(size_t i=0;i<f->fields.size();i++){
-            auto& field=f->fields[i];HWND label=CreateWindowW(L"STATIC",field.label.c_str(),WS_CHILD|WS_VISIBLE,16,y+4,210,labelHeight(field),hwnd,nullptr,nullptr,nullptr);SendMessageW(label,WM_SETFONT,(WPARAM)f->font,TRUE);
+            auto& field=f->fields[i];HWND label=CreateWindowW(L"STATIC",field.label.c_str(),WS_CHILD|WS_VISIBLE|(f->tabStyle.unified?SS_LEFTNOWORDWRAP:0),16,y+4,210,labelHeight(field),hwnd,nullptr,nullptr,nullptr);SendMessageW(label,WM_SETFONT,(WPARAM)f->font,TRUE);
             int height=inputHeight(field);HWND edit;
             if(field.toggle){
                 edit=CreateWindowW(L"BUTTON",field.value=="1"?L"표시 중":L"숨김 상태",

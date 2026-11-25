@@ -287,7 +287,7 @@ void editPlotAxes(int id,int initialTab){
     fields[x.fields.size()+12].label=L"최솟값";fields[x.fields.size()+13].label=L"최댓값";
     fields[x.fields.size()+14].label=L"눈금 간격";fields[x.fields.size()+15].label=L"눈금·숫자 표시";
     fields[x.fields.size()+16].label=L"눈금 글자 크기";
-    fields[x.fields.size()+17].label=L"제목의 단위 표기";
+    fields[x.fields.size()+17].label=L"단위 표기";
     fields[x.fields.size()+18].label=L"Y축 표시";
     auto update=[&](const std::vector<std::string>& values)->std::wstring{
         const auto middle=values.begin()+x.fields.size();
