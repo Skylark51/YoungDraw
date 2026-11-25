@@ -326,7 +326,7 @@ struct Form {
     std::vector<Field> fields;std::vector<HWND> edits;
     std::vector<std::string> result;Preview preview;
     bool done=false,ok=false,synchronizing=false;HFONT font=nullptr;HWND error=nullptr,apply=nullptr;
-    bool ownsStorage=false,embedded=false;
+    bool ownsStorage=false,embedded=false,keepOpenOnApply=false;
     Preview embeddedApply;
     std::function<void()> dismiss;
     std::function<std::optional<COLORREF>(COLORREF)> pickColor;
@@ -778,6 +778,10 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
                 if(!preview(*f))return 0;
                 const auto error=f->embeddedApply(read(*f));
                 if(!error.empty()){SetWindowTextW(f->error,error.c_str());return 0;}
+                if(f->keepOpenOnApply){
+                    SetWindowTextW(f->error,L"적용했습니다. 계속 편집할 수 있습니다.");
+                    return 0;
+                }
             }
             const auto dismiss=f->dismiss;
             dismiss();
@@ -813,15 +817,19 @@ static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
 }
 HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fields,const Preview& update,
     const Preview& apply,const std::function<void()>& dismiss,
-    const std::function<std::optional<COLORREF>(COLORREF)>& pickColor){
+    const std::function<std::optional<COLORREF>(COLORREF)>& pickColor,bool keepOpenOnApply){
     WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"YoungDrawEmbeddedForm";
     wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
     auto f=std::make_unique<Form>();
-    f->embedded=true;f->fields=fields;f->preview=update;f->embeddedApply=apply;f->dismiss=dismiss;f->pickColor=pickColor;
+    f->embedded=true;f->fields=fields;f->preview=update;f->embeddedApply=apply;f->dismiss=dismiss;f->pickColor=pickColor;f->keepOpenOnApply=keepOpenOnApply;
     HWND hwnd=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,title,WS_CHILD|WS_CLIPCHILDREN,
         0,0,680,280,parent,nullptr,wc.hInstance,f.get());
     if(hwnd){f->ownsStorage=true;layoutEmbeddedForm(hwnd,*f);f.release();ui::attachWindowHelp(hwnd);}
     return hwnd;
+}
+bool validateEmbeddedForm(HWND hwnd){
+    auto* f=reinterpret_cast<Form*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+    return f&&f->embedded&&preview(*f);
 }
 
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& callback,const FormTabs& tabs,

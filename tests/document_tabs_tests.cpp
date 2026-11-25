@@ -1259,12 +1259,61 @@ static void graphManagerChecks(HWND hwnd){
         doc.plots.front().series.back().markerSize==4.5,"path creation and marker plus/minus commit together");
     SendMessageW(manager,WM_COMMAND,133,0);
     check(GetWindowLongPtrW(GetDlgItem(manager,4401),GWL_STYLE)&WS_VISIBLE,"path style panel exposes an inline path selector");
-    SendDlgItemMessageW(manager,4401,CB_SETCURSEL,1,0);
-    SendMessageW(manager,WM_COMMAND,MAKEWPARAM(4401,CBN_SELCHANGE),0);
     form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+    RECT originalFrame{};GetWindowRect(manager,&originalFrame);
+    for(const auto size:{SIZE{900,640},SIZE{1280,780},SIZE{1600,900}}){
+        SetWindowPos(manager,nullptr,0,0,size.cx,size.cy,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+        RECT tab{},selector{},fields{},first{},last{},apply{},cancel{};
+        GetWindowRect(GetDlgItem(manager,4000),&tab);GetWindowRect(GetDlgItem(manager,4401),&selector);
+        GetWindowRect(form,&fields);GetWindowRect(GetDlgItem(form,100),&first);
+        GetWindowRect(GetDlgItem(form,105),&last);GetWindowRect(GetDlgItem(form,IDOK),&apply);
+        GetWindowRect(GetDlgItem(form,IDCANCEL),&cancel);
+        check(selector.top>=tab.bottom+10&&fields.top>=selector.bottom+8&&first.top>=fields.top+28,
+            "the path selector has a separate row with space above and below at every manager size");
+        check(last.bottom+8<=apply.top&&apply.bottom<=fields.bottom&&cancel.right<=fields.right,
+            "path style fields and footer fit the compact manager");
+        captureAxesManager(L"graph-path-style-"+std::to_wstring(size.cx)+L".png");
+    }
+    SetWindowPos(manager,nullptr,0,0,originalFrame.right-originalFrame.left,originalFrame.bottom-originalFrame.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+    const auto pathsBefore=toNative(doc);
+    auto choosePath=[&](int index){
+        SendDlgItemMessageW(manager,4401,CB_SETCURSEL,index,0);
+        SendMessageW(manager,WM_COMMAND,MAKEWPARAM(4401,CBN_SELCHANGE),0);
+        form=FindWindowExW(manager,nullptr,L"YoungDrawEmbeddedForm",nullptr);
+        check(form!=nullptr,"switching paths stays inside the style editor");
+    };
+    SetDlgItemTextW(form,100,L"S = 0");SetDlgItemTextW(form,101,L"#ff0000");
+    SetDlgItemTextW(form,103,L"3.5");
+    choosePath(1);
+    check(toNative(doc)==pathsBefore,"switching paths preserves drafts without applying them");
+    SetDlgItemTextW(form,100,L"S = 1");SetDlgItemTextW(form,101,L"#0000ff");
     SendMessageW(form,WM_COMMAND,905,0);
+    choosePath(0);
+    wchar_t pathName[64]{},pathWidth[32]{};
+    GetDlgItemTextW(form,100,pathName,64);GetDlgItemTextW(form,103,pathWidth,32);
+    check(std::wstring(pathName)==L"S = 0"&&std::wstring(pathWidth)==L"3.5","returning to a path restores its pending name and width");
+    SetDlgItemTextW(form,103,L"invalid");
+    choosePath(1);
+    check(SendDlgItemMessageW(manager,4401,CB_GETCURSEL,0,0)==0&&!IsWindowEnabled(GetDlgItem(form,IDOK)),
+        "invalid input keeps its path selected and blocks Apply");
+    GetDlgItemTextW(form,103,pathWidth,32);
+    check(std::wstring(pathWidth)==L"invalid"&&toNative(doc)==pathsBefore,"invalid input is retained for correction");
+    SetDlgItemTextW(form,103,L"3.5");choosePath(1);
     SendMessageW(form,WM_COMMAND,IDOK,0);
-    check(doc.plots.front().series.back().markerSize==4,"minus changes the selected path marker radius");
+    check(doc.plots.front().series[0].name=="S = 0"&&doc.plots.front().series[0].color=="#ff0000"&&
+        doc.plots.front().series[0].width==3.5&&doc.plots.front().series[1].name=="S = 1"&&
+        doc.plots.front().series[1].color=="#0000ff"&&doc.plots.front().series.back().markerSize==4,
+        "one Apply commits the names, colors, widths and marker changes from both paths");
+    check(IsWindow(form)&&SendDlgItemMessageW(manager,4401,CB_GETCURSEL,0,0)==1,
+        "Apply keeps the style editor open on the current path");
+    const auto pathsApplied=toNative(doc);
+    choosePath(0);SetDlgItemTextW(form,101,L"#00ff00");choosePath(1);
+    SetDlgItemTextW(form,103,L"9");SendMessageW(form,WM_COMMAND,IDCANCEL,0);
+    check(toNative(doc)==pathsApplied,"Cancel discards all changes made since the last Apply");
+    SendMessageW(manager,WM_COMMAND,104,0);
+    check(toNative(doc)==pathsBefore,"all path changes undo together in one operation");
+    SendMessageW(manager,WM_COMMAND,105,0);
+    check(toNative(doc)==pathsApplied,"redo restores the complete batch of path styles");
     SendMessageW(manager,WM_COMMAND,104,0);
     SendMessageW(manager,WM_COMMAND,104,0);
     check(toNative(doc)==before,"path creation and styling are separately undoable");

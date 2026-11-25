@@ -16,6 +16,7 @@
 #include <uxtheme.h>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <sstream>
 
 namespace yd::editor {
@@ -24,6 +25,7 @@ namespace {
 constexpr int tabFirst=4000,slotControl=4200,sideControl=4201,panelBack=4400,pathControl=4401,verticalBranch=4402,distributeStages=4403,dataFont=4404,photoExcitation=4405;
 constexpr int editStructure=4300,pasteStructure=4301,fileStructure=4302,sizeStructure=4303,removeStructure=4304,structureBorder=4305;
 constexpr int axesManager=4406;
+constexpr int pathLabel=4407;
 constexpr int previewFit=4410,previewIn=4411,previewOut=4412;
 constexpr int pageOrder[]={0,2,1,3,4};
 LRESULT CALLBACK managerButtonProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR){
@@ -53,6 +55,8 @@ struct Manager{
     int branchDataRow=-1;
     int axisInitialTab=-1;
     std::optional<EnergyPlot> draft;
+    std::shared_ptr<EnergyPlot> seriesSession;
+    size_t seriesIndex=0,seriesCount=0;
     std::optional<LegendDrag> legendDrag;
     std::optional<AnnotationFrame> annotationFrame;
     std::optional<AnnotationFrame> transientFrame;
@@ -218,7 +222,7 @@ struct Manager{
         if(legendDrag){legendDrag.reset();if(GetCapture()==window)ReleaseCapture();}
         if(grid){DestroyWindow(grid);grid=nullptr;}
         if(form){DestroyWindow(form);form=nullptr;}
-        panel=0;draft.reset();cachedScene.reset();annotationFrame.reset();
+        panel=0;draft.reset();seriesSession.reset();cachedScene.reset();annotationFrame.reset();
     }
     void openStages(){
         const auto* p=graph();
@@ -249,7 +253,7 @@ struct Manager{
     }
 
     using PlotEdit=std::function<void(EnergyPlot&,const std::vector<std::string>&)>;
-    void openForm(int action,const wchar_t* title,const std::vector<ui::Field>& fields,const PlotEdit& edit){
+    void openForm(int action,const wchar_t* title,const std::vector<ui::Field>& fields,const PlotEdit& edit,bool keepOpenOnApply=false){
         annotationFrame=AnnotationFrame{currentScene().bounds,graph()->p};
         auto update=[this,edit,action](const std::vector<std::string>& values,bool apply)->std::wstring{
             try{
@@ -261,6 +265,8 @@ struct Manager{
                     Document before=doc;
                     *p=std::move(candidate);
                     if(toNative(before)!=toNative(doc)){history.checkpoint(before);changed();}
+                    draft.reset();cachedScene.reset();InvalidateRect(window,nullptr,FALSE);
+                    if(action==133){seriesCount=p->series.size();refreshSeriesChoices();}
                     if(action==verticalBranch)branchDataRow=graph()->series.back().branchState+1;
                 }else{
                     draft=std::move(candidate);
@@ -280,7 +286,7 @@ struct Manager{
             [this](COLORREF color){
                 ui::InlineDialogHost host(window,[this](HWND child){mount(child);});
                 return ui::chooseColor(window,color);
-            });
+            },keepOpenOnApply);
         if(!form)throw std::runtime_error("관리창 편집을 열 수 없습니다.");
         panel=action;layout();SetFocus(GetDlgItem(form,100));ui::attachWindowHelp(window);
     }
@@ -359,12 +365,25 @@ struct Manager{
         SendMessageW(form,WM_COMMAND,MAKEWPARAM(102,EN_CHANGE),0);
     }
 
-    void openSeries(bool add,size_t index=0){
+    void refreshSeriesChoices(){
+        auto combo=GetDlgItem(window,pathControl);
+        SendMessageW(combo,CB_RESETCONTENT,0,0);
+        if(seriesSession)for(const auto& entry:seriesSession->series)
+            SendMessageW(combo,CB_ADDSTRING,0,(LPARAM)ui::wide(entry.name).c_str());
+        SendMessageW(combo,CB_SETCURSEL,seriesIndex,0);
+    }
+
+    void openSeries(bool add,size_t index=0,std::shared_ptr<EnergyPlot> session={}){
         const auto& p=*graph();
         const size_t count=p.series.size();
         if(add&&count>=100)throw std::runtime_error("경로는 최대 100개입니다.");
-        EnergySeries path=count?p.series.at(index):basePath(p);
-        if(p.curveWidth>0)path.width=p.curveWidth/(p.inkScale*(p.thinLines?.5:1.));
+        if(!add){
+            seriesSession=session?std::move(session):std::make_shared<EnergyPlot>(p);
+            seriesIndex=index;seriesCount=count;
+        }
+        const auto& source=add?p:*seriesSession;
+        EnergySeries path=count?source.series.at(index):basePath(source);
+        if(source.curveWidth>0)path.width=source.curveWidth/(source.inkScale*(source.thinLines?.5:1.));
         if(add){
             path=EnergySeries{};
             path.name="Path "+std::to_string(std::max(size_t(1),count)+1);
@@ -372,15 +391,16 @@ struct Manager{
         }
         auto radius=ui::numericField(L"표식 반지름 (pt)",path.markerSize,.1,20,.5);
         radius.stepWithSigns=true;radius.stepButtons=true;
-        openForm(add?132:133,add?L"경로 추가":L"경로 스타일",{
+        openForm(add?132:133,add?L"경로 추가":L"경로 스타일 · 경로를 바꿔도 입력 유지",{
             {L"경로 이름",path.name,false,{},false,4,true},
             {L"선 색상",path.color,false,{},true},
             {L"선 종류",std::to_string(path.dash),false,{L"실선",L"파선",L"점선"}},
             {L"선 굵기 (pt)",number(path.width)},
             {L"기본 표식",std::to_string(path.marker),false,{L"없음",L"원",L"사각",L"마름모",L"삼각"}},
             radius
-        },[add,index,count](EnergyPlot& target,const auto& values){
-            if(target.series.size()!=count)throw std::runtime_error("경로 목록이 변경되었습니다. 이 편집을 닫고 다시 여세요.");
+        },[this,add,index,count,session=seriesSession](EnergyPlot& target,const auto& values){
+            if(target.series.size()!=(add?count:seriesCount))throw std::runtime_error("경로 목록이 변경되었습니다. 이 편집을 닫고 다시 여세요.");
+            if(!add){target.series=session->series;target.curveWidth=session->curveWidth;}
             if(target.series.empty())target.series.push_back(basePath(target));
             if(target.curveWidth>0){
                 const double width=target.curveWidth/(target.inkScale*(target.thinLines?.5:1.));
@@ -398,14 +418,14 @@ struct Manager{
             series.marker=std::stoi(values[4]);series.markerSize=numeric(values[5],.1,20);
             if(series.dash<0||series.dash>2||series.marker<0||series.marker>4)
                 throw std::runtime_error("선 종류와 표식을 선택하세요.");
-        });
+            if(!add)*session=target;
+        },!add);
         auto combo=GetDlgItem(window,pathControl);
-        SendMessageW(combo,CB_RESETCONTENT,0,0);
-        if(!add)for(const auto& entry:p.series)SendMessageW(combo,CB_ADDSTRING,0,(LPARAM)ui::wide(entry.name).c_str());
-        SendMessageW(combo,CB_SETCURSEL,index,0);
+        refreshSeriesChoices();
+        if(!add)SetDlgItemTextW(form,IDOK,L"모두 적용");
         SetWindowPos(combo,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
         layout();
-        if(add)SendMessageW(form,WM_COMMAND,MAKEWPARAM(100,EN_CHANGE),0);
+        SendMessageW(form,WM_COMMAND,MAKEWPARAM(100,EN_CHANGE),0);
     }
 
     const Scene& currentScene(){
@@ -570,9 +590,12 @@ struct Manager{
             const int gridTop=panel==139||panel==131?64:44;
             place(grid,editorLeft,panelTop+gridTop,editorWidth,height-panelTop-gridTop-56,expanded&&!subpane);
         }
-        if(form)place(form,editorLeft,panelTop+44,editorWidth,height-panelTop-100,showForm);
+        const bool pathSelector=showForm&&panel==133&&graph()&&graph()->series.size()>1;
+        const int formTop=panelTop+(pathSelector?86:44);
+        if(form)place(form,editorLeft,formTop,editorWidth,height-formTop-56,showForm);
         if(subpane)place(subpane,editorLeft,panelTop+43,editorWidth,height-panelTop-51);
-        place(GetDlgItem(window,pathControl),width-190,panelTop+44,170,190,showForm&&panel==133&&graph()&&graph()->series.size()>1);
+        place(GetDlgItem(window,pathLabel),editorLeft+16,panelTop+50,142,24,pathSelector);
+        place(GetDlgItem(window,pathControl),editorLeft+174,panelTop+46,editorWidth-190,190,pathSelector);
         place(GetDlgItem(window,104),editorLeft,height-46,86,30,!subpane);place(GetDlgItem(window,105),editorLeft+92,height-46,86,30,!subpane);
         place(GetDlgItem(window,panelBack),width-236,height-46,104,30,expanded&&!showForm&&!subpane);
         place(GetDlgItem(window,IDCANCEL),width-124,height-46,104,30,!subpane);
@@ -708,6 +731,8 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         auto path=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
             0,0,170,180,h,reinterpret_cast<HMENU>(INT_PTR(pathControl)),nullptr,nullptr);
         SendMessageW(path,WM_SETFONT,(WPARAM)self->font,TRUE);ui::themeCombo(path);
+        const auto label=CreateWindowW(L"STATIC",L"편집할 경로",WS_CHILD,0,0,1,1,h,reinterpret_cast<HMENU>(INT_PTR(pathLabel)),nullptr,nullptr);
+        SendMessageW(label,WM_SETFONT,(WPARAM)self->font,TRUE);
         SetWindowPos(path,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
         auto slot=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,100,300,h,reinterpret_cast<HMENU>(INT_PTR(slotControl)),GetModuleHandleW(nullptr),nullptr);auto side=CreateWindowExW(0,L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST,0,0,100,140,h,reinterpret_cast<HMENU>(INT_PTR(sideControl)),GetModuleHandleW(nullptr),nullptr);SendMessageW(slot,WM_SETFONT,(WPARAM)self->font,TRUE);SendMessageW(side,WM_SETFONT,(WPARAM)self->font,TRUE);SendMessageW(side,CB_ADDSTRING,0,(LPARAM)L"상태 위 구조");SendMessageW(side,CB_ADDSTRING,0,(LPARAM)L"상태 아래 구조");SendMessageW(side,CB_SETCURSEL,0,0);ui::themeCombo(slot);ui::themeCombo(side);self->initializeCards();appearance::titlebar(h);return 0;}
     case WM_SIZE:self->layout();return 0;
@@ -728,8 +753,13 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         if(action==pathControl){
             const auto index=SendDlgItemMessageW(h,pathControl,CB_GETCURSEL,0,0);
             if(HIWORD(wp)==CBN_SELCHANGE&&index>=0&&self->panel==133&&self->graph()&&size_t(index)<self->graph()->series.size()){
+                if(!ui::validateEmbeddedForm(self->form)){
+                    SendDlgItemMessageW(h,pathControl,CB_SETCURSEL,self->seriesIndex,0);
+                    return 0;
+                }
+                auto session=self->seriesSession;
                 self->clearPanel();
-                try{self->openSeries(false,size_t(index));SetFocus(GetDlgItem(h,pathControl));}
+                try{self->openSeries(false,size_t(index),std::move(session));SetFocus(GetDlgItem(h,pathControl));}
                 catch(const std::exception& error){self->notice=ui::wide(error.what());self->layout();}
             }
             return 0;

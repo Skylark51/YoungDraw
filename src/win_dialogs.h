@@ -55,7 +55,8 @@ using Preview = std::function<std::wstring(const std::vector<std::string>&)>;
 struct FormTabStyle {std::vector<int> icons;int initial=0;int* remember=nullptr;bool unified=false;};
 HWND embeddedForm(HWND parent,const wchar_t* title,const std::vector<Field>& fields,const Preview& preview,
     const Preview& apply,const std::function<void()>& dismiss,
-    const std::function<std::optional<COLORREF>(COLORREF)>& pickColor={});
+    const std::function<std::optional<COLORREF>(COLORREF)>& pickColor={},bool keepOpenOnApply=false);
+bool validateEmbeddedForm(HWND form);
 std::optional<std::vector<std::string>> form(HWND parent,const std::wstring& title,const std::vector<Field>& fields,const Preview& preview={},
     const std::vector<std::pair<std::wstring,std::vector<size_t>>>& tabs={},
     const std::function<void(HDC,const RECT&,const std::vector<std::string>&)>& illustration={},int illustrationHeight=124,
