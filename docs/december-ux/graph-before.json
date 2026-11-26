@@ -1,0 +1,66 @@
+{
+  "nodes": [
+    {
+      "id": "appearance",
+      "label": "appearance"
+    },
+    {
+      "id": "data",
+      "label": "data"
+    },
+    {
+      "id": "font-panel",
+      "label": "font-panel"
+    }
+  ],
+  "edges": [
+    {
+      "from": "appearance",
+      "to": "command:133",
+      "costs": {
+        "actions": 2
+      },
+      "evidence": "before: src/win_plot_manager.cpp pages, panelPage, layout; explicit clicks including return from form when applicable. Apply/value editing excluded equally."
+    },
+    {
+      "from": "appearance",
+      "to": "command:142",
+      "costs": {
+        "actions": 2
+      },
+      "evidence": "before: src/win_plot_manager.cpp pages, panelPage, layout; explicit clicks including return from form when applicable. Apply/value editing excluded equally."
+    },
+    {
+      "from": "data",
+      "to": "command:133",
+      "costs": {
+        "actions": 1
+      },
+      "evidence": "before: src/win_plot_manager.cpp pages, panelPage, layout; explicit clicks including return from form when applicable. Apply/value editing excluded equally."
+    },
+    {
+      "from": "data",
+      "to": "command:142",
+      "costs": {
+        "actions": 1
+      },
+      "evidence": "before: src/win_plot_manager.cpp pages, panelPage, layout; explicit clicks including return from form when applicable. Apply/value editing excluded equally."
+    },
+    {
+      "from": "font-panel",
+      "to": "command:133",
+      "costs": {
+        "actions": 3
+      },
+      "evidence": "before: src/win_plot_manager.cpp pages, panelPage, layout; explicit clicks including return from form when applicable. Apply/value editing excluded equally."
+    },
+    {
+      "from": "font-panel",
+      "to": "command:142",
+      "costs": {
+        "actions": 3
+      },
+      "evidence": "before: src/win_plot_manager.cpp pages, panelPage, layout; explicit clicks including return from form when applicable. Apply/value editing excluded equally."
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "required_command_ids": [
+    131,
+    132,
+    133,
+    142,
+    185,
+    227,
+    247,
+    261,
+    262
+  ],
+  "max_workflow_cost": {
+    "appearance-to-133": 2,
+    "appearance-to-142": 2,
+    "data-to-133": 2,
+    "data-to-142": 2,
+    "font-panel-to-133": 2,
+    "font-panel-to-142": 2
+  }
+}

@@ -34,8 +34,8 @@ try {
     if ($TestFilter) {
         & (Join-Path $projectDir 'scripts/test-isolated.ps1') -BuildDirectory $outputDir -Filter $TestFilter
     } elseif ($HeadlessTests) {
-        # Console tests plus the hidden pointer regression: omit interactive dialog/theme coverage.
-        & (Join-Path $projectDir 'scripts/test-isolated.ps1') -BuildDirectory $outputDir -Filter '^(workflow_access_audit|ligand_spatial|ligand_template_export|quality_regression|pointer_quality|core_tests|layout_refinement|atomic_file_save|mechanism_regression|mechanism_editing|mechanism_graph_editing|cdx_import|plot_layout|november_complex_graphs|reaction_profile_annotations|office_storage_roundtrip|png_export|graph_manager|atom_radicals|label_bond_alignment|document_shortcuts)$'
+        # Core regressions and the UX audit fixture, always on the isolated desktop.
+        & (Join-Path $projectDir 'scripts/test-isolated.ps1') -BuildDirectory $outputDir -Filter '^(ux_auditor_unit|ui_evidence_comparison_unit|ux_runtime_audit|workflow_access_audit|ligand_spatial|ligand_template_export|quality_regression|pointer_quality|core_tests|layout_refinement|atomic_file_save|mechanism_regression|mechanism_editing|mechanism_graph_editing|cdx_import|plot_layout|november_complex_graphs|reaction_profile_annotations|office_storage_roundtrip|png_export|graph_manager|atom_radicals|label_bond_alignment|document_shortcuts)$'
     } else {
         & (Join-Path $projectDir 'scripts/test-isolated.ps1') -BuildDirectory $outputDir
     }

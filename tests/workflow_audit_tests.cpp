@@ -100,6 +100,12 @@ int main(){try{
     auto available=availableEditorCommands(hwnd);std::set<int> commands;for(const auto& item:available)commands.insert(item.id);size_t menuCount=0;
     std::function<void(HMENU)> inspect=[&](HMENU menu){for(int i=0;i<GetMenuItemCount(menu);i++){if(auto child=GetSubMenu(menu,i)){inspect(child);continue;}int id=int(GetMenuItemID(menu,i));if(id<=0)continue;menuCount++;check(isEditorCommand(id),"every menu command reaches the native message router");if(id!=230&&!(GetMenuState(menu,i,MF_BYPOSITION)&(MF_GRAYED|MF_DISABLED)))check(commands.count(id)>0,"every enabled menu function remains searchable");}};inspect(GetMenu(hwnd));
     check(commands.count(ligandSpatialCommand)&&commands.count(201)&&commands.count(150),"3D, drawing tools and document formatting are searchable");
+    check(commands.size()==available.size(),"search aliases never duplicate canonical command IDs");
+    for(const auto& item:available){
+        if(item.id==133)check(item.detail.find(L"color")!=std::wstring::npos&&item.detail.find(L"서식")!=std::wstring::npos,"path styling is discoverable by color and formatting vocabulary");
+        if(item.id==247)check(item.detail.find(L"투명 배경")!=std::wstring::npos,"PNG export is discoverable by output purpose");
+        if(item.id==227)check(item.detail.find(L"Mulliken")!=std::wstring::npos,"spin analysis shares molecular annotation vocabulary");
+    }
     std::vector<ui::TemplateCard> cards;auto fragment=ligandTemplates()[0].drawing;cards.push_back({L"BQCN",L"리간드",fragment,makeScene(fragment),L"",L"",false});SetTimer(hwnd,919,10,driveGallery);
     ui::templateGallery(hwnd,cards,L"전체",[](Graphics&,const Scene&,RectF){},[&](size_t index,bool value){check(index==0,"favorite preserves selected card");favoriteCalls++;cards[index].favorite=value;});KillTimer(hwnd,919);check(galleryDriven&&favoriteCalls==2,"native gallery workflow completed");
     std::vector<ui::TemplateCard> pages;for(int i=0;i<12;i++)pages.push_back({L"Card "+std::to_wstring(i),L"리간드",fragment,makeScene(fragment),L"",L"",false});SetTimer(hwnd,920,10,drivePage);auto next=ui::templateGallery(hwnd,pages,L"전체",[](Graphics&,const Scene&,RectF){});KillTimer(hwnd,920);check(next&&next->index>0,"next page plus Enter inserts the visible page selection, never an off-page card");

@@ -1,0 +1,7 @@
+workflow_id,status,effective_cost,cost_unit,frequency,path_edges
+appearance-to-133,modeled_reachable,1.0,weighted_model_units_not_human_time,1.0,"[""edge:869""]"
+appearance-to-142,modeled_reachable,1.0,weighted_model_units_not_human_time,1.0,"[""edge:870""]"
+data-to-133,modeled_reachable,2.0,weighted_model_units_not_human_time,1.0,"[""edge:871""]"
+data-to-142,modeled_reachable,2.0,weighted_model_units_not_human_time,1.0,"[""edge:872""]"
+font-panel-to-133,modeled_reachable,2.0,weighted_model_units_not_human_time,1.0,"[""edge:873""]"
+font-panel-to-142,modeled_reachable,2.0,weighted_model_units_not_human_time,1.0,"[""edge:874""]"

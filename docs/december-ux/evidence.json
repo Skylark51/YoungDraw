@@ -1,0 +1,71 @@
+{
+  "baseline_commit": "9fc80cfe69623d7f2473a18848a3d236e08736ad",
+  "isolation": "scripts/test-isolated.ps1; never switched",
+  "hash_policy": "PNG: raw bytes. Text: CRLF normalized to LF for checkout portability.",
+  "files": [
+    {
+      "file": "after-interaction_cost.csv",
+      "sha256": "3e65e205e00d88f5b677bfb202fa6e11e16e5aa3c32186cddfb9d0e44595f884"
+    },
+    {
+      "file": "after-ux_baseline.json",
+      "sha256": "1eeb9c5f30f9c408f6c9f8aecf1c9fd99a702f9ffa506faa7945d9e3aa9efbc5"
+    },
+    {
+      "file": "after-ux_constraints.json",
+      "sha256": "82acdc0970fa67f8754fd2b63377a3c746bfe73c101e5dfa9e68f0ef23db0b61"
+    },
+    {
+      "file": "before-interaction_cost.csv",
+      "sha256": "3ba23c0b903c22d7f554a30a12012a5191f42de839db0e8216d827b807df63d8"
+    },
+    {
+      "file": "before-ux_baseline.json",
+      "sha256": "38463175285eacc902e82d9974d4bb2b87928e59928ff9f66c14a223e4ab3ef5"
+    },
+    {
+      "file": "before-ux_constraints.json",
+      "sha256": "5888e9b618d03c02779d06455b6321d69eaf7cb0f92364e19e7fe6bd39507cc9"
+    },
+    {
+      "file": "constraints.json",
+      "sha256": "93af68d0fb929062c622fb9f3c59b69fa2ce36cee841a2e36d806a3a53de609d"
+    },
+    {
+      "file": "graph-after.json",
+      "sha256": "e9b06b953cd809e13206ff85e02c7e86ebc52b091678eeaf543594a2eb26c2c7"
+    },
+    {
+      "file": "graph-before.json",
+      "sha256": "1fbf9d92949c541be8d395ebd6d1910b81aff655f921327cd9b6df2f856513a6"
+    },
+    {
+      "file": "graph-page0-after.png",
+      "sha256": "e9805d068b5d843fa913daf174919399a3a575e284964d1775458554aa372e1d"
+    },
+    {
+      "file": "graph-page0-before.png",
+      "sha256": "5714aef5065944ade35a75d99ea13ea9007b43b46fa0bf60cc8691eedce39a32"
+    },
+    {
+      "file": "graph-page1-after.png",
+      "sha256": "c67060e265d96c1a0e57ff8c2eadb01e0f95773cd7f9ebfe5b60c8a67002b3d6"
+    },
+    {
+      "file": "graph-page1-before.png",
+      "sha256": "ffca578cf021103914a5fa590515888cce233a0d3c3fe33e57e6a2e627f1fc8b"
+    },
+    {
+      "file": "preservation.json",
+      "sha256": "67c7ee820fe2929942209b520ed90ba007f5600bd321689d7c20e2a1e041feab"
+    },
+    {
+      "file": "README.md",
+      "sha256": "dbcac9e81a525238075141fd6c8cd4b67e445bf78c4bed8835e64b77fd1773ac"
+    },
+    {
+      "file": "workflows.json",
+      "sha256": "4944c00f7a22ef0fcfcab8360d09c974ee11a19ae4c448b877d6fc70d2c54bbb"
+    }
+  ]
+}

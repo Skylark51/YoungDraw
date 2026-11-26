@@ -1,0 +1,23 @@
+{
+  "baseline_menu_entries": 95,
+  "after_menu_entries": 95,
+  "baseline_search_entries": 147,
+  "after_search_entries": 147,
+  "missing_menu_ids_with_counts": {},
+  "missing_search_ids": [],
+  "missing_search_ids_with_counts": {},
+  "missing_hit_routes_with_counts": [],
+  "missing_or_changed_editor_hit_rectangles": [],
+  "missing_or_changed_hit_rectangles": [],
+  "approved_relocated_hit_routes": [],
+  "constraint_violations": [],
+  "missing_captures": [],
+  "after_outside_parent_controls": [],
+  "new_or_changed_outside_parent_controls": [],
+  "effective_dpi_values": [
+    "96"
+  ],
+  "dpi_scope": "Synthetic WM_DPICHANGED + fixed pixel viewports; effective DPI separately observed. No physical monitor scaling claim.",
+  "scope": "Runtime menu/search ID multiplicity and all visible hit routes/rectangles in matching fixtures; offscreen scroll positions and menu semantic equivalence need separate tests.",
+  "passed_preservation": true
+}

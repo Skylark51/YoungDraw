@@ -1,0 +1,40 @@
+{
+  "workflows": [
+    {
+      "id": "appearance-to-133",
+      "start": "appearance",
+      "goal": "command:133",
+      "evidence": "Source-backed click model; not observed user behavior. Manager already open. font-panel includes closing the current form. Equal weights are illustrative, not measured frequency."
+    },
+    {
+      "id": "appearance-to-142",
+      "start": "appearance",
+      "goal": "command:142",
+      "evidence": "Source-backed click model; not observed user behavior. Manager already open. font-panel includes closing the current form. Equal weights are illustrative, not measured frequency."
+    },
+    {
+      "id": "data-to-133",
+      "start": "data",
+      "goal": "command:133",
+      "evidence": "Source-backed click model; not observed user behavior. Manager already open. font-panel includes closing the current form. Equal weights are illustrative, not measured frequency."
+    },
+    {
+      "id": "data-to-142",
+      "start": "data",
+      "goal": "command:142",
+      "evidence": "Source-backed click model; not observed user behavior. Manager already open. font-panel includes closing the current form. Equal weights are illustrative, not measured frequency."
+    },
+    {
+      "id": "font-panel-to-133",
+      "start": "font-panel",
+      "goal": "command:133",
+      "evidence": "Source-backed click model; not observed user behavior. Manager already open. font-panel includes closing the current form. Equal weights are illustrative, not measured frequency."
+    },
+    {
+      "id": "font-panel-to-142",
+      "start": "font-panel",
+      "goal": "command:142",
+      "evidence": "Source-backed click model; not observed user behavior. Manager already open. font-panel includes closing the current form. Equal weights are illustrative, not measured frequency."
+    }
+  ]
+}

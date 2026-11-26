@@ -61,6 +61,10 @@ if(WIN32)
   target_link_libraries(YoungDraw PRIVATE youngdraw_editor)
 endif()
 enable_testing()
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME ux_auditor_unit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_ux_auditor.py")
+add_test(NAME ui_evidence_comparison_unit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_compare_ui_evidence.py")
+set_tests_properties(ux_auditor_unit ui_evidence_comparison_unit PROPERTIES TIMEOUT 30)
 if(WIN32)
   add_executable(workflow_audit_tests tests/workflow_audit_tests.cpp)
   target_link_libraries(workflow_audit_tests PRIVATE youngdraw_editor)
@@ -83,6 +87,16 @@ if(WIN32)
   target_link_libraries(ui_access_validation PRIVATE youngdraw_editor)
   add_test(NAME ui_access_validation COMMAND ui_access_validation)
   set_tests_properties(ui_access_validation PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+  add_test(NAME ux_runtime_audit COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ux-auditor.py"
+    --evidence-dir "${CMAKE_CURRENT_BINARY_DIR}/ui-access-validation"
+    --output-dir "${CMAKE_CURRENT_BINARY_DIR}/ux-audit"
+    --graph "${CMAKE_CURRENT_SOURCE_DIR}/docs/december-ux/graph-after.json"
+    --workflows "${CMAKE_CURRENT_SOURCE_DIR}/docs/december-ux/workflows.json"
+    --constraints "${CMAKE_CURRENT_SOURCE_DIR}/docs/december-ux/constraints.json"
+    --fail-on-constraints)
+  set_tests_properties(ui_access_validation PROPERTIES FIXTURES_SETUP ux_runtime_evidence)
+  set_tests_properties(ux_runtime_audit PROPERTIES FIXTURES_REQUIRED ux_runtime_evidence TIMEOUT 30)
 endif()
 add_executable(core_tests tests/core_tests.cpp)
 target_link_libraries(core_tests PRIVATE youngdraw_core)
