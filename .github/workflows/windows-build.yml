@@ -42,6 +42,16 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Upload UX audit and runtime inventories
+        uses: actions/upload-artifact@v4
+        with:
+          name: YoungDraw-ux-audit
+          path: |
+            build/ci/ux-audit/
+            build/ci/ui-access-validation/*.csv
+          if-no-files-found: error
+          retention-days: 30
+
       # The next git pull brings down the tested executable together with the source.
       # Pushing with GITHUB_TOKEN does not trigger another workflow run.
       - name: Refresh committed YoungDraw.exe

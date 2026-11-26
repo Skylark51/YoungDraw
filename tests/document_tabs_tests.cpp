@@ -1159,7 +1159,9 @@ static void graphManagerChecks(HWND hwnd){
           "data table sets its screen font and the two graph font sizes independently");
     check(history.undo(doc)&&toNative(doc)==before,"graph font settings apply with one undo step");
     SendMessageW(manager,WM_COMMAND,4400,0);
-    for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={139,plotFontCommand,plotAnnotationsCommand,4300,plotWaveWidthCommand};check(GetWindowLongPtrW(GetDlgItem(manager,expected[page]),GWL_STYLE)&WS_VISIBLE,"each manager category exposes its icon tools");check(bool(GetWindowLongPtrW(GetDlgItem(manager,139),GWL_STYLE)&WS_VISIBLE)==(page==0),"reaction names and arrows belong only to graph, axes and data");ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
+    for(int page=0;page<5;page++){SendMessageW(manager,WM_COMMAND,4000+page,0);const int expected[]={139,plotFontCommand,plotAnnotationsCommand,4300,plotWaveWidthCommand};check(GetWindowLongPtrW(GetDlgItem(manager,expected[page]),GWL_STYLE)&WS_VISIBLE,"each manager category exposes its icon tools");check(bool(GetWindowLongPtrW(GetDlgItem(manager,139),GWL_STYLE)&WS_VISIBLE)==(page==0),"reaction names and arrows belong only to graph, axes and data");
+        for(int style:{133,142})check(bool(GetWindowLongPtrW(GetDlgItem(manager,style),GWL_STYLE)&WS_VISIBLE)==(page==1),"path and segment color styles share the appearance page");
+        ui::attachWindowHelp(manager);EnumChildWindows(manager,[](HWND button,LPARAM)->BOOL{wchar_t type[32]{};GetClassNameW(button,type,32);if(!_wcsicmp(type,L"Button"))check(ui::hasButtonHelp(button),"every graph manager button has tooltip help");return TRUE;},0);}
     check(GetDlgItem(manager,131)==originalButton,"tab changes reuse controls instead of recreating them");
     SendMessageW(manager,WM_COMMAND,4000,0);
     SendMessageW(manager,WM_COMMAND,4402,0);

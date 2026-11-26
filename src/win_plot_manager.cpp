@@ -37,8 +37,8 @@ LRESULT CALLBACK managerButtonProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,
 int tableFontPoints=12;
 struct Card{int action,icon;const wchar_t* label;const wchar_t* detail;int slot=-1;};
 const std::vector<std::vector<Card>> pages={
-    {{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{axesManager,242,L"축 관리",L"X축·Y축 통합 설정"},{131,131,L"데이터 표",L"상태·에너지·행·열 편집"},{139,139,L"반응 이름·화살표",L"이름·위치·자석 배치"},{132,132,L"경로 추가",L"비교 경로 만들기"},{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상태에서 분기",L"분기점 선택·에너지 입력"}},
-    {{137,137,L"그래프 설정",L"제목·크기·표시"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"},{241,241,L"데이터 값 크기",L"에너지 숫자"},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치"}},
+    {{changePlotStyleCommand,130,L"그래프 형태",L"곡선·직선·준위"},{axesManager,242,L"축 관리",L"X축·Y축 통합 설정"},{131,131,L"데이터 표",L"상태·에너지·행·열 편집"},{139,139,L"반응 이름·화살표",L"이름·위치·자석 배치"},{132,132,L"경로 추가",L"비교 경로 만들기"},{135,135,L"양쪽 분기",L"좌우 경로 구성"},{verticalBranch,4402,L"상태에서 분기",L"분기점 선택·에너지 입력"}},
+    {{133,133,L"경로 스타일",L"이름·색·선·표식"},{142,142,L"구간별 색상",L"준위·연결선 색"},{137,137,L"그래프 설정",L"제목·크기·표시"},{plotFontCommand,253,L"글꼴·스타일",L"글꼴·굵게·기울임"},{138,138,L"출판용 정돈",L"비율·배치 자동 정리"},{241,241,L"데이터 값 크기",L"에너지 숫자"},{plotLegendCommand,plotLegendCommand,L"범례 관리",L"표시·글자·위치"}},
     {{plotAnnotationsCommand,236,L"TS·이름 위치",L"미리보기에서 상태 클릭"},{addEnergyGapCommand,237,L"에너지 갭",L"추가·배치·글꼴·색상"},{151,151,L"스핀 교차점",L"교차 에너지·라벨"},{photoExcitation,4405,L"광여기 hν",L"빛에 의한 준위 전이"}},
     {{editStructure,186,L"구조 그리기·편집",L"선택한 위·아래 영역"},{pasteStructure,123,L"구조 붙여넣기",L"클립보드에서 삽입"},{fileStructure,124,L"구조 파일 삽입",L"CDXML·이미지 파일"},{sizeStructure,165,L"구조 크기",L"선택 구조 확대·축소"},{removeStructure,144,L"구조 제거",L"선택 영역만 비우기"},{structureBorder,4305,L"사각형 테두리",L"표시·색상·여백·굵기"}},
     {{244,244,L"곡선 굵기",L"경로 선 굵기"},{245,245,L"그림 선 굵기",L"선택 후 + / - 조절"},{plotWaveWidthCommand,250,L"물결 관리",L"물결 굵기·곡선 간격"}}
@@ -213,7 +213,7 @@ struct Manager{
     }
     int panelPage() const {
         if(panel==structureBorder)return 3;
-        if(panel==plotLegendCommand)return 1;
+        if(panel==plotLegendCommand||panel==133)return 1;
         return 0;
     }
     bool panelVisible() const {return panel&&page==panelPage();}
@@ -710,7 +710,7 @@ struct Manager{
         if(action==addEnergyGapCommand){const int index=gapIndex;gapIndex=-1;manageEnergyGaps(owner,index);return;}
         if(action==139){openStages();return;}
         if(action==plotLegendCommand){openLegend();return;}
-        if(action==132||action==133){openSeries(action==132);return;}
+        if(action==132||action==133){selectPage(action==133?1:0);openSeries(action==132);return;}
         if(action>=editStructure&&action<=structureBorder){
             const int index=int(SendDlgItemMessageW(window,slotControl,CB_GETCURSEL,0,0));if(index<0||size_t(index)>=graph()->states.size())throw std::runtime_error("구조를 넣을 상태를 먼저 선택하세요.");
             targetContainer=owner;targetSlot=size_t(index);targetAbove=SendDlgItemMessageW(window,sideControl,CB_GETCURSEL,0,0)==0;
@@ -726,7 +726,7 @@ LRESULT CALLBACK managerProc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_NCCREATE){self=static_cast<Manager*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);self->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}
     if(!self)return DefWindowProcW(h,message,wp,lp);
     switch(message){
-    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"그래프·축·데이터",L"모양·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i:pageOrder)self->button(tabFirst+i,tabs[i]);self->button(previewOut,L"−");self->button(previewIn,L"+");self->button(previewFit,L"전체 보기");self->button(136,L"자석 배치");self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");self->button(distributeStages,L"자동 균등 배치");self->button(dataFont,L"글자 크기");
+    case WM_CREATE:{ui::enableButtonHelp();self->font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,ui::interfaceFont());const wchar_t* tabs[]={L"그래프·축·데이터",L"색·선·글자",L"반응·주석",L"구조",L"굵기·물결"};for(int i:pageOrder)self->button(tabFirst+i,tabs[i]);self->button(previewOut,L"−");self->button(previewIn,L"+");self->button(previewFit,L"전체 보기");self->button(136,L"자석 배치");self->button(104,L"실행 취소");self->button(105,L"다시 실행");self->button(IDCANCEL,L"닫기");self->button(panelBack,L"확인");self->button(distributeStages,L"자동 균등 배치");self->button(dataFont,L"글자 크기");
         auto path=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
             0,0,170,180,h,reinterpret_cast<HMENU>(INT_PTR(pathControl)),nullptr,nullptr);
         SendMessageW(path,WM_SETFONT,(WPARAM)self->font,TRUE);ui::themeCombo(path);

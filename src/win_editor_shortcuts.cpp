@@ -178,6 +178,23 @@ std::vector<EditorCommandEntry> availableEditorCommands(HWND window){
     auto add=[&](int id,std::wstring title,std::wstring group){
         if(!isEditorCommand(id)||id==230||!seen.insert(id).second)return;
         if(const auto pos=title.find(L'\t');pos!=std::wstring::npos)title.replace(pos,1,L"   ·   ");
+        // Search uses both title and detail. Keep one canonical command per ID
+        // while accepting the vocabulary researchers use for the same action.
+        const wchar_t* aliases=nullptr;
+        switch(id){
+        case 103:case 106:aliases=L"SVG 벡터 이미지 내보내기 export vector";break;
+        case 108:aliases=L"CDXML ChemDraw 구조 내보내기 export";break;
+        case 247:case 248:aliases=L"PNG 그림 이미지 투명 배경 해상도 export image";break;
+        case 131:aliases=L"그래프 데이터 표 에너지 값 수정 energy data table";break;
+        case 133:aliases=L"그래프 서식 경로 색상 선 표식 path style color marker";break;
+        case 142:aliases=L"그래프 서식 구간 색상 준위 연결선 segment color";break;
+        case 185:aliases=L"프로젝트 폴더 파일 관리 검색 ZIP 백업 project";break;
+        case 227:aliases=L"분자 분석 주석 Mulliken spin 스핀 밀도";break;
+        case 261:case 262:aliases=L"분자 분석 주석 거리 각도 원자 결합 annotation distance angle";break;
+        case 111:aliases=L"템플릿 갤러리 전체 탐색 template gallery";break;
+        default:break;
+        }
+        if(aliases){if(!group.empty())group+=L" · ";group+=aliases;}
         result.push_back({id,std::move(title),std::move(group)});
     };
     std::function<void(HMENU,const std::wstring&)> scan=[&](HMENU menu,const std::wstring& group){

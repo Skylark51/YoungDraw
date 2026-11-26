@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "file": "D:\\이영섭\\프로젝트 개발\\개발프로젝트\\YoungDraw\\build\\december-ux-evidence\\after\\menus.csv",
+      "sha256": "95c71731688719d164669fa2f24ea9297f921cab03190b29a49d56d97656d18b"
+    },
+    {
+      "file": "D:\\이영섭\\프로젝트 개발\\개발프로젝트\\YoungDraw\\build\\december-ux-evidence\\after\\commands.csv",
+      "sha256": "3594be9c1d66a7836dd98d4cd118891c6ff78d49204a46ea04674c60babbd253"
+    },
+    {
+      "file": "D:\\이영섭\\프로젝트 개발\\개발프로젝트\\YoungDraw\\build\\december-ux-evidence\\after\\hits.csv",
+      "sha256": "ec10d83f0c0835fe2bafb4b5e1b7a1232f4f6676f429fd9c1c8884c683f19e33"
+    },
+    {
+      "file": "D:\\이영섭\\프로젝트 개발\\개발프로젝트\\YoungDraw\\build\\december-ux-evidence\\after\\captures.csv",
+      "sha256": "c29ca82566cd985faa947036737d263d81276330a252b5bdfa398305340b60e6"
+    },
+    {
+      "file": "D:\\이영섭\\프로젝트 개발\\개발프로젝트\\YoungDraw\\docs\\december-ux\\graph-after.json",
+      "sha256": "5ecbb0d83f8598da0cdef0f961970b64486f42e3d3caa5d836276cc22c058640"
+    },
+    {
+      "file": "D:\\이영섭\\프로젝트 개발\\개발프로젝트\\YoungDraw\\docs\\december-ux\\workflows.json",
+      "sha256": "de8e8a5c64ce6e6089bb24f85161b0ae184e02b25832fff68b7bc60c8a7add62"
+    },
+    {
+      "file": "D:\\이영섭\\프로젝트 개발\\개발프로젝트\\YoungDraw\\docs\\december-ux\\constraints.json",
+      "sha256": "679568b0efda7b95c97b65b66269649fb614f4332071cf3372dd42bc90071156"
+    }
+  ],
+  "inventory_rows": {
+    "menus": 95,
+    "commands": 147,
+    "hits": 774,
+    "captures": 181
+  },
+  "unique_runtime_command_ids": 158,
+  "menu_command_ids": 95,
+  "search_command_ids": 147,
+  "hit_command_ids": 73,
+  "capture_count": 181,
+  "requested_dpi": [
+    96,
+    120,
+    144,
+    192
+  ],
+  "effective_dpi": [
+    96
+  ],
+  "model_coverage": {
+    "covered_command_ids": [
+      "command:133",
+      "command:142"
+    ],
+    "covered": 2,
+    "total": 158,
+    "fraction": 0.012658227848101266,
+    "meaning": "reachable explicit scenarios; not executed or human-tested coverage"
+  },
+  "workflow_count": 6,
+  "unreachable_workflows": [],
+  "constraint_failures": 0,
+  "constraint_unverifiable": 0,
+  "human_evidence": {
+    "status": "missing",
+    "completion_time": null,
+    "error_rate": null,
+    "satisfaction": null
+  },
+  "limitations": [
+    "Inventory is observed command IDs, not a count of all application features.",
+    "Menu depth and direct hit activation are modeled access routes, not task completion proof.",
+    "Search titles establish discoverability inventory only; no search cost is inferred.",
+    "Selection, enabled state, modal preconditions and document correctness need explicit workflow evidence.",
+    "Capture DPI probes may be synthetic WM_DPICHANGED; requested DPI is not physical monitor validation.",
+    "No human completion times, satisfaction, error rates or cognitive scores were measured."
+  ]
+}

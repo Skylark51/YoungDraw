@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "required_command_ids": [
+    131,
+    132,
+    133,
+    142,
+    185,
+    227,
+    247,
+    261,
+    262
+  ],
+  "max_workflow_cost": {
+    "appearance-to-133": 2.0,
+    "appearance-to-142": 2.0,
+    "data-to-133": 2.0,
+    "data-to-142": 2.0,
+    "font-panel-to-133": 2.0,
+    "font-panel-to-142": 2.0
+  },
+  "checks": [
+    {
+      "kind": "required_command",
+      "id": 131,
+      "status": "pass"
+    },
+    {
+      "kind": "required_command",
+      "id": 132,
+      "status": "pass"
+    },
+    {
+      "kind": "required_command",
+      "id": 133,
+      "status": "pass"
+    },
+    {
+      "kind": "required_command",
+      "id": 142,
+      "status": "pass"
+    },
+    {
+      "kind": "required_command",
+      "id": 185,
+      "status": "pass"
+    },
+    {
+      "kind": "required_command",
+      "id": 227,
+      "status": "pass"
+    },
+    {
+      "kind": "required_command",
+      "id": 247,
+      "status": "pass"
+    },
+    {
+      "kind": "required_command",
+      "id": 261,
+      "status": "pass"
+    },
+    {
+      "kind": "required_command",
+      "id": 262,
+      "status": "pass"
+    },
+    {
+      "kind": "max_workflow_cost",
+      "id": "appearance-to-133",
+      "limit": 2.0,
+      "actual": 1.0,
+      "status": "pass"
+    },
+    {
+      "kind": "max_workflow_cost",
+      "id": "appearance-to-142",
+      "limit": 2.0,
+      "actual": 1.0,
+      "status": "pass"
+    },
+    {
+      "kind": "max_workflow_cost",
+      "id": "data-to-133",
+      "limit": 2.0,
+      "actual": 2.0,
+      "status": "pass"
+    },
+    {
+      "kind": "max_workflow_cost",
+      "id": "data-to-142",
+      "limit": 2.0,
+      "actual": 2.0,
+      "status": "pass"
+    },
+    {
+      "kind": "max_workflow_cost",
+      "id": "font-panel-to-133",
+      "limit": 2.0,
+      "actual": 2.0,
+      "status": "pass"
+    },
+    {
+      "kind": "max_workflow_cost",
+      "id": "font-panel-to-142",
+      "limit": 2.0,
+      "actual": 2.0,
+      "status": "pass"
+    }
+  ],
+  "note": "No implicit UX thresholds; pass refers only to explicit model constraints."
+}
