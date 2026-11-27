@@ -449,6 +449,8 @@ void themePopup(HMENU menu){
 }
 struct NativeColors {ui::DialogColors colors;int theme=settings().theme;unsigned revision=customRevision;};
 constexpr UINT_PTR windowThemeId=991;
+constexpr auto messageBoxThemeProperty=L"YoungDraw.MessageBoxTheme";
+thread_local bool themingMessageBox=false;
 
 LRESULT CALLBACK themedWindow(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR paintClient){
     if(msg==WM_NCDESTROY){
@@ -470,7 +472,9 @@ LRESULT CALLBACK themedWindow(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DW
     }}
     if(msg==WM_DRAWITEM){auto* item=reinterpret_cast<DRAWITEMSTRUCT*>(lp);
         if(paintClient&&(item->CtlType==ODT_BUTTON||item->CtlType==ODT_LISTBOX)){
-            colors.draw(*item,item->CtlID==IDOK);
+            const auto preferred=SendMessageW(h,DM_GETDEFID,0,0);
+            const int primary=HIWORD(preferred)==DC_HASDEFID?LOWORD(preferred):IDOK;
+            colors.draw(*item,item->CtlID==primary);
             return TRUE;
         }
 
@@ -487,6 +491,13 @@ LRESULT CALLBACK themedWindow(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DW
         if(item->CtlType==ODT_TAB&&GetPropW(item->hwndItem,L"YoungDraw.NativeTab")){wchar_t label[128]{};TCITEMW tab{};tab.mask=TCIF_TEXT;tab.pszText=label;tab.cchTextMax=128;TabCtrl_GetItem(item->hwndItem,item->itemID,&tab);SetDCBrushColor(item->hDC,((item->itemState&ODS_SELECTED)?palette().raised:palette().panel).ToCOLORREF());FillRect(item->hDC,&item->rcItem,(HBRUSH)GetStockObject(DC_BRUSH));SetBkMode(item->hDC,TRANSPARENT);SetTextColor(item->hDC,palette().text.ToCOLORREF());auto r=item->rcItem;DrawTextW(item->hDC,label,-1,&r,DT_SINGLELINE|DT_VCENTER|DT_CENTER);return TRUE;}
     }
     if(paintClient){
+        // Windows paints a separate system-colored button band in MessageBox.
+        // Paint the entire client ourselves; its text, icon and buttons remain
+        // native child controls, with their original IDs and dialog behavior.
+        if(msg==WM_PAINT&&GetPropW(h,messageBoxThemeProperty)){
+            PAINTSTRUCT paint{};HDC dc=BeginPaint(h,&paint);
+            FillRect(dc,&paint.rcPaint,colors.panel);EndPaint(h,&paint);return 0;
+        }
         if(msg==WM_ERASEBKGND||msg==WM_PRINTCLIENT){
             RECT r{};GetClientRect(h,&r);
             FillRect(reinterpret_cast<HDC>(wp),&r,colors.panel);
@@ -559,11 +570,25 @@ void styleNativeDialog(HWND root){
     if(!isSystemDialog(root))return;
     if(!GetWindowSubclass(root,themedWindow,windowThemeId,nullptr))styleWindow(root,true);
     EnumChildWindows(root,styleShellControl,0);
+    if(themingMessageBox){
+        SetPropW(root,messageBoxThemeProperty,reinterpret_cast<HANDLE>(1));
+        EnumChildWindows(root,[](HWND child,LPARAM)->BOOL{
+            wchar_t type[32]{};GetClassNameW(child,type,32);
+            const auto style=GetWindowLongPtrW(child,GWL_STYLE),button=style&BS_TYPEMASK;
+            if(!_wcsicmp(type,L"Button")&&(button==BS_PUSHBUTTON||button==BS_DEFPUSHBUTTON)){
+                SendMessageW(child,BM_SETSTYLE,BS_OWNERDRAW,TRUE);
+                InvalidateRect(child,nullptr,TRUE);
+            }
+            return TRUE;
+        },0);
+        InvalidateRect(root,nullptr,TRUE);
+    }
 }
 
 // Keep Windows' file navigation, validation and keyboard behavior. Some shell
 // dialogs build their controls after initialization, just before activation.
 class NativeDialogTheme {
+    bool previousMessageBox=themingMessageBox;
     static LRESULT CALLBACK observe(int code,WPARAM wp,LPARAM lp){
         if(code>=0){
             const auto& event=*reinterpret_cast<const CWPRETSTRUCT*>(lp);
@@ -579,7 +604,9 @@ class NativeDialogTheme {
     HHOOK initHook=SetWindowsHookExW(WH_CALLWNDPROCRET,observe,nullptr,GetCurrentThreadId());
     HHOOK activationHook=SetWindowsHookExW(WH_CBT,activate,nullptr,GetCurrentThreadId());
 public:
+    explicit NativeDialogTheme(bool messageBox=false){themingMessageBox=messageBox;}
     ~NativeDialogTheme(){
+        themingMessageBox=previousMessageBox;
         if(activationHook)UnhookWindowsHookEx(activationHook);
         if(initHook)UnhookWindowsHookEx(initHook);
     }
@@ -625,7 +652,7 @@ void dialog(HWND hwnd){
     SetWindowSubclass(hwnd,themedWindow,windowThemeId,TRUE);
 }
 int messageBox(HWND owner,const wchar_t* text,const wchar_t* caption,UINT type){
-    NativeDialogTheme theme;
+    NativeDialogTheme theme(true);
     return MessageBoxW(owner,text,caption,type);
 }
 BOOL openFileDialog(OPENFILENAMEW& options){

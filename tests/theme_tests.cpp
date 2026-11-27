@@ -22,7 +22,7 @@ using namespace yd::editor;
 #include <iostream>
 namespace {
 int requested=0;bool driven=false,valid=true,plotSettingsValid=true;
-enum class NativeCase { AlignmentWarning, Open, Save, GifSave };
+enum class NativeCase { AlignmentWarning, Open, Save, GifSave, SaveConfirmation };
 NativeCase nativeCase;
 bool nativeDialogSeen=false;
 
@@ -34,7 +34,7 @@ void CALLBACK inspectNativeDialog(HWND owner,UINT,UINT_PTR timer,DWORD){
         if(wcscmp(type,L"#32770")!=0||!IsWindowVisible(hwnd))return TRUE;
         wchar_t title[100]{};
         if(!GetWindowTextW(hwnd,title,int(std::size(title))))return TRUE;
-        if(nativeCase==NativeCase::AlignmentWarning&&wcscmp(title,L"YoungDraw")!=0)return TRUE;
+        if((nativeCase==NativeCase::AlignmentWarning||nativeCase==NativeCase::SaveConfirmation)&&wcscmp(title,L"YoungDraw")!=0)return TRUE;
         if(nativeCase==NativeCase::GifSave&&wcscmp(title,L"GIF 저장 테마 검증")!=0)return TRUE;
         *reinterpret_cast<HWND*>(result)=hwnd;
         return FALSE;
@@ -56,6 +56,23 @@ void CALLBACK inspectNativeDialog(HWND owner,UINT,UINT_PTR timer,DWORD){
     const bool themed=background==palette.panel.ToCOLORREF()&&brushInfo.lbColor==background&&
         GetTextColor(dc)==palette.text.ToCOLORREF();
     graphics.ReleaseHDC(dc);
+
+    if(nativeCase==NativeCase::SaveConfirmation){
+        RECT client{};GetClientRect(dialog,&client);UpdateWindow(dialog);
+        Bitmap actual(client.right,client.bottom,PixelFormat32bppARGB);Graphics rendered(&actual);
+        HDC capture=rendered.GetHDC();const bool printed=PrintWindow(dialog,capture,PW_CLIENTONLY)!=FALSE;rendered.ReleaseHDC(capture);
+        Color lower;actual.GetPixel(6,client.bottom-6,&lower);
+        bool buttons=true;
+        for(int id:{IDYES,IDNO,IDCANCEL}){
+            auto button=GetDlgItem(dialog,id);
+            buttons=buttons&&button&&(GetWindowLongPtrW(button,GWL_STYLE)&BS_TYPEMASK)==BS_OWNERDRAW;
+        }
+        const CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
+        const auto file=L"save-confirmation-"+std::to_wstring(GetCurrentProcessId())+L"-theme-"+std::to_wstring(requested)+L".png";
+        valid=valid&&printed&&buttons&&lower.ToCOLORREF()==palette.panel.ToCOLORREF()&&actual.Save(file.c_str(),&png,nullptr)==Ok;
+        if(lower.ToCOLORREF()!=palette.panel.ToCOLORREF())std::cerr<<"Save confirmation button band missed theme "<<requested<<'\n';
+        PostMessageW(dialog,WM_COMMAND,IDCANCEL,0);return;
+    }
 
     if(!themed){
         wchar_t title[100]{};
@@ -83,6 +100,12 @@ void checkNativeDialogs(HWND owner){
     doc=Document{};
     exercise(NativeCase::AlignmentWarning,[&]{SendMessageW(owner,WM_COMMAND,125,0);});
     doc=before;
+
+    const auto original=toNative(doc);
+    exercise(NativeCase::SaveConfirmation,[&]{
+        valid=(appearance::messageBox(owner,L"변경 내용을 저장하시겠습니까?",L"YoungDraw",MB_YESNOCANCEL|MB_ICONQUESTION)==IDCANCEL)&&valid;
+    });
+    valid=(toNative(doc)==original)&&valid;
 
     if(requested!=2&&requested!=5)return;
     exercise(NativeCase::Open,[&]{valid=openDocumentFiles().empty()&&valid;});
