@@ -12,6 +12,7 @@
 #include "win_editor_tabs.h"
 #include "win_editor_text.h"
 #include "win_editor_window.h"
+#include "win_editor_tool_options.h"
 #include "office.h"
 #include "win_dialogs.h"
 #include "win_theme.h"
@@ -53,8 +54,8 @@ LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){try{switch(msg){
     CheckMenuItem(reinterpret_cast<HMENU>(wp),showMolecularAnnotationsCommand,
         MF_BYCOMMAND|(doc.showMolecularAnnotations?MF_CHECKED:MF_UNCHECKED));
     break;
- case WM_MEASUREITEM:{auto* item=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(item->CtlType==ODT_MENU){auto label=reinterpret_cast<const wchar_t*>(item->itemData);item->itemWidth=UINT(wcslen(label)*8+16);item->itemHeight=24;return TRUE;}break;}
- case WM_DRAWITEM:{auto* item=reinterpret_cast<DRAWITEMSTRUCT*>(lp);if(item->CtlType==ODT_MENU){const auto& p=appearance::palette();Graphics g(item->hDC);RectF box(float(item->rcItem.left),float(item->rcItem.top),float(item->rcItem.right-item->rcItem.left),float(item->rcItem.bottom-item->rcItem.top));fill(g,box,(item->itemState&ODS_SELECTED)?p.hover:p.chrome);SetBkMode(item->hDC,TRANSPARENT);SetTextColor(item->hDC,RGB(p.text.GetR(),p.text.GetG(),p.text.GetB()));auto font=SelectObject(item->hDC,GetStockObject(DEFAULT_GUI_FONT));RECT rect=item->rcItem;rect.left+=8;DrawTextW(item->hDC,reinterpret_cast<const wchar_t*>(item->itemData),-1,&rect,DT_SINGLELINE|DT_VCENTER);SelectObject(item->hDC,font);return TRUE;}break;}
+ case WM_MEASUREITEM:{auto* item=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(measureDrawingToolOption(*item))return TRUE;if(item->CtlType==ODT_MENU){auto label=reinterpret_cast<const wchar_t*>(item->itemData);item->itemWidth=UINT(wcslen(label)*8+16);item->itemHeight=24;return TRUE;}break;}
+ case WM_DRAWITEM:{auto* item=reinterpret_cast<DRAWITEMSTRUCT*>(lp);if(drawDrawingToolOption(*item))return TRUE;if(item->CtlType==ODT_MENU){const auto& p=appearance::palette();Graphics g(item->hDC);RectF box(float(item->rcItem.left),float(item->rcItem.top),float(item->rcItem.right-item->rcItem.left),float(item->rcItem.bottom-item->rcItem.top));fill(g,box,(item->itemState&ODS_SELECTED)?p.hover:p.chrome);SetBkMode(item->hDC,TRANSPARENT);SetTextColor(item->hDC,RGB(p.text.GetR(),p.text.GetG(),p.text.GetB()));auto font=SelectObject(item->hDC,GetStockObject(DEFAULT_GUI_FONT));RECT rect=item->rcItem;rect.left+=8;DrawTextW(item->hDC,reinterpret_cast<const wchar_t*>(item->itemData),-1,&rect,DT_SINGLELINE|DT_VCENTER);SelectObject(item->hDC,font);return TRUE;}break;}
  case WM_CTLCOLOREDIT:if((HWND)lp==inlineEdit){SetTextColor((HDC)wp,inlineColor);SetBkColor((HDC)wp,RGB(255,255,255));return (LRESULT)GetStockObject(WHITE_BRUSH);}break;case WM_TIMER:if(wp==915){showHeldToolOptions();return 0;}if(wp==914){snapshotRecovery();return 0;}if(wp==913||wp==912){if(!IsIconic(hwnd)){auto box=canvasBox();RECT r{LONG(box.X),LONG(box.Y),LONG(box.GetRight()),LONG(box.GetBottom())};repaintOnly(&r);}return 0;}if(wp==911){showTooltip();return 0;}break;case WM_ACTIVATEAPP:if(!wp)hideTooltip();break;case WM_LBUTTONDOWN:mouseDown({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;case WM_LBUTTONUP:mouseUp({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;
  case WM_LBUTTONDBLCLK:if(stageCopyOwner)return 0;{if(snapPlot||tool==Rotate){mouseDown({double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))});return 0;}Vec at{double(GET_X_LPARAM(lp)),double(GET_Y_LPARAM(lp))};if(!canvas(at))return 0;Vec p=world(at);
  if(tool==Select)if(auto axis=plotAxisTitleAt(sceneForPaint(true),p,4/zoom)){if(!finishInline(true))return 0;cancel();selection={axis->owner};sidebarPage=1;openPlotAxesManager(axis->owner,axis->xAxis?0:1);return 0;}

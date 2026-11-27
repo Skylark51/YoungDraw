@@ -440,7 +440,9 @@ void themePopup(HMENU menu){
     MENUINFO background{sizeof(background)};background.fMask=MIM_BACKGROUND;background.hbrBack=brush;SetMenuInfo(menu,&background);
     for(int i=0;i<GetMenuItemCount(menu);++i){
         wchar_t label[512]{};MENUITEMINFOW item{sizeof(item)};item.fMask=MIIM_FTYPE|MIIM_STRING|MIIM_SUBMENU;item.dwTypeData=label;item.cch=512;
-        if(!GetMenuItemInfoW(menu,i,TRUE,&item)||item.fType&MFT_SEPARATOR)continue;
+        // A caller-owned menu row has its own data, measurement and painter.
+        // Replacing that data with a label breaks icon menus and their width.
+        if(!GetMenuItemInfoW(menu,i,TRUE,&item)||item.fType&(MFT_SEPARATOR|MFT_OWNERDRAW))continue;
         auto stored=menuLabels.insert(label).first;auto data=reinterpret_cast<ULONG_PTR>(stored->c_str());menuData.insert(data);
         item.fMask=MIIM_FTYPE|MIIM_DATA;item.fType|=MFT_OWNERDRAW;item.dwItemData=data;SetMenuItemInfoW(menu,i,TRUE,&item);
     }

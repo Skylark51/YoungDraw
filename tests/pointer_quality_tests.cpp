@@ -19,9 +19,63 @@
 #include "win_editor_chrome.h"
 #include <iostream>
 #include <stdexcept>
+#include <commctrl.h>
 using namespace yd;
 using namespace yd::editor;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+static HMENU trackedToolMenu=nullptr;
+static bool toolMenuReadable=false,toolMenuCaptured=false;
+static int expectedToolMenuRows=0;
+static int toolMenuTimerTicks=0;
+static std::wstring toolMenuCaptureSuffix;
+static LRESULT CALLBACK observeToolMenu(HWND hwnd,UINT message,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR){
+    if(message==WM_INITMENUPOPUP)trackedToolMenu=reinterpret_cast<HMENU>(wp);
+    return DefSubclassProc(hwnd,message,wp,lp);
+}
+static void CALLBACK captureToolMenu(HWND owner,UINT,UINT_PTR timer,DWORD){
+    if(++toolMenuTimerTicks>20){KillTimer(owner,timer);EndMenu();return;}
+    if(!trackedToolMenu)return;
+    HWND popup=nullptr;
+    EnumThreadWindows(GetCurrentThreadId(),[](HWND window,LPARAM data)->BOOL{
+        wchar_t type[32]{};GetClassNameW(window,type,32);
+        if(wcscmp(type,L"#32768")==0&&IsWindowVisible(window)){*reinterpret_cast<HWND*>(data)=window;return FALSE;}
+        return TRUE;
+    },reinterpret_cast<LPARAM>(&popup));
+    if(!popup)return;
+    KillTimer(owner,timer);
+    const float scale=std::max(1.f,float(GetDpiForWindow(owner))/96.f);
+    toolMenuReadable=GetMenuItemCount(trackedToolMenu)==expectedToolMenuRows;
+    for(int index=0;index<expectedToolMenuRows;++index){
+        RECT row{};MENUITEMINFOW entry{};entry.cbSize=sizeof(entry);entry.fMask=MIIM_FTYPE|MIIM_DATA|MIIM_BITMAP;
+        toolMenuReadable=toolMenuReadable&&GetMenuItemRect(nullptr,trackedToolMenu,UINT(index),&row)&&
+            row.right-row.left>=int(360*scale)&&row.bottom-row.top>=int(48*scale)&&
+            GetMenuItemInfoW(trackedToolMenu,UINT(index),TRUE,&entry)&&(entry.fType&MFT_OWNERDRAW)&&entry.dwItemData&&!entry.hbmpItem;
+    }
+    RECT bounds{};GetWindowRect(popup,&bounds);
+    Bitmap screenshot(bounds.right-bounds.left,bounds.bottom-bounds.top,PixelFormat32bppARGB);
+    Graphics graphics(&screenshot);HDC dc=graphics.GetHDC();
+    const bool printed=PrintWindow(popup,dc,0)!=FALSE;graphics.ReleaseHDC(dc);
+    const CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
+    const auto path=L"ux-popup-"+std::to_wstring(GetCurrentProcessId())+toolMenuCaptureSuffix;
+    toolMenuCaptured=printed&&screenshot.Save(path.c_str(),&png,nullptr)==Ok;
+    EndMenu();
+}
+static void toolMenuReadabilityRegression(HWND hwnd){
+    check(SetWindowSubclass(hwnd,observeToolMenu,992,0)!=FALSE,"observe the real tool popup");
+    // These windows are shown only on scripts/test-isolated.ps1's separate desktop.
+    ShowWindow(hwnd,SW_SHOWNOACTIVATE);UpdateWindow(hwnd);
+    for(int toolId:{210,217}){
+        trackedToolMenu=nullptr;toolMenuReadable=toolMenuCaptured=false;toolMenuTimerTicks=0;
+        expectedToolMenuRows=toolId==210?4:2;
+        toolMenuCaptureSuffix=toolId==210?L"-arrows.png":L"-resonance.png";
+        SetTimer(hwnd,992,120,captureToolMenu);
+        check(showDrawingToolOptions(toolId,{190,180}),"open the actual drawing option menu");
+        KillTimer(hwnd,992);
+        check(toolMenuReadable,"all real popup rows reserve full label width and readable icon height");
+        check(toolMenuCaptured,"capture the actual opened tool popup");
+    }
+    RemoveWindowSubclass(hwnd,observeToolMenu,992);ShowWindow(hwnd,SW_HIDE);
+}
 static bool equilibriumPropertiesPreserved=false;
 static void CALLBACK acceptEquilibriumProperties(HWND owner,UINT,UINT_PTR timer,DWORD){
     HWND dialog=nullptr;
@@ -324,6 +378,7 @@ int main(int argc,char** argv){
         }
 
         BYTE initialKeys[256]{};check(SetKeyboardState(initialKeys)!=FALSE,"initialize the isolated pointer test keyboard state");
+        toolMenuReadabilityRegression(hwnd);
         sevenUxRegression(hwnd);
         doc={};int a=doc.addAtom({50,50}),b=doc.addAtom({80,50});doc.addBond(a,b);history.clear();dirty=false;selection={a};zoom=2;origin={300,200};tool=Select;
         auto before=toNative(doc);Vec start=screen(doc.atom(a)->p);

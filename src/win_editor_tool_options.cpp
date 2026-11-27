@@ -5,29 +5,83 @@
 #include "win_editor_state.h"
 #include "win_editor_structure.h"
 #include "win_theme.h"
+#include "win_ui.h"
 
 namespace yd::editor {
 int reactionArrowHead=1;
 bool partialTripleBond=false;
 
+namespace {
+struct DrawingToolOption {int command;const wchar_t* label;};
+const DrawingToolOption drawingToolOptions[]={
+    {irreversibleArrowCommand,L"비가역 반응"},
+    {equilibriumArrowCommand,L"평형 · 같은 길이"},
+    {upperFavoredArrowCommand,L"평형 · 위쪽 화살표 우세"},
+    {lowerFavoredArrowCommand,L"평형 · 아래쪽 화살표 우세"},
+    {delocalizedBondOptionCommand,L"공명 결합 · 실선 + 파선"},
+    {partialTripleBondOptionCommand,L"부분 삼중 결합 · 실선 2개 + 파선"}
+};
+const DrawingToolOption* drawingToolOption(ULONG_PTR data){
+    for(const auto& option:drawingToolOptions)
+        if(data==reinterpret_cast<ULONG_PTR>(&option))return &option;
+    return nullptr;
+}
+float optionMenuScale(){return std::max(1.f,float(GetDpiForWindow(win))/96.f);}
+HFONT optionMenuFont(float scale){
+    return CreateFontW(-int(std::lround(14*scale)),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,
+        DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
+        DEFAULT_PITCH,ui::interfaceFont());
+}
+}
+
+bool measureDrawingToolOption(MEASUREITEMSTRUCT& item){
+    if(item.CtlType!=ODT_MENU)return false;
+    const auto* option=drawingToolOption(item.itemData);if(!option)return false;
+    const float scale=optionMenuScale();
+    HDC dc=GetDC(win);HFONT font=optionMenuFont(scale);auto previous=SelectObject(dc,font);
+    SIZE label{};GetTextExtentPoint32W(dc,option->label,int(wcslen(option->label)),&label);
+    SelectObject(dc,previous);DeleteObject(font);ReleaseDC(win,dc);
+    // Reserve separate columns for the check mark, chemical pictogram and full name.
+    item.itemWidth=UINT(std::max(360.f*scale,float(label.cx)+112.f*scale));
+    item.itemHeight=UINT(std::lround(48*scale));return true;
+}
+
+bool drawDrawingToolOption(const DRAWITEMSTRUCT& item){
+    if(item.CtlType!=ODT_MENU)return false;
+    const auto* option=drawingToolOption(item.itemData);if(!option)return false;
+    const float scale=optionMenuScale();const auto& palette=appearance::palette();
+    const float x=float(item.rcItem.left),y=float(item.rcItem.top);
+    const float height=float(item.rcItem.bottom-item.rcItem.top);
+    {
+        Graphics graphics(item.hDC);graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+        fill(graphics,{x,y,float(item.rcItem.right-item.rcItem.left),height},
+             item.itemState&ODS_SELECTED?palette.hover:palette.panel);
+        icon(graphics,option->command,{x+30*scale,y+(height-30*scale)/2,52*scale,30*scale},palette.text);
+        if(item.itemState&ODS_CHECKED){
+            Pen check(palette.accent,2*scale);const float middle=y+height/2;
+            graphics.DrawLine(&check,x+9*scale,middle,x+14*scale,middle+5*scale);
+            graphics.DrawLine(&check,x+14*scale,middle+5*scale,x+22*scale,middle-6*scale);
+        }
+    }
+    HFONT font=optionMenuFont(scale);auto previous=SelectObject(item.hDC,font);
+    SetBkMode(item.hDC,TRANSPARENT);SetTextColor(item.hDC,palette.text.ToCOLORREF());
+    RECT label=item.rcItem;label.left+=LONG(std::lround(96*scale));label.right-=LONG(std::lround(16*scale));
+    DrawTextW(item.hDC,option->label,-1,&label,DT_SINGLELINE|DT_VCENTER|DT_LEFT|DT_NOPREFIX);
+    SelectObject(item.hDC,previous);DeleteObject(font);return true;
+}
+
 bool showDrawingToolOptions(int id,Vec at){
     if(id!=210&&id!=217)return false;
-    HMENU menu=CreatePopupMenu();std::vector<HBITMAP> bitmaps;
+    HMENU menu=CreatePopupMenu();
     const int first=id==210?irreversibleArrowCommand:delocalizedBondOptionCommand,last=id==210?lowerFavoredArrowCommand:partialTripleBondOptionCommand;
-    const wchar_t* labels[]={L"비가역 반응",L"평형 · 같은 길이",L"평형 · 위쪽 화살표 우세",L"평형 · 아래쪽 화살표 우세",L"공명 결합 · 실선 + 파선",L"부분 삼중 결합 · 실선 2개 + 파선"};
     for(int command=first;command<=last;++command){
         const bool active=id==210?reactionArrowHead==(command==irreversibleArrowCommand?1:command-equilibriumArrowCommand+4):partialTripleBond==(command==partialTripleBondOptionCommand);
-        AppendMenuW(menu,MF_STRING|(active?MF_CHECKED:0),command,labels[command-irreversibleArrowCommand]);
-        Bitmap preview(48,32,PixelFormat32bppARGB);Graphics graphics(&preview);
-        graphics.Clear(Color(255,255,255,255));graphics.SetSmoothingMode(SmoothingModeAntiAlias);
-        icon(graphics,command,{4,2,40,26},Color(255,30,40,50));HBITMAP bitmap=nullptr;
-        preview.GetHBITMAP(Color(255,255,255,255),&bitmap);bitmaps.push_back(bitmap);
-        MENUITEMINFOW item{};item.cbSize=sizeof(item);item.fMask=MIIM_BITMAP;item.hbmpItem=bitmap;
-        SetMenuItemInfoW(menu,command,FALSE,&item);
+        const auto& option=drawingToolOptions[command-irreversibleArrowCommand];
+        AppendMenuW(menu,MF_OWNERDRAW|(active?MF_CHECKED:0),command,reinterpret_cast<LPCWSTR>(&option));
     }
     POINT point{LONG(at.x),LONG(at.y)};ClientToScreen(win,&point);
     const int chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,win,nullptr);
-    DestroyMenu(menu);for(auto bitmap:bitmaps)DeleteObject(bitmap);
+    DestroyMenu(menu);
     if(chosen)command(chosen);return true;
 }
 
