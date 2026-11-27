@@ -55,6 +55,25 @@ std::vector<Vec> routeArrow(const Document& d,const Object& o,const std::map<int
     return std::vector<Vec>(best.begin(),best.end());
 }
 static std::vector<Primitive> arrowParts(const Object& o,double maxHeadFraction){
+    // Two separated, opposing half-arrows. The shorter stroke is centered on
+    // the same chord, so resizing preserves both direction and equilibrium bias.
+    if(o.head>=4&&o.head<=6&&o.points.size()>=2){
+        const Vec a=o.points.front(),b=o.points.back(),v=b-a;
+        const double length=v.length();if(length<1e-6)return {};
+        const Vec u=v*(1/length),n{-u.y,u.x};
+        const double gap=std::max(3.,o.width*2),barb=std::min(std::max(5.,o.width*3),length*.18);
+        std::vector<Primitive> result;
+        auto half=[&](bool upper,double fraction){
+            const Vec middle=(a+b)*.5+n*(upper?-gap:gap);
+            const Vec direction=u*(upper?1.:-1.);
+            const Vec tail=middle-direction*(length*fraction*.5),tip=middle+direction*(length*fraction*.5);
+            Primitive shaft;shaft.owner=o.id;shaft.color=o.color;shaft.width=o.width;shaft.points={tail,tip};
+            result.push_back(shaft);
+            shaft.points={tip-direction*barb+n*(upper?-barb*.55:barb*.55),tip};result.push_back(shaft);
+        };
+        half(true,o.head==6?.6:1.);half(false,o.head==5?.6:1.);
+        return result;
+    }
     if(o.head==3&&o.kind==ObjectKind::Curve&&o.points.size()>=4&&(o.points.size()-1)%3==0){
         Object forward=o;forward.head=1;auto right=arrowParts(forward,.35);
         if(right.size()!=2)return {};

@@ -34,6 +34,7 @@ if(WIN32)
     src/win_editor_structure.cpp
     src/win_editor_commands.cpp
     src/win_editor_canvas.cpp
+    src/win_editor_tool_options.cpp
     src/win_editor_pointer.cpp
     src/win_editor_shortcuts.cpp
     src/win_editor_window.cpp

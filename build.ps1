@@ -1,4 +1,4 @@
-param([string]$BuildDirectory = 'build/release-v04-final', [switch]$HeadlessTests = $true, [string]$VisualStudioDirectory = '', [string]$TestFilter = '')
+param([string]$BuildDirectory = 'build/release-v04-final', [switch]$HeadlessTests = $true, [string]$VisualStudioDirectory = '', [string]$TestFilter = '', [switch]$ReuseConfiguration, [switch]$CleanBuild)
 $ErrorActionPreference = 'Stop'
 if ($BuildDirectory -notmatch '^[A-Za-z0-9_/-]+$' -or $BuildDirectory.Contains('..')) { throw 'Use a relative build folder inside the project.' }
 $env:VSLANG = '1033'
@@ -27,9 +27,15 @@ if ($LASTEXITCODE) { throw 'Cannot create temporary build alias' }
 try {
     $buildRoot = "${driveLetter}:/"
     $outputDir = "${buildRoot}$BuildDirectory"
-    cmake --fresh -S $buildRoot -B $outputDir -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninjaPath" -DCMAKE_BUILD_TYPE=Release
+    if ($ReuseConfiguration) {
+        if (!(Test-Path -LiteralPath "$outputDir/CMakeCache.txt" -PathType Leaf)) { throw 'ReuseConfiguration requires an existing configured build directory.' }
+        cmake -S $buildRoot -B $outputDir -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninjaPath" -DCMAKE_BUILD_TYPE=Release
+    } else {
+        cmake --fresh -S $buildRoot -B $outputDir -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninjaPath" -DCMAKE_BUILD_TYPE=Release
+    }
     if ($LASTEXITCODE) { throw 'CMake configure failed' }
-    cmake --build $outputDir
+    if ($CleanBuild) { cmake --build $outputDir --clean-first }
+    else { cmake --build $outputDir }
     if ($LASTEXITCODE) { throw 'Build failed' }
     if ($TestFilter) {
         & (Join-Path $projectDir 'scripts/test-isolated.ps1') -BuildDirectory $outputDir -Filter $TestFilter

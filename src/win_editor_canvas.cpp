@@ -3,6 +3,7 @@
 #include "win_editor_canvas.h"
 #include "win_editor_chrome.h"
 #include "win_editor_commands.h"
+#include "win_editor_tool_options.h"
 #include "win_editor_images.h"
 #include "win_editor_plot.h"
 #include "win_editor_pointer.h"
@@ -136,13 +137,13 @@ Object draftArrow(Vec pointer){Object o;o.id=-1;Vec a=world(down),b=world(pointe
         return o;
     }
     if(tool==Straight||tool==Resonance){o.head=tool==Resonance?3:0;if(!o.head)o.color="#000000";if(GetKeyState(VK_SHIFT)&0x8000){Vec v=b-a;b=std::abs(v.x)>std::abs(v.y)?Vec{b.x,a.y}:Vec{a.x,b.y};}o.points={a,b};return o;}
-    o.head=tool==Fishhook?2:1;o.sourceAtom=startAtom;o.targetAtom=atomHit(b);
+    o.head=tool==Fishhook?2:tool==Arrow?reactionArrowHead:1;o.sourceAtom=startAtom;o.targetAtom=atomHit(b);
     o.sourceBond=o.sourceAtom?0:startBond;o.targetBond=o.targetAtom?0:doc.bondAt(b,5/zoom);
     o.sourceBondT=bondFraction(o.sourceBond,a);o.targetBondT=bondFraction(o.targetBond,b);
     if(o.targetAtom==o.sourceAtom)o.targetAtom=0;
     if(auto* atom=doc.atom(o.sourceAtom))a=atom->p;
     if(auto* atom=doc.atom(o.targetAtom))b=atom->p;else if(!o.targetBond&&(GetKeyState(VK_SHIFT)&0x8000)){Vec v=b-a;b=std::abs(v.x)>std::abs(v.y)?Vec{b.x,a.y}:Vec{a.x,b.y};}
-    bool electron=tool==Curve||tool==Fishhook||((o.sourceAtom||o.sourceBond)&&(o.targetAtom||o.targetBond));o.kind=electron?ObjectKind::Curve:ObjectKind::Line;o.autoRoute=electron;
+    bool electron=tool==Curve||tool==Fishhook||(o.head==1&&(o.sourceAtom||o.sourceBond)&&(o.targetAtom||o.targetBond));o.kind=electron?ObjectKind::Curve:ObjectKind::Line;o.autoRoute=electron;
     if(electron){Vec v=b-a;double len=v.length();Vec n=len>.001?Vec{-v.y/len,v.x/len}:Vec{0,1};double bend=std::clamp(len*.3,6.,24.);o.points={a,a+v*.28+n*bend,a+v*.72+n*bend,b};}
     else{o.sourceAtom=o.targetAtom=o.sourceBond=o.targetBond=0;o.points={a,b};}return o;
 }
@@ -195,7 +196,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
      separator();group({104,105});
      separator();group({107,125});
  }
- separator();group({170,171,172,173,174});
+ separator();group({170});
  if(!isolatedStructureEditing){separator();group({bondAnimationCommand,copyPngCommand,184});}
  for(int id:favorites)group({id});
  g.Restore(toolbarState);
@@ -209,7 +210,8 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  if(isolatedStructureEditing)text(g,L"이 창에서는 선택한 단계의 구조만 편집합니다. 적용하면 원래 메커니즘에 반영됩니다.",left+12,96,12,ink,true);
  // Selection formatting occupies the spare chrome row.
  const auto formatting=selectionFormatting();
- const auto quickCommands=selectionFormattingCommands(formatting);
+ auto quickCommands=selectionFormattingCommands(formatting);
+ quickCommands.erase(std::remove(quickCommands.begin(),quickCommands.end(),155),quickCommands.end());
  const bool showFormatting=!quickCommands.empty()&&!inlineEdit&&!drawing&&!dragging&&!boxing&&!panning&&!snapPlot&&!stageCopyOwner;
  if(showFormatting){
     float x=float(left+32);
@@ -227,8 +229,8 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  leftOffset=std::min(leftOffset,std::max(0,drawingPanelBottom-(wh-bottom)));
  const auto leftHits=hits.size();auto leftState=g.Save();g.SetClip(leftClip);g.TranslateTransform(0,float(-leftOffset));
  text(g,L"그리기",16,101,11,muted,true);
- const std::vector<int> drawingTools={200,209,201,204,202,205,203,217,207,208,210,211,212,216,215,dottedBondCommand,213,214,218};
- for(size_t i=0;i<drawingTools.size();i++)toolButton(g,drawingTools[i],{float(12+(i%2)*82),float(122+(i/2)*44),74,40},drawingTools[i]==(tool==DottedBond||tool==Interaction?dottedBondCommand:200+int(tool)));
+ const std::vector<int> drawingTools={200,209,201,204,205,217,207,208,210,211,212,216,215,dottedBondCommand,213,214,218};
+ for(size_t i=0;i<drawingTools.size();i++)toolButton(g,drawingTools[i],{float(12+(i%2)*82),float(122+(i/2)*44),74,40},drawingTools[i]==(tool==Double||tool==Triple?201:tool==DottedBond||tool==Interaction?dottedBondCommand:200+int(tool)));
  text(g,L"원소",16,586,11,muted,true);std::vector<int> elements={1,6,7,8,9,17,25,26,27,29};
  for(int i=0;i<int(elements.size());i++)button(g,300+elements[i],ui::wide(symbol(elements[i])),{float(12+i%3*53),float(608+i/3*30),49,26},element==elements[i]);
  int shown=int(tool);for(auto& h:hits)if(h.box.Contains(float(mouse.x),float(mouse.y))){
@@ -343,23 +345,7 @@ void paint(HDC dc,bool reuseScene){std::vector<ui::HelpRegion> regionHelp;const 
  const auto rightHits=hits.size();auto rightState=g.Save();g.SetClip(rightClip);g.TranslateTransform(0,float(-rightOffset));
  button(g,175,L"도구",{rx+12,91,float((right-30)/2),28},!showLayers);button(g,176,L"레이어",{rx+18+(right-30)/2,91,float((right-30)/2),28},showLayers);
  if(showLayers){
-    text(g,L"레이어 잠금",rx+16,142,14,ink,true);
-    text(g,L"잠긴 레이어는 클릭되지 않습니다.",rx+16,170,11,muted);
-    size_t images=std::count_if(doc.objects.begin(),doc.objects.end(),[](const Object& o){return o.kind==ObjectKind::Image;});
-    auto row=[&](float y,const std::wstring& label,size_t count,bool locked,int id){
-        appearance::rounded(g,{rx+12,y,float(right-24),64},8,palette.raised);text(g,label,rx+24,y+10,13,ink,true);text(g,std::to_wstring(count)+L"개",rx+24,y+34,11,muted);
-        button(g,id,locked?L"잠김":L"편집 가능",{rx+float(right-110),y+31,86,26},locked);
-    };
-    row(204,L"이미지",images,doc.imagesLocked,177);row(276,L"그래프",doc.plots.size(),doc.graphsLocked,178);
-    text(g,L"빠른 전환",rx+16,372,11,muted,true);
-    button(g,179,L"이미지만 편집",{rx+12,398,float(right-24),34},doc.graphsLocked&&!doc.imagesLocked);
-    button(g,180,L"그래프만 편집",{rx+12,442,float(right-24),34},doc.imagesLocked&&!doc.graphsLocked);
-    button(g,181,L"모두 잠금 해제",{rx+12,486,float(right-24),34});
-    text(g,L"그림 편집 중 그래프가 눌리면",rx+16,554,11,muted);
-    text(g,L"'이미지만 편집'을 누르세요.",rx+16,575,11,muted);
-    text(g,L"이미지와 그래프는 자동 분류됩니다.",rx+16,616,11,muted);
-    text(g,L"잠금 상태도 문서에 저장됩니다.",rx+16,637,11,muted);
-    text(g,L"Ctrl+Z로 잠금 변경을 되돌립니다.",rx+16,658,11,muted);
+    drawLayerPanel(g,rx,right);
  }else if(isolatedStructureEditing){
     button(g,110,L"구조 정리  Ctrl+Shift+K",{rx+12,124,float(right-24),30});button(g,113,L"구조·이미지 파일 삽입",{rx+12,204,float(right-24),30});button(g,165,L"크기 조정  Ctrl+K",{rx+12,244,float(right-24),30});
     text(g,L"이 단계의 구조만 편집합니다.",rx+16,304,13,ink,true);text(g,L"상단 적용 또는 Ctrl+S: 반영",rx+16,342,12,muted);text(g,L"취소 / 창 닫기: 변경 버리기",rx+16,372,12,muted);

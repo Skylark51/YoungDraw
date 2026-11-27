@@ -296,6 +296,7 @@ Scene makeScene(const Document& d,const Measure& measure){
         else if(b.kind==BondKind::Triple){line(a,z,bondWidth);line(a+n*gap,z+n*gap,bondWidth);line(a-n*gap,z-n*gap,bondWidth);}
         else if(b.kind==BondKind::Wavy){Vec last=a;for(int i=1;i<=24;i++){double t=double(i)/24;Vec q=a+v*t+n*(std::sin(t*pi*8)*.8*b.drawingScale);line(last,q,bondWidth);last=q;}}
         else if(b.kind==BondKind::Dative){line(a,z,bondWidth);if(b.customDisplay!="Solid"){line(z,z-u*(3*b.drawingScale)+n*(1.4*b.drawingScale),bondWidth);line(z,z-u*(3*b.drawingScale)-n*(1.4*b.drawingScale),bondWidth);}}
+        else if(b.kind==BondKind::PartialTriple){line(a-n*gap*.5,z-n*gap*.5,bondWidth);line(a+n*gap*.5,z+n*gap*.5,bondWidth);line(a+n*gap*1.5,z+n*gap*1.5,bondWidth,1);}
         else if(b.kind==BondKind::Aromatic){
             // The solid stroke stays on the skeleton; put the partial second
             // stroke inside the ring or delocalized fragment, independent of
@@ -1616,6 +1617,11 @@ Scene makeScene(const Document& d,const Measure& measure){
             }
         }
     }
+    s.items.erase(std::remove_if(s.items.begin(),s.items.end(),[&](const Primitive& item){
+        if(!d.graphsVisible&&std::any_of(d.plots.begin(),d.plots.end(),[&](const EnergyPlot& graph){return graph.id==item.owner;}))return true;
+        if(!d.imagesVisible&&std::any_of(d.objects.begin(),d.objects.end(),[&](const Object& object){return object.id==item.owner&&object.kind==ObjectKind::Image;}))return true;
+        return false;
+    }),s.items.end());
     double l=1e20,t=1e20,r=-1e20,b=-1e20;
     for(auto& p:s.items){double pl=1e20,pt=1e20,pr=-1e20,pb=-1e20;for(auto q:p.points){double pad=p.type==Primitive::Text?std::max(0.,p.textStrokeWidth/2):p.width/2;pl=std::min(pl,q.x-pad);pt=std::min(pt,q.y-pad);pr=std::max(pr,q.x+pad);pb=std::max(pb,q.y+pad);if(p.type==Primitive::Text){pr=std::max(pr,q.x+textWidth(measure,p.text,p.fontSize,p.font,p.face));pb=std::max(pb,q.y+p.fontSize*1.3*(1+std::count(p.text.begin(),p.text.end(),'\n')));if(p.rotation==-90){pr=q.x+p.fontSize*1.3;pt=q.y-textWidth(measure,p.text,p.fontSize,p.font,p.face);pb=q.y;}}}
         if(p.points.empty())continue;l=std::min(l,pl);t=std::min(t,pt);r=std::max(r,pr);b=std::max(b,pb);auto it=s.objectBounds.find(p.owner);if(it==s.objectBounds.end())s.objectBounds[p.owner]={pl,pt,pr-pl,pb-pt};else{auto& v=it->second;double x=std::min(v.x,pl),y=std::min(v.y,pt);v={x,y,std::max(v.x+v.w,pr)-x,std::max(v.y+v.h,pb)-y};}}

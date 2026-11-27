@@ -43,10 +43,20 @@ inline constexpr int selectedFontLargerCommand = 267;
 inline constexpr int selectedStrokeThinnerCommand = 268;
 inline constexpr int selectedStrokeThickerCommand = 269;
 inline constexpr int energyGapStyleCommand = 270;
+inline constexpr int irreversibleArrowCommand = 271;
+inline constexpr int equilibriumArrowCommand = 272;
+inline constexpr int upperFavoredArrowCommand = 273;
+inline constexpr int lowerFavoredArrowCommand = 274;
+inline constexpr int delocalizedBondOptionCommand = 275;
+inline constexpr int partialTripleBondOptionCommand = 276;
+inline constexpr int imageVisibilityCommand = 277;
+inline constexpr int graphVisibilityCommand = 278;
+inline constexpr int selectImageLayerCommand = 279;
+inline constexpr int selectGraphLayerCommand = 280;
 inline constexpr int exportPngCommand = 247;
 inline constexpr int copyPngCommand = 248;
 
-inline constexpr bool isEditorCommand(int id){return (id>=100&&id<=energyGapStyleCommand)||(id>=301&&id<=418);}
+inline constexpr bool isEditorCommand(int id){return (id>=100&&id<=selectGraphLayerCommand)||(id>=301&&id<=418);}
 struct SelectionFormatting {
     bool properties=false,atoms=false,text=false,arrows=false,stroke=false;
     int commonFace=7;

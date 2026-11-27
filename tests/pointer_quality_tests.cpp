@@ -15,11 +15,92 @@
 #include "win_editor_commands.h"
 #include "win_editor_canvas.h"
 #include "win_editor_render.h"
+#include "win_editor_tool_options.h"
+#include "win_editor_chrome.h"
 #include <iostream>
 #include <stdexcept>
 using namespace yd;
 using namespace yd::editor;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+static bool equilibriumPropertiesPreserved=false;
+static void CALLBACK acceptEquilibriumProperties(HWND owner,UINT,UINT_PTR timer,DWORD){
+    HWND dialog=nullptr;
+    while((dialog=FindWindowExW(nullptr,dialog,L"YoungDrawForm",L"그리기 속성")))if(GetWindow(dialog,GW_OWNER)==owner)break;
+    if(!dialog)return;
+    KillTimer(owner,timer);
+    equilibriumPropertiesPreserved=SendDlgItemMessageW(dialog,105,CB_GETCURSEL,0,0)==6;
+    PostMessageW(dialog,WM_COMMAND,IDOK,0);
+}
+static void sevenUxRegression(HWND hwnd){
+    doc={};selection.clear();history.clear();zoom=2;origin={400,300};
+    const int a=doc.addAtom({0,0}),b=doc.addAtom({60,0}),bond=doc.addBond(a,b);
+    const auto original=toNative(doc);
+    for(int mode=Single;mode<=Rotate;++mode){tool=Tool(mode);key(VK_ESCAPE);check(tool==Select,"Esc returns each drawing tool to selection");}
+    tool=Single;mouseDown(screen({160,50}));check(drawing,"bond gesture begins");key(VK_ESCAPE);
+    check(tool==Select&&!drawing&&toNative(doc)==original,"Esc cancels unfinished drawing without changing the document");
+    tool=Single;
+    for(auto expected:{BondKind::Double,BondKind::Triple,BondKind::Single}){
+        mouseDown(screen({30,0}));mouseUp(screen({30,0}));
+        check(doc.bond(bond)->kind==expected,"repeated bond clicks cycle single, double, triple");
+    }
+    check(history.undo(doc)&&doc.bond(bond)->kind==BondKind::Triple,"bond cycle supports undo");
+    history.clear();hoverAtom=a;hoverBond=0;
+    hotkey('1');check(tool==Single,"1 selects single bond over an atom");
+    hotkey('2');check(tool==Double,"2 selects double bond over an atom");
+    hotkey('3');check(tool==Triple&&doc.atoms.size()==2,"3 selects triple bond without adding a ring");
+    hoverAtom=0;hoverBond=bond;hotkey('2');
+    check(tool==Double&&doc.bond(bond)->kind==BondKind::Double,"numeric shortcut updates both hovered bond and active tool");
+    hoverAtom=hoverBond=0;selection={bond};command(partialTripleBondOptionCommand);
+    check(doc.bond(bond)->kind==BondKind::PartialTriple,"partial triple option applies to the selected bond");
+    auto strokes=makeScene(doc);int solid=0,dashed=0;
+    for(const auto& item:strokes.items)if(item.owner==bond){if(item.dash)++dashed;else ++solid;}
+    check(solid==2&&dashed==1,"partial triple has two solid strokes and one dashed stroke");
+    check(fromNative(toNative(doc)).bond(bond)->kind==BondKind::PartialTriple,"partial triple survives native saving");
+    check(toCdxml(doc).find("Order=\"2.5\"")!=std::string::npos,"partial triple exports its fractional order");
+    for(int option=irreversibleArrowCommand;option<=lowerFavoredArrowCommand;++option){
+        command(option);down=screen({0,100});startAtom=startBond=0;
+        auto arrow=draftArrow(screen({120,100}));arrow.id=doc.nextId++;
+        check(arrow.head==(option==irreversibleArrowCommand?1:option-equilibriumArrowCommand+4),"arrow option chooses the requested kind");
+        auto pieces=arrowPrimitives(arrow);
+        if(option>irreversibleArrowCommand){
+            check(pieces.size()==4,"equilibrium is two separate half arrows");
+            const auto top=pieces[0].points,lower=pieces[2].points;
+            const double upperLength=(top[1]-top[0]).length(),lowerLength=(lower[1]-lower[0]).length();
+            check(top[0].y<lower[0].y&&top[1].x>top[0].x&&lower[1].x<lower[0].x,"equilibrium points right above and left below");
+            check(option==equilibriumArrowCommand?std::abs(upperLength-lowerLength)<.001:option==upperFavoredArrowCommand?upperLength>lowerLength:upperLength<lowerLength,"equilibrium favors the chosen direction");
+            arrow.points.back().x+=120;auto resized=arrowPrimitives(arrow);
+            check((resized[0].points[1]-resized[0].points[0]).length()>upperLength,"resizing preserves the equilibrium style");
+        }
+        doc.objects.push_back(arrow);
+        check(fromCdxml(toCdxml(doc)).objects.back().head==arrow.head,"arrow kind survives CDXML roundtrip");
+    }
+    SetTimer(hwnd,991,10,acceptEquilibriumProperties);editObject(doc.objects.back().id);KillTimer(hwnd,991);
+    check(equilibriumPropertiesPreserved&&doc.objects.back().head==6,"opening and accepting properties preserves equilibrium style");
+    auto graph=newEnergyPlot(0,true);graph.id=doc.nextId++;graph.p={100,180};doc.plots.push_back(graph);
+    Object image;image.id=doc.nextId++;image.kind=ObjectKind::Image;image.points={{0,160},{40,190}};doc.objects.push_back(image);
+    history.clear();command(selectGraphLayerCommand);check(selection==std::vector<int>{graph.id},"layer row selects graph objects");
+    command(graphVisibilityCommand);check(!doc.graphsVisible&&doc.isLocked(graph.id)&&selection.empty(),"hidden graph layer is not editable or selected");
+    auto hidden=makeScene(doc);check(std::none_of(hidden.items.begin(),hidden.items.end(),[&](const Primitive& p){return p.owner==graph.id;}),"hidden graphs have no rendered strokes");
+    check(!fromNative(toNative(doc)).graphsVisible,"layer visibility survives saving");
+    check(history.undo(doc)&&doc.graphsVisible,"layer visibility supports undo");
+    command(177);check(doc.imagesLocked,"layer lock remains available");command(181);
+    check(!doc.imagesLocked&&!doc.graphsLocked,"unlock all preserves existing behavior");
+    auto capture=[&](const wchar_t* suffix){
+        HDC dc=GetDC(hwnd);paint(dc);ReleaseDC(hwnd,dc);
+        const CLSID png={0x557cf406,0x1a04,0x11d3,{0x9a,0x73,0x00,0x00,0xf8,0x1e,0xf3,0x2e}};
+        const auto file=L"ux-seven-"+std::to_wstring(GetCurrentProcessId())+suffix;
+        check(paintBuffer->Save(file.c_str(),&png,nullptr)==Ok,"save isolated UX screenshot");
+    };
+    selection={a,b};tool=Single;showLayers=false;capture(L"-toolbar.png");
+    auto present=[](int id){return std::any_of(hits.begin(),hits.end(),[&](const Hit& hit){return hit.id==id;});};
+    check(present(201)&&!present(202)&&!present(203),"bond controls are consolidated");
+    check(present(170)&&!present(171)&&!present(172)&&!present(173)&&!present(174),"template category shortcuts are removed");
+    check(std::count_if(hits.begin(),hits.end(),[](const Hit& hit){return hit.id==155;})==1,"atom color appears only in the top toolbar");
+    showLayers=true;capture(L"-layers.png");
+    check(present(imageVisibilityCommand)&&present(graphVisibilityCommand)&&present(selectImageLayerCommand)&&present(selectGraphLayerCommand),"layer panel exposes visibility and row selection");
+    showLayers=false;reactionArrowHead=1;partialTripleBond=false;
+    cancel();doc={};selection.clear();history.clear();hoverAtom=hoverBond=0;tool=Select;dirty=false;
+}
 static bool pickerCancel=false,pickerDriven=false,stylePreviewSeen=false;
 static int pickerMode=3;
 static void CALLBACK driveGraphPicker(HWND owner,UINT,UINT_PTR timer,DWORD){
@@ -80,7 +161,8 @@ static void editorToolRegression(HWND hwnd){
     check((doc.atom(remove)->p-Vec{20,20}).length()<1e-8,"rotation follows pointer angle during drag");
     SendMessageW(hwnd,WM_KEYDOWN,VK_ESCAPE,0);
     pointMessage(WM_LBUTTONUP,finish);
-    check(toNative(doc)==original&&selection.empty()&&!dragging&&!history.undo(doc),"Escape rolls back the in-progress rotation");
+    check(toNative(doc)==original&&selection.empty()&&!dragging&&!history.undo(doc)&&tool==Select,"Escape rolls back rotation and activates selection");
+    command(rotateToolCommand);
     pointMessage(WM_LBUTTONDOWN,start);
     pointMessage(WM_LBUTTONUP,finish);
     check((doc.atom(keep)->p-Vec{20,-20}).length()<1e-8&&zoom==2&&(origin-viewport).length()==0,"rotation moves the connected molecule about its center and keeps the viewport");
@@ -131,7 +213,8 @@ static void partialRotationRegression(HWND hwnd){
         check((doc.atom(c)->p-Vec{80,0}).length()==0&&(doc.atom(d)->p-Vec{120,30}).length()==0,"direct rotation leaves connected unselected atoms fixed, including group members");
         check(!contains(selection,c)&&!contains(selection,d),"direct rotation does not expand the explicit selection to the molecule or group");
         SendMessageW(hwnd,WM_KEYDOWN,VK_ESCAPE,0);point(WM_LBUTTONUP,finish);
-        check(toNative(doc)==original&&selection==originalSelection&&!history.undo(doc)&&!dirty,"partial rotation Escape restores the exact document and selection without an undo entry");
+        check(toNative(doc)==original&&selection==originalSelection&&!history.undo(doc)&&!dirty&&tool==Select,"Escape restores the selected fragment and activates selection");
+        command(rotateToolCommand);
         point(WM_LBUTTONDOWN,start);point(WM_LBUTTONUP,finish);
         auto expected=fromNative(original);expected.atom(a)->p={20,-20};expected.atom(b)->p={20,20};
         check(toNative(doc)==toNative(expected),"partial rotation changes only selected atom coordinates; bonds, groups and other chemical data remain intact");
@@ -241,6 +324,7 @@ int main(int argc,char** argv){
         }
 
         BYTE initialKeys[256]{};check(SetKeyboardState(initialKeys)!=FALSE,"initialize the isolated pointer test keyboard state");
+        sevenUxRegression(hwnd);
         doc={};int a=doc.addAtom({50,50}),b=doc.addAtom({80,50});doc.addBond(a,b);history.clear();dirty=false;selection={a};zoom=2;origin={300,200};tool=Select;
         auto before=toNative(doc);Vec start=screen(doc.atom(a)->p);
         mouseDown(start);mouseUp(start+Vec{24,18});

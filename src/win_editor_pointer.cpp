@@ -2,6 +2,7 @@
 #include "win_editor_chrome.h"
 #include "win_editor_clipboard.h"
 #include "win_editor_commands.h"
+#include "win_editor_tool_options.h"
 #include "win_editor_plot.h"
 #include "win_editor_pointer.h"
 #include "win_editor_reaction.h"
@@ -195,7 +196,7 @@ static void dropEnergy(Vec p){
     }else status=L"에너지 칸이 비어 있는 구조나 그 아래에 놓으세요.";
 }
 
-BondKind kind(){return tool==Double?BondKind::Double:tool==Triple?BondKind::Triple:tool==Wedge?BondKind::Wedge:tool==Hash?BondKind::Hash:tool==Delocalized?BondKind::Aromatic:tool==DottedBond?BondKind::Dot:BondKind::Single;}
+BondKind kind(){return tool==Double?BondKind::Double:tool==Triple?BondKind::Triple:tool==Wedge?BondKind::Wedge:tool==Hash?BondKind::Hash:tool==Delocalized?(partialTripleBond?BondKind::PartialTriple:BondKind::Aromatic):tool==DottedBond?BondKind::Dot:BondKind::Single;}
 Vec sproutPoint(int id){return bondEndpoint(doc,id,doc.atom(id)->p,kind());}
 Vec endpoint(Vec p){Vec a=startAtom?doc.atom(startAtom)->p:world(down);int target=atomHit(world(p),8);if(target&&target!=startAtom)return doc.atom(target)->p;if((p-down).length()<5)return startAtom?bondEndpoint(doc,startAtom,doc.atom(startAtom)->p,kind(),element):a+Vec{std::cos(-pi/6),std::sin(-pi/6)}*defaultBondLength(doc,0,kind(),element);if(startAtom&&!(GetKeyState(VK_MENU)&0x8000))return bondEndpoint(doc,startAtom,world(p),kind(),element);return snapped(a,world(p),defaultBondLength(doc,startAtom,kind(),element),(GetKeyState(VK_MENU)&0x8000)!=0);}
 int objectAt(Vec p){auto sc=scene();for(auto it=doc.objects.rbegin();it!=doc.objects.rend();++it){if(doc.isLocked(it->id))continue;auto box=sc.objectBounds.find(it->id);if(box==sc.objectBounds.end())continue;auto b=box->second;double t=5/zoom;if(p.x<b.x-t||p.x>b.x+b.w+t||p.y<b.y-t||p.y>b.y+b.h+t)continue;if(hitObject(sc,it->id,p,t))return it->id;}
@@ -311,7 +312,7 @@ void updateDrag(){
     if(copyDrag){auto fragment=selectedDocument();int first=doc.nextId;doc.append(fragment);selection.clear();for(int id:doc.allIds())if(id>=first)selection.push_back(id);copyDrag=false;dragBase=doc;}doc.translate(selection,delta);
 }
 void cancel(){cancelToolHold();cancelStageCopy();mechanismConnecting=mechanismConnectionDrag=false;connectionEdge=-1;selectedCycleOwner=0;selectedCycleArrow=-1;snapPlot=0;snapStart.reset();pendingEnergyGap.reset();if(dragging){doc=dragBefore;if(rotationDrag||!dragSelection.empty())selection=dragSelection;}rotationDrag.reset();dragSelection.clear();energyDrag.reset();stageArrowDrag.reset();drawing=dragging=boxing=panning=rightPanning=false;curveHandle=-1;annotationDrag=0;crossingDrag.reset();gapDrag.reset();plotLevelDrag.reset();plotAxisDrag.reset();stagePositionDrag.reset();ReleaseCapture();redraw();}
-void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!finishInline(true))return;for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){if(!beginToolHold(h.id,p))command(h.id);return;}if(!canvas(p))return;SetFocus(win);if(canvas(p)){
+void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&h.box.Contains(float(p.x),float(p.y))){command(h.id);return;}if(!finishInline(true))return;for(auto& h:hits)if(h.box.Contains(float(p.x),float(p.y))){if(showDrawingToolOptions(h.id,{h.box.GetRight(),h.box.Y}))return;if(!beginToolHold(h.id,p))command(h.id);return;}if(!canvas(p))return;SetFocus(win);if(canvas(p)){
     const Vec at=world(p);int hit=atomHit(at);if(!hit)hit=doc.bondAt(at,5/zoom);if(!hit)hit=objectAt(at);
     if(plot(hit)){sidebarPage=1;showLayers=false;}
     else if(reaction(hit)){sidebarPage=0;showLayers=false;}
@@ -391,7 +392,7 @@ void mouseDown(Vec p){hideTooltip();for(auto& h:hits)if((h.id==150||h.id==156)&&
  if(tool==ImageTool){addImage(w);return;}if(tool==Ring5||tool==Ring6||tool==Benzene){history.checkpoint(doc);if(tool==Benzene&&aid)attachPhenyl(aid);else if(aid||bid)doc.attachRing(aid,aid?0:bid,tool==Ring5?5:6,tool==Benzene);else doc.ring(w,tool==Ring5?5:6,tool==Benzene);changed();return;}
  if(tool==Arrow||tool==Curve||tool==Fishhook||tool==Straight||tool==Resonance||tool==Interaction||tool==Orbital){drawing=true;startAtom=aid;startBond=aid?0:bid;SetCapture(win);return;}
  if((GetKeyState(VK_MENU)&0x8000)&&aid){selection={aid};editObject(aid);return;}
- if(!aid&&bid){history.checkpoint(doc);auto b=doc.bond(bid);if(b->kind==BondKind::Aromatic&&kind()==BondKind::Aromatic){Vec a=doc.atom(b->a)->p,v=doc.atom(b->b)->p-a;for(auto& stroke:scene().items)if(stroke.owner==bid&&stroke.dash&&stroke.points.size()==2){Vec offset=(stroke.points[0]+stroke.points[1])*.5-a;b->doubleSide=(v.x*offset.y-v.y*offset.x)>0?-1:1;break;}}else if(b->kind==kind()&&(kind()==BondKind::Wedge||kind()==BondKind::Hash))std::swap(b->a,b->b);else setBondKind(doc,bid,kind());b->customOrder.clear();b->customDisplay.clear();selection={bid};changed();return;}
+ if(!aid&&bid){history.checkpoint(doc);auto b=doc.bond(bid);if(b->kind==BondKind::Aromatic&&kind()==BondKind::Aromatic){Vec a=doc.atom(b->a)->p,v=doc.atom(b->b)->p-a;for(auto& stroke:scene().items)if(stroke.owner==bid&&stroke.dash&&stroke.points.size()==2){Vec offset=(stroke.points[0]+stroke.points[1])*.5-a;b->doubleSide=(v.x*offset.y-v.y*offset.x)>0?-1:1;break;}}else if(b->kind==kind()&&(kind()==BondKind::Wedge||kind()==BondKind::Hash))std::swap(b->a,b->b);else if(tool==Single&&(b->kind==BondKind::Single||b->kind==BondKind::Double||b->kind==BondKind::Triple))setBondKind(doc,bid,b->kind==BondKind::Single?BondKind::Double:b->kind==BondKind::Double?BondKind::Triple:BondKind::Single);else setBondKind(doc,bid,kind());b->customOrder.clear();b->customDisplay.clear();selection={bid};changed();return;}
  startAtom=aid;drawing=true;SetCapture(win);redraw();}
 static void finishErase(Vec p){
     mouse=p;boxing=false;ReleaseCapture();

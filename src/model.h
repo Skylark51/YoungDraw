@@ -23,7 +23,7 @@ struct Style {
     int labelFace=1;
     std::string labelFont="Arial";
 };
-enum class BondKind { Single, Double, Triple, Wedge, Hash, Dash, Bold, Wavy, Aromatic, Dative, Dot };
+enum class BondKind { Single, Double, Triple, Wedge, Hash, Dash, Bold, Wavy, Aromatic, Dative, Dot, PartialTriple };
 struct TextRun { std::string text,color="#000000",font="Arial"; double size=10; int face=0; };
 inline constexpr char partialChargeColor[]="#17699d";
 inline constexpr char spinDensityColor[]="#a13e62";
@@ -187,6 +187,7 @@ struct MolecularMeasurement {
 struct Document {
     Style style;
     bool imagesLocked=false,graphsLocked=false;
+    bool imagesVisible=true,graphsVisible=true;
     int bondGeometryVersion=1;
     bool isLocked(int id) const;
     std::vector<int> editableIds() const;

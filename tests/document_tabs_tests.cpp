@@ -1821,7 +1821,7 @@ int main(int argc,char** argv){
             check(GetMenuState(GetSubMenu(layoutMenu,4),190,MF_BYCOMMAND)!=UINT(-1)&&GetMenuState(GetSubMenu(layoutMenu,3),190,MF_BYCOMMAND)==UINT(-1),"alignment commands belong only to object alignment submenu");
             for(int id:{121,127,140,143,144,145,146,147,149,169})check(!present(id),"mechanism tools are consolidated into independent editor");
             for(auto& action:hits)check(!helpText(action.id).empty(),"every visible main button has help");
-            for(int id:{100,101,102,104,105,107,125,arrowColorCommand,155,156,170,171,172,173,174,160,161,162,163,164,rotateToolCommand}){
+            for(int id:{100,101,102,104,105,107,125,arrowColorCommand,155,156,170,160,161,162,163,164,rotateToolCommand}){
                 check(present(id)&&hit(id).Y==hit(100).Y&&hit(id).Width==44&&hit(id).GetBottom()<89,"icon toolbar fits one row above document tabs");
                 check(!helpText(id).empty(),"each toolbar icon has Korean help");
             }

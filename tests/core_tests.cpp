@@ -407,8 +407,8 @@ int main(){try{
  auto stale=toCdxml(d);auto at=stale.find("p=\"");stale.insert(at+3,"1");loaded=fromCdxml(stale);check(!loaded.importWarnings.empty(),"external modification invalidates stale smart data");
  auto rejects=[](const std::string& s){try{fromCdxml(s);return false;}catch(...){return true;}};
  check(!rejects("<!DOCTYPE CDXML SYSTEM 'https://static.chemistry.revvitycloud.com/cdxml/CDXML.dtd'><CDXML><page id='1'/></CDXML>"),"ChemDraw 26 external DTD declaration accepted without fetching");
- auto radical=fromCdxml("<CDXML><page id='1'><fragment id='2'><n id='3' p='20 20' Element='8' Radical='Doublet'/><n id='4' p='40 20'/><b id='5' B='3' E='4' Order='2.5'/></fragment></page></CDXML>");
- check(radical.atom(3)->radical==2&&toCdxml(radical).find("Order=\"2.5\"")!=std::string::npos,"retain named radicals and unusual bond orders");
+ auto radical=fromCdxml("<CDXML><page id='1'><fragment id='2'><n id='3' p='20 20' Element='8' Radical='Doublet'/><n id='4' p='40 20'/><b id='5' B='3' E='4' Order='2.25'/></fragment></page></CDXML>");
+ check(radical.atom(3)->radical==2&&toCdxml(radical).find("Order=\"2.25\"")!=std::string::npos,"retain named radicals and unusual bond orders");
  radical.addBond(4,radical.addAtom({54.4,20}));auto extension=strip(toCdxml(radical));check(fromCdxml(extension).atoms.size()==3,"extend an imported fragment");
  auto joined=fromCdxml(R"(<CDXML><page id="1">
    <fragment id="2"><n id="3" p="10 20"/><n id="4" p="25 20"/><b id="5" B="3" E="4" Order="2"/></fragment>

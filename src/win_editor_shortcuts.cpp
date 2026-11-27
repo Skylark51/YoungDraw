@@ -75,11 +75,15 @@ void hotkey(char c){
     int target=doc.atom(hoverAtom)?hoverAtom:selection.size()==1&&doc.atom(selection.front())?selection.front():0;
     if(target){history.checkpoint(doc);auto* a=doc.atom(target);if(c=='*')a->radical=a->radical?0:2;else{a->charge+=c=='+'?1:-1;a->explicitH=-1;}changed();return;}
  }
+ if(c>='1'&&c<='3'){
+    tool=c=='1'?Single:c=='2'?Double:Triple;
+    if(!doc.bond(hoverBond)){redraw();return;}
+ }
  int aid=doc.atom(hoverAtom)?hoverAtom:0,bid=aid?0:doc.bond(hoverBond)?hoverBond:0;if(aid){std::map<char,std::string> labels={{'b',"Br"},{'B',"B"},{'c',"C"},{'C',"Cl"},{'f',"F"},{'h',"H"},{'i',"I"},{'l',"Cl"},{'L',"Li"},{'n',"N"},{'w',"N"},{'o',"O"},{'q',"O"},{'p',"P"},{'s',"S"},{'S',"Si"},{'m',"Me"},{'e',"Et"},{'r',"R"},{'x',"X"},{'X',"X"},{'N',"NO2"},{'O',"OMe"},{'P',"Ph"},{'F',"CF3"},{'y',"Boc"},{'d',"D"}};auto label=labels.find(c);if(label!=labels.end()){history.checkpoint(doc);auto a=doc.atom(aid);int e=atomicNumber(label->second);if(e){applyAtomElement(aid,e);a=doc.atom(aid);if(c=='c')a->label="C";}else{a->label=label->second;a->labelRuns.clear();}if(c=='d'){a->element=1;a->isotope=2;a->label.clear();a->labelRuns.clear();}selection={aid};changed();return;}if(c=='g'){selection=doc.component(aid);tool=Select;redraw();return;}
  if(c=='a'){history.checkpoint(doc);attachPhenyl(aid);changed();return;}if((c>='0'&&c<='9')||c=='z'||c=='v'||c=='u'){history.checkpoint(doc);if(c=='3'||c=='a'||c=='6'||c=='7'||c=='v'||c=='u'){bool aromatic=c=='a'||c=='3';Vec at=bondEndpoint(doc,aid,doc.atom(aid)->p,BondKind::Single,6);if(aromatic&&doc.atom(aid)->element==6){Vec v=at-doc.atom(aid)->p;at=doc.atom(aid)->p+v*(doc.style.bondLength*benzeneConnectorScale/v.length());}int attached=doc.addAtom(at);doc.addBond(aid,attached);doc.attachRing(attached,0,c=='7'?5:c=='v'?3:c=='u'?4:6,aromatic);}else{int e=c=='2'?8:6;BondKind k=c=='2'||c=='8'?BondKind::Double:c=='z'?BondKind::Triple:c=='4'?BondKind::Wedge:c=='5'?BondKind::Hash:BondKind::Single;Vec p=bondEndpoint(doc,aid,doc.atom(aid)->p,k,e);int b=doc.addAtom(p,e);doc.addBond(aid,b,k);if(c=='9'){int z=doc.addAtom(sproutPoint(aid));doc.addBond(aid,z);}}changed();return;}}
  if(bid){auto b=doc.bond(bid);if(c=='g'){selection=doc.component(b->a);tool=Select;redraw();return;}if(c=='1'||c=='2'||c=='3'||c=='w'||c=='h'||c=='W'||c=='d'||c=='b'||c=='y'){history.checkpoint(doc);BondKind k=c=='1'?BondKind::Single:c=='2'?BondKind::Double:c=='3'?BondKind::Triple:c=='w'?BondKind::Wedge:c=='h'||c=='W'?BondKind::Hash:c=='d'?BondKind::Dash:c=='b'?BondKind::Bold:BondKind::Wavy;if(b->kind==k&&(k==BondKind::Wedge||k==BondKind::Hash))std::swap(b->a,b->b);setBondKind(doc,bid,k);b->customOrder.clear();b->customDisplay.clear();changed();return;}
  if((c>='4'&&c<='8')||c=='a'||c=='v'){history.checkpoint(doc);doc.attachRing(0,bid,c=='a'?6:c=='v'?3:c-'0',c=='a');changed();return;}if(c=='l'||c=='r'||c=='c'){history.checkpoint(doc);b->doubleSide=c=='l'?1:c=='r'?-1:0;changed();return;}}
- switch(c){case ' ':tool=Select;break;case 'G':tool=Orbital;break;case 'x':tool=Single;break;case 'a':tool=Benzene;break;case 'e':tool=Arrow;break;case 't':tool=Text;break;case 'l':tool=Straight;break;case 'r':tool=Resonance;break;default:break;}redraw();}
+ switch(c){case ' ':tool=Select;break;case '1':tool=Single;break;case '2':tool=Double;break;case '3':tool=Triple;break;case 'G':tool=Orbital;break;case 'x':tool=Single;break;case 'a':tool=Benzene;break;case 'e':tool=Arrow;break;case 't':tool=Text;break;case 'l':tool=Straight;break;case 'r':tool=Resonance;break;default:break;}redraw();}
 
 void alignSelection(int id){
     Document candidate=doc;
@@ -207,6 +211,7 @@ std::vector<EditorCommandEntry> availableEditorCommands(HWND window){
     };scan(GetMenu(window),L"");
     for(int id=200;id<=218&&id-200<int(toolNames.size());++id)add(id,toolNames[id-200],L"그리기 도구");
     const int extra[]={150,131,132,133,170,171,172,173,174,175,177,178,179,180,181,182,183,155,156,spinMultiplicityPlotCommand,reactionProfilePlotCommand,plotLegendCommand,plotWaveWidthCommand,plotWaveGapCommand,240,241,242,243,244,245,246};
+    for(int id=irreversibleArrowCommand;id<=selectGraphLayerCommand;++id){auto help=helpText(id);auto line=help.find(L'\n');add(id,help.substr(0,line),L"그리기 / 레이어 / "+help);}
     for(int id=selectedBoldCommand;id<=selectedStrokeThickerCommand;++id){
         auto help=helpText(id);const auto line=help.find(L'\n');
         add(id,help.substr(0,line),L"선택 서식 / "+(line==std::wstring::npos?help:help.substr(line+1)));
@@ -220,6 +225,7 @@ void searchCommands(){
     if(auto selected=ui::search(win,L"명령 검색 · Ctrl+Shift+F",entries,L"실행",true))command(available.at(*selected).id);
 }
 void key(WPARAM k){
+    if(k==VK_ESCAPE){cancel();tool=Select;targetContainer=0;status=L"선택·이동 · Esc / Space";redraw();return;}
     if(stageCopyOwner){
         if(k==VK_ESCAPE)cancel();
         else if(k==VK_RETURN||(k=='C'&&(GetKeyState(VK_CONTROL)&0x8000)))finishStageCopy();

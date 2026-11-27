@@ -33,10 +33,10 @@ std::string chemicalScripts(const std::string& text) {
     return result;
 }
 double chemicalScriptScale(const std::string& text){return !text.empty()&&text.find_first_not_of("IVX")==std::string::npos?.55:.7;}
-int order(BondKind k) { return k==BondKind::Double?2:k==BondKind::Triple?3:1; }
+int order(BondKind k) { return k==BondKind::Double||k==BondKind::PartialTriple?2:k==BondKind::Triple?3:1; }
 bool Document::isLocked(int id) const {
-    if(graphsLocked)for(const auto& p:plots)if(p.id==id)return true;
-    if(imagesLocked)for(const auto& o:objects)if(o.id==id&&o.kind==ObjectKind::Image)return true;
+    if(graphsLocked||!graphsVisible)for(const auto& p:plots)if(p.id==id)return true;
+    if(imagesLocked||!imagesVisible)for(const auto& o:objects)if(o.id==id&&o.kind==ObjectKind::Image)return true;
     return false;
 }
 std::vector<int> Document::editableIds() const {

@@ -1,6 +1,7 @@
 #include "win_button_help.h"
 #include "win_editor_chrome.h"
 #include "win_editor_commands.h"
+#include "win_editor_tool_options.h"
 #include "win_editor_shortcuts.h"
 #include "win_editor_state.h"
 #include "win_editor_tabs.h"
@@ -57,14 +58,25 @@ void icon(Graphics& g,int id,RectF box,Color color){
     case 173:line(-23,8,-11,-7);line(-11,-7,2,8);line(2,8,15,-7);g.DrawEllipse(&pen,14.f,-13.f,11.f,11.f);break;
     case 174:line(-7,-22,-7,-5);line(7,-22,7,-5);line(-11,-22,11,-22);line(-7,-5,-20,19);line(7,-5,20,19);line(-20,19,20,19);line(-14,8,14,8);break;
     case 200:{PointF p[]={{-10,-19},{-10,17},{-2,8},{6,21},{12,17},{4,4},{16,3}};g.FillPolygon(&brush,p,7);break;}
-    case 201:line(-20,11,20,-11);break;
+    case 201:for(int count=1;count<=3;++count){const float center=(count-2)*18.f;for(int i=0;i<count;++i){const float offset=(i-(count-1)*.5f)*4;line(center-5+offset,12,center+5+offset,-12);}}break;
     case 202:line(-20,6,18,-15);line(-17,14,21,-7);break;
     case 203:for(int i=-1;i<=1;i++)line(-20,9+i*6.f,20,-13+i*6.f);break;
     case 204:{PointF p[]={{-19,10},{15,-18},{23,-4}};g.FillPolygon(&brush,p,3);break;}
     case 205:for(int i=0;i<=7;i++){float t=i/7.f,x=-19+38*t,y=10-20*t;line(x-4*t,y-7*t,x+4*t,y+7*t);}break;
     case 206:ring(5,false);break;case 207:ring(6,false);break;case 208:ring(6,true);break;
     case 209:{PointF p[]={{-18,7},{4,-17},{20,-3},{0,18}};g.DrawPolygon(&pen,p,4);line(-9,-3,10,11);line(-18,20,22,20);break;}
-    case 210:arrow();break;
+    case 210:case irreversibleArrowCommand:case equilibriumArrowCommand:case upperFavoredArrowCommand:case lowerFavoredArrowCommand:{
+        const int head=id==210?reactionArrowHead:id==irreversibleArrowCommand?1:id-equilibriumArrowCommand+4;
+        if(head==1){arrow();break;}
+        const float upper=head==6?12.f:21.f,lower=head==5?12.f:21.f;
+        line(-upper,-6,upper,-6);line(upper,-6,upper-7,-12);
+        line(lower,6,-lower,6);line(-lower,6,-lower+7,12);break;}
+    case 177:case 178:
+        g.DrawRectangle(&pen,-13.f,-2.f,26.f,22.f);g.DrawArc(&pen,-9.f,-20.f,18.f,24.f,180.f,180.f);line(0,5,0,12);break;
+    case imageVisibilityCommand:case graphVisibilityCommand:
+        g.DrawEllipse(&pen,-23.f,-12.f,46.f,24.f);g.FillEllipse(&brush,-5.f,-5.f,10.f,10.f);break;
+    case delocalizedBondOptionCommand:case partialTripleBondOptionCommand:
+        line(-22,-7,22,-7);if(id==partialTripleBondOptionCommand)line(-22,0,22,0);pen.SetDashStyle(DashStyleDash);line(-22,9,22,9);break;
     case 211:case 212:g.DrawBezier(&pen,PointF(-21,13),PointF(-16,-23),PointF(16,-23),PointF(21,9));line(21,9,11,4);if(id==211)line(21,9,23,-2);break;
     case 213:{FontFamily ff(L"Arial");Font f(&ff,35,FontStyleBold,UnitPixel);g.DrawString(L"A",-1,&f,PointF(-16,-24),&brush);line(16,-17,16,19);break;}
     case 214:g.DrawRectangle(&pen,-21.f,-17.f,42.f,34.f);g.DrawEllipse(&pen,7.f,-11.f,7.f,7.f);line(-18,12,-5,-5);line(-5,-5,5,8);line(5,8,12,2);line(12,2,20,12);break;
@@ -73,7 +85,7 @@ void icon(Graphics& g,int id,RectF box,Color color){
     case interactionToolCommand:for(int i=-2;i<=2;i++)g.FillEllipse(&brush,float(i*9-2),-2.f,4.f,4.f);break;
     case 215:line(-22,0,22,0);break;
     case 216:arrow();line(-20,0,-13,-5);line(-20,0,-13,5);break;
-    case 217:line(-20,5,18,-16);pen.SetDashStyle(DashStyleDash);line(-16,14,22,-7);break;
+    case 217:if(partialTripleBond){line(-20,-4,18,-25);}line(-20,5,18,-16);pen.SetDashStyle(DashStyleDash);line(-16,14,22,-7);break;
     case 218:{GraphicsPath positive,negative;
         positive.AddBezier(0.f,0.f,-16.f,-23.f,-27.f,-12.f,-20.f,0.f);positive.AddBezier(-20.f,0.f,-27.f,12.f,-16.f,23.f,0.f,0.f);positive.CloseFigure();g.FillPath(&brush,&positive);
         negative.AddBezier(0.f,0.f,16.f,-23.f,27.f,-12.f,20.f,0.f);negative.AddBezier(20.f,0.f,27.f,12.f,16.f,23.f,0.f,0.f);negative.CloseFigure();g.DrawPath(&pen,&negative);break;}
@@ -198,14 +210,14 @@ void icon(Graphics& g,int id,RectF box,Color color){
     default:arrow();break;
     }g.Restore(st);
 }
-const std::vector<std::wstring> toolNames={L"선택·이동 [Space]",L"단일 결합 [x]",L"이중 결합",L"삼중 결합",L"쐐기 결합",L"해시 결합",L"5각 고리",L"6각 고리",L"벤젠 [a]",L"지우개 · 드래그: 범위 삭제",L"반응 화살표 [e]",L"전자쌍 이동 화살표",L"단전자 이동 화살표",L"텍스트 [t] · 클릭하여 입력",L"이미지 삽입",L"직선 [l]",L"공명 화살표 ↔ [r]",L"공명 결합 (실선+파선)",L"오비탈 · 드래그: 방향·크기",L"상호작용 점선",L"점선 단일 결합",L"직접 회전 · 드래그"};
+const std::vector<std::wstring> toolNames={L"선택·이동 [Esc / Space]",L"결합 · 1 / 2 / 3 [x]",L"이중 결합",L"삼중 결합",L"쐐기 결합",L"해시 결합",L"5각 고리",L"6각 고리",L"벤젠 [a]",L"지우개 · 드래그: 범위 삭제",L"반응 화살표 [e]",L"전자쌍 이동 화살표",L"단전자 이동 화살표",L"텍스트 [t] · 클릭하여 입력",L"이미지 삽입",L"직선 [l]",L"공명 화살표 ↔ [r]",L"공명 결합 (실선+파선)",L"오비탈 · 드래그: 방향·크기",L"상호작용 점선",L"점선 단일 결합",L"직접 회전 · 드래그"};
 void toolButton(Graphics& g,int id,RectF r,bool active){
     hits.push_back({id,r});bool hovered=r.Contains(float(mouse.x),float(mouse.y));appearance::rounded(g,r,7,active?accent:hovered?appearance::palette().hover:appearance::palette().raised);
-    std::wstring key=id==200?L"Space":id==201?L"x":id==208?L"a":id==210?L"e":id==213?L"t":id==215?L"l":id==216?L"r":id==217?L"공명":id==218?L"오비탈 ▾":id==219?L"오비탈 옵션":id==dottedBondCommand?L"점선 ▾":id==interactionToolCommand?L"점선":L"";
+    std::wstring key=id==200?L"Esc / Space":id==201?L"1  2  3":id==208?L"a":id==210?L"e ▾":id==213?L"t":id==215?L"l":id==216?L"r":id==217?L"공명 ▾":id==218?L"오비탈 ▾":id==219?L"오비탈 옵션":id==dottedBondCommand?L"점선 ▾":id==interactionToolCommand?L"점선":L"";
     icon(g,id,{r.X+10,r.Y+1,r.Width-20,23},active?appearance::palette().onAccent:ink);
     if(!key.empty()){
         RectF strip{r.X+2,r.Y+r.Height-18,r.Width-4,18};
-        ui::drawLabel(g,key,strip,id==218||id==219?12.f:13.f,active?appearance::palette().onAccent:appearance::palette().muted,true,true);
+        ui::drawLabel(g,key,strip,id==200?10.f:id==218||id==219?12.f:13.f,active?appearance::palette().onAccent:appearance::palette().muted,true,true);
     }
 }
 void button(Graphics& g,int id,std::wstring label,RectF r,bool active){
@@ -228,6 +240,9 @@ std::wstring helpText(int id){
              id<=selectedFontLargerCommand?L"선택한 원자 라벨·텍스트의 글자 크기를 1 pt씩 조절합니다. 첨자 비율·색·글꼴을 유지합니다. Ctrl+Z: 되돌리기.":
              L"선택한 결합·선·화살표·윤곽 도형의 획을 15%씩 조절합니다. Shift와 + / - 키로도 조절할 수 있습니다. Ctrl+Z: 되돌리기.");
     }
+    if(id>=irreversibleArrowCommand&&id<=partialTripleBondOptionCommand)return id<=lowerFavoredArrowCommand?L"반응 화살표 종류\n비가역 / 평형 / 위쪽 우세 / 아래쪽 우세. 평형은 위쪽 오른향·아래쪽 왼향의 분리된 반쪽 화살표입니다.":L"공명 결합 종류\n실선 + 파선 또는 실선 2개 + 파선의 부분 삼중 결합 표기를 선택합니다.";
+    if(id==imageVisibilityCommand||id==graphVisibilityCommand)return L"레이어 표시 / 숨김\n다시 누르면 원래대로 표시합니다. 문서 저장과 Ctrl+Z를 지원합니다.";
+    if(id==selectImageLayerCommand||id==selectGraphLayerCommand)return L"레이어 항목 선택\n표시되고 잠금이 풀린 항목을 모두 선택합니다.";
     if(id==mechanismManagerCommand)return L"메커니즘 관리\n선택한 메커니즘을 독립 편집 창에서 수정합니다. 구조·단계·연결·배치·설명을 미리 보고 적용하며 취소하면 원본이 유지됩니다.";
     if(id==includeMechanismCommand)return L"메커니즘에 편입하기\n선택한 분자·이미지들을 단계로 묶고 새 창에서 배치를 미리 봅니다. 화살표 없이도 순서대로 연결하며 선택하지 않은 구조는 유지합니다.";
     if(id==plotManagerCommand)return L"그래프 관리\n선택한 그래프를 별도 창에서 편집합니다. 데이터·축·글꼴·구조·반응 주석·물결을 아이콘 도구로 조절하고 미리보기를 확인합니다.";
@@ -275,7 +290,7 @@ std::wstring helpText(int id){
     if(id==dottedBondCommand)return L"점선\n클릭: 점선 결합 · 길게 누르기 또는 우클릭: 결합·상호작용 선택";
     if(id==interactionToolCommand)return L"상호작용 점선\n수소결합 등을 표시할 두 지점 사이를 드래그하세요. Shift: 수평·수직.";
     if(id==217)return L"공명 결합 (실선+파선)\n선택한 결합들을 변환하거나 클릭·드래그하여 그립니다. 같은 결합 재클릭: 파선 위치 전환.";if(id==216)return L"공명 화살표 ↔ [r]\n드래그하여 공명 구조 사이에 양방향 화살표를 그립니다. Shift: 수평·수직.";if(id==215)return L"직선 [l]\n드래그하여 화살촉 없는 직선을 그립니다. Shift: 수평·수직.";
-    if(id>=200&&id<=214){static const std::vector<std::wstring> detail={L"클릭하거나 드래그하여 객체를 선택·이동합니다. Shift: 선택 추가, Ctrl+객체 드래그: 복제.",L"원자를 클릭하거나 드래그하여 단일 결합을 그립니다.",L"드래그하여 이중 결합을 그립니다. 기존 결합을 클릭하면 차수를 바꿉니다.",L"드래그하여 삼중 결합을 그립니다.",L"앞으로 나오는 입체 결합을 그립니다. 같은 결합을 다시 클릭하면 방향을 바꿉니다.",L"뒤로 들어가는 입체 결합을 그립니다. 같은 결합을 다시 클릭하면 방향을 바꿉니다.",L"빈 공간에 5각 고리를 삽입하거나 원자·결합에 고리를 연결합니다.",L"빈 공간에 6각 고리를 삽입하거나 원자·결합에 고리를 연결합니다.",L"방향족 벤젠 고리를 그립니다. 원자·결합 위에서는 고리를 연결합니다.",L"클릭한 원자·결합·그리기 객체를 삭제합니다. Ctrl+Z로 복원할 수 있습니다.",L"드래그하여 반응 화살표를 그립니다. 원자에서 원자로 연결하면 전자 이동 곡선으로 자동 전환됩니다. Shift: 수평·수직.",L"전자쌍의 이동을 곡선과 전체 화살촉으로 표시합니다. 원자·결합선과 여백을 두고 작게 휘도록 배치합니다. 선택 후 점을 드래그하면 곡선을 수정합니다.",L"전자 하나의 이동을 곡선과 반쪽 화살촉으로 표시합니다. 원자·결합선과 약간 떨어져 배치합니다. 선택 후 점을 드래그하면 곡선을 수정합니다.",L"캔버스나 기존 텍스트를 클릭하여 입력합니다. Ctrl+Enter: 완료, Esc: 취소.",L"GIF/PNG/JPEG 원본 이미지를 삽입합니다. GIF 애니메이션과 원본 데이터는 문서에 보관합니다."};return toolNames[id-200]+L"\n"+detail[id-200];}
+    if(id>=200&&id<=214){static const std::vector<std::wstring> detail={L"클릭하거나 드래그하여 객체를 선택·이동합니다. Shift: 선택 추가, Ctrl+객체 드래그: 복제.",L"드래그: 결합 그리기. 기존 결합 클릭: 단일 → 이중 → 삼중 → 단일. 1 / 2 / 3: 결합 차수 선택.",L"드래그하여 이중 결합을 그립니다. 기존 결합을 클릭하면 차수를 바꿉니다.",L"드래그하여 삼중 결합을 그립니다.",L"앞으로 나오는 입체 결합을 그립니다. 같은 결합을 다시 클릭하면 방향을 바꿉니다.",L"뒤로 들어가는 입체 결합을 그립니다. 같은 결합을 다시 클릭하면 방향을 바꿉니다.",L"빈 공간에 5각 고리를 삽입하거나 원자·결합에 고리를 연결합니다.",L"빈 공간에 6각 고리를 삽입하거나 원자·결합에 고리를 연결합니다.",L"방향족 벤젠 고리를 그립니다. 원자·결합 위에서는 고리를 연결합니다.",L"클릭한 원자·결합·그리기 객체를 삭제합니다. Ctrl+Z로 복원할 수 있습니다.",L"드래그하여 반응 화살표를 그립니다. 원자에서 원자로 연결하면 전자 이동 곡선으로 자동 전환됩니다. Shift: 수평·수직.",L"전자쌍의 이동을 곡선과 전체 화살촉으로 표시합니다. 원자·결합선과 여백을 두고 작게 휘도록 배치합니다. 선택 후 점을 드래그하면 곡선을 수정합니다.",L"전자 하나의 이동을 곡선과 반쪽 화살촉으로 표시합니다. 원자·결합선과 약간 떨어져 배치합니다. 선택 후 점을 드래그하면 곡선을 수정합니다.",L"캔버스나 기존 텍스트를 클릭하여 입력합니다. Ctrl+Enter: 완료, Esc: 취소.",L"GIF/PNG/JPEG 원본 이미지를 삽입합니다. GIF 애니메이션과 원본 데이터는 문서에 보관합니다."};return toolNames[id-200]+L"\n"+detail[id-200];}
     if(id>=301&&id<=418)return ui::wide(symbol(id-300))+L" 원소 선택\n다음 원자를 이 원소로 그립니다. 원자를 선택한 상태에서는 해당 원소로 바꿉니다.";
     static const std::map<int,std::wstring> help={
       {100,L"새 문서 (Ctrl+T / Ctrl+N)\n새 문서 탭을 만듭니다."},{101,L"열기 (Ctrl+O)\nYoungDraw 또는 CDXML 문서를 엽니다."},{102,L"저장 (Ctrl+S)\n구조·그래프·이미지와 편집 정보를 저장합니다."},{103,L"SVG 내보내기\n논문용 벡터 그림으로 저장합니다."},{106,L"JACS 출판용 SVG\n240/504 pt 열 너비를 선택하고 출력 시 글자·선 두께·그림 높이를 검사합니다."},{108,L"CDXML 내보내기\nChemDraw에서 편집할 수 있는 문서로 저장합니다."},{104,L"실행 취소 (Ctrl+Z)\n직전 편집을 되돌립니다."},{105,L"다시 실행 (Ctrl+Shift+Z)\n취소한 편집을 다시 적용합니다."},{107,L"화면 맞춤\n전체 그림이 보이도록 확대·축소합니다."},
